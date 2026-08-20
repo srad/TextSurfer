@@ -327,7 +327,7 @@ fn fit_cells(text: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::core::dom::ElementNs;
-    use crate::css::{BasicCascade, Cascade};
+    use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
     use crate::paint::{BasicPainter, Painter};
     use proptest::prelude::*;
 
@@ -335,7 +335,7 @@ mod tests {
         let mut document = Document::new();
         let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
         document.insert_text(Some(p), text);
-        let styles = BasicCascade.apply(&[], &document);
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         (document, styles)
     }
 
@@ -388,7 +388,7 @@ mod tests {
         let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
         let p = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
         document.insert_text(Some(p), "one two three four");
-        let styles = BasicCascade.apply(&[], &document);
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 9, rows: 5 });
         let text: Vec<&str> = tree.lines.iter().map(|line| line.text.as_str()).collect();
         assert_eq!(text, vec!["one two", "three", "four"]);
@@ -396,11 +396,28 @@ mod tests {
     }
 
     #[test]
+    fn long_words_break_to_terminal_width_even_when_author_css_requests_normal_wrapping() {
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        document.insert_text(Some(p), "abcdefghijk");
+        let sheet = CssparserParser.parse("p { overflow-wrap: normal }");
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
+        assert_eq!(
+            tree.lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["abcd", "efgh", "ijk"]
+        );
+    }
+
+    #[test]
     fn preformatted_text_preserves_spaces_and_line_breaks() {
         let mut document = Document::new();
         let pre = document.insert_element(None, "pre", ElementNs::Html, vec![]);
         document.insert_text(Some(pre), "  a\n b");
-        let styles = BasicCascade.apply(&[], &document);
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
         assert_eq!(
             tree.lines
@@ -422,7 +439,7 @@ mod tests {
             vec![crate::core::dom::Attr::plain("href", "/next")],
         );
         document.insert_text(Some(link), "next");
-        let styles = BasicCascade.apply(&[], &document);
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
         assert_eq!(
             tree.links,

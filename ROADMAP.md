@@ -22,7 +22,8 @@ is written; the audit is re-run whenever a candidate crate appears.
 |---|---|---|
 | `net/encoding.rs` — WHATWG sniffing: BOM, header, meta prescan, XML fallback, x-user-defined postprocess | custom | **Keep** — html5ever ships only the meta-`charset` substring extractor and it is `pub(crate)`; encoding_rs is decode/encode-only; no sniffer exists in the ecosystem |
 | `core/url.rs` — `url_fix` | not a parser | **No change** — delegates all real parsing to the `url` crate; scheme/host/search heuristics are address-bar UX behavior |
-| `css/parser.rs` | library adapter | **No change** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
+| `css/parser.rs` | library adapter | **Keep** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
+| `css/parser.rs` — type-only media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ## Status legend
@@ -256,12 +257,13 @@ pass rate in the updates log. (done — first run: 1829/1922 raw = 95.16%, 100% 
 - [x] First `layout`/`paint` slice: Taffy 0.13 owns vertical block placement; textwrap 0.16.2 and
       Unicode grapheme/cell crates own wrapping and painting; `display:none`, block/inline text,
       headings, lists, `<pre>`, simple margins/padding/borders, and link discovery are covered.
-- [ ] Complete cascade degradation: @media crude
-      `screen` match; @import ignored+logged; degradation table (table/inline-block/flex/grid→block,
-      position→static, percentage heights→auto, box-sizing honored, overflow-wrap break-word default).
+- [x] Complete conditional CSS and cascade degradation: type-only `@media` with an injected screen
+      context; `@import` ignored+diagnosed; table/inline-block/flex/grid→block, position→static,
+      percentage heights→auto, and overflow-wrap break-word enforced. (done)
 - [ ] Complete the box model: Taffy block/content-size engine stays behind `LayoutEngine`; add CSS anonymous
-      block boxes, and annotated textwrap fragments for inline cell layout; unbounded height, vertical
-      inline margin/padding ignored, whitespace collapse/trim/pre, viewport-width-dependent reflow.
+      block boxes and annotated textwrap fragments for inline cell layout; honor `box-sizing` through
+      Taffy; unbounded height, vertical inline margin/padding ignored, whitespace collapse/trim/pre,
+      viewport-width-dependent reflow.
 - [ ] Complete paint: depth-order (bg bottom-up, borders box-drawing ≥2 cells doubled, text clipped);
       DisplayList with NodeId hit-tags; interactive-element list (`<a>`).
 - [ ] Corpus fixtures + golden screen snapshots (margins, headings, borders, links, wide chars, `pre`).
@@ -564,3 +566,15 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
 - 2026-08-20 — M1-B property-law progress recorded: viewport-width monotonicity and painted-row
   bounds are green; laminar per-row box families and engine-backed deepest-hit round trips remain
   milestone completion gates.
+- 2026-08-20 — M1-B conditional-CSS plan corrected before implementation: the current slice owns
+  type-only `@media`, bounded structured diagnostics, ignored/unfetched `@import`, and explicit
+  degradation contracts; `box-sizing` moved to the hierarchical box-model slice where Taffy 0.13.0
+  can apply it. Registry/source audit retained cssparser 0.37.0 + selectors 0.40.0 and rejected
+  css-mediaquery 0.1.1, LightningCSS 1.0.0-alpha.72, Stylo/Blitz/MusKitty, rdom-tui, litehtml,
+  and Ladybird as either incomplete media evaluators or incompatible whole-engine stacks. Ladybird's
+  anonymous block construction is reference material only; no dependency or copied code.
+- 2026-08-20 — M1-B conditional CSS and cascade degradation completed: recursive media-rule groups,
+  explicit screen/print evaluation, fail-closed unsupported queries, ignored/unfetched imports,
+  bounded structured diagnostics with exact aggregate counts, nested source order, app warning
+  reporting, fallback display/position/height behavior, and deliberate long-word splitting are
+  covered by contracts. No dependency changes; default and `js` strict gates are green.

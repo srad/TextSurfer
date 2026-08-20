@@ -7,7 +7,7 @@ use crate::core::focus::Focus;
 use crate::core::geom::Size;
 use crate::core::style::StyleTree;
 use crate::core::url::url_fix;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, StyleSheet};
+use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext, StyleSheet};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::net::{FetchPayload, charset_from_content_type, decode, decode_text};
@@ -133,7 +133,15 @@ impl App {
                         let decoded = decode(&response.body, charset.as_deref());
                         let outcome = Html5everParser::new(false).parse_document(&decoded.text);
                         let sheets = embedded_style_sheets(&outcome.document.borrow());
-                        let styles = BasicCascade.apply(&sheets, &outcome.document.borrow());
+                        let css_warnings = sheets
+                            .iter()
+                            .map(|sheet| sheet.diagnostics.total())
+                            .sum::<usize>();
+                        let styles = BasicCascade.apply(
+                            &sheets,
+                            &outcome.document.borrow(),
+                            MediaContext::screen(),
+                        );
                         tab.content = render_document(
                             &outcome.document.borrow(),
                             &styles,
@@ -142,10 +150,20 @@ impl App {
                         tab.layout_width = self.geometry.content_cols();
                         tab.document = Some(outcome.document);
                         tab.styles = Some(styles);
-                        tab.message = format!(
-                            "accepted gen {} - {} ({} parse errors)",
-                            payload.generation, response.final_url, outcome.parse_errors
-                        );
+                        tab.message = if css_warnings == 0 {
+                            format!(
+                                "accepted gen {} - {} ({} parse errors)",
+                                payload.generation, response.final_url, outcome.parse_errors
+                            )
+                        } else {
+                            format!(
+                                "accepted gen {} - {} ({} parse errors, {} CSS warnings)",
+                                payload.generation,
+                                response.final_url,
+                                outcome.parse_errors,
+                                css_warnings
+                            )
+                        };
                     }
                     ResponseKind::PlainText => {
                         let decoded = decode_text(&response.body, charset.as_deref());
@@ -943,6 +961,56 @@ mod tests {
                 .content
                 .iter()
                 .any(|line| line.contains("hidden"))
+        );
+    }
+
+    #[test]
+    fn css_warnings_are_aggregated_without_scheduling_import_fetches() {
+        let fake = Arc::new(FakeNet::default());
+        let mut app = App::with_net(fake.clone());
+        app.submit_url("https://example.com");
+        let pending = fake.pending.lock().unwrap().pop().unwrap();
+        assert!(
+            app.deliver_fetch(FetchPayload {
+                tab_id: pending.tab_id,
+                generation: pending.generation,
+                result: Ok(FetchResponse {
+                    final_url: Url::parse("https://example.com/").unwrap(),
+                    body: br#"<!doctype html><html><head>
+                    <style>@import url(one.css); p { display: block }</style>
+                    <style>@media (width: 1px) { p { display: none } } @import url(two.css);</style>
+                    </head><body><p>shown</p></body></html>"#
+                        .to_vec(),
+                    content_type: Some("text/html; charset=utf-8".to_string()),
+                }),
+            })
+        );
+        assert_eq!(fake.submitted.lock().unwrap().len(), 1);
+        assert_eq!(
+            app.message(),
+            "accepted gen 1 - https://example.com/ (0 parse errors, 3 CSS warnings)"
+        );
+        assert!(app.tabs.active().content.iter().any(|line| line == "shown"));
+    }
+
+    #[test]
+    fn zero_css_warnings_preserve_the_existing_acceptance_message() {
+        let mut app = App::new();
+        app.submit_url("https://example.com");
+        let generation = app.tabs.active().generation;
+        let tab_id = app.tabs.active().id;
+        assert!(app.deliver_fetch(FetchPayload {
+            tab_id,
+            generation,
+            result: Ok(FetchResponse {
+                final_url: Url::parse("https://example.com/").unwrap(),
+                body: b"<!doctype html><html><body><p>shown</p></body></html>".to_vec(),
+                content_type: Some("text/html; charset=utf-8".to_string()),
+            }),
+        }));
+        assert_eq!(
+            app.message(),
+            "accepted gen 1 - https://example.com/ (0 parse errors)"
         );
     }
 

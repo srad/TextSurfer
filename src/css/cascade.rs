@@ -3,36 +3,60 @@ use cssparser::{Parser, ParserInput, Token};
 use crate::core::dom::Document;
 use crate::core::dom::{AttrNs, ElementNs, Node, NodeId};
 use crate::core::style::{ComputedStyle, Display, EdgeSizes, StyleTree, WhiteSpace};
-use crate::css::parser::parse_declarations;
+use crate::css::parser::{CssRule, MediaQuery, MediaQueryList, StyleRule, parse_declarations};
 use crate::css::selectors::matching_specificity;
 use crate::css::{Declaration, StyleSheet};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MediaTarget {
+    Screen,
+    Print,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MediaContext {
+    target: MediaTarget,
+}
+
+impl MediaContext {
+    pub const fn screen() -> Self {
+        Self {
+            target: MediaTarget::Screen,
+        }
+    }
+
+    pub const fn print() -> Self {
+        Self {
+            target: MediaTarget::Print,
+        }
+    }
+}
+
 pub trait Cascade: Send + Sync {
-    fn apply(&self, sheets: &[StyleSheet], document: &Document) -> StyleTree;
+    fn apply(&self, sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree;
 }
 
 #[derive(Default)]
 pub struct BasicCascade;
 
 impl Cascade for BasicCascade {
-    fn apply(&self, sheets: &[StyleSheet], document: &Document) -> StyleTree {
+    fn apply(&self, sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree {
         let mut tree = StyleTree::default();
+        let rules = active_style_rules(sheets, media);
         for id in elements_in_document_order(document) {
             let mut style = ua_style(document, id);
             let mut declarations = Vec::new();
             let mut order = 0usize;
-            for sheet in sheets {
-                for rule in &sheet.rules {
-                    if let Some(specificity) = matching_specificity(&rule.selectors, document, id) {
-                        for declaration in &rule.declarations {
-                            declarations.push((
-                                declaration.important,
-                                specificity,
-                                order,
-                                declaration.clone(),
-                            ));
-                            order += 1;
-                        }
+            for rule in &rules {
+                if let Some(specificity) = matching_specificity(&rule.selectors, document, id) {
+                    for declaration in &rule.declarations {
+                        declarations.push((
+                            declaration.important,
+                            specificity,
+                            order,
+                            declaration.clone(),
+                        ));
+                        order += 1;
                     }
                 }
             }
@@ -51,6 +75,45 @@ impl Cascade for BasicCascade {
             tree.insert(id, style);
         }
         tree
+    }
+}
+
+fn active_style_rules(sheets: &[StyleSheet], media: MediaContext) -> Vec<&StyleRule> {
+    let mut stack = Vec::new();
+    for sheet in sheets.iter().rev() {
+        stack.extend(sheet.rules.iter().rev());
+    }
+    let mut active = Vec::new();
+    while let Some(rule) = stack.pop() {
+        match rule {
+            CssRule::Style(rule) => active.push(rule),
+            CssRule::Media(rule) if media_query_list_matches(&rule.queries, media) => {
+                stack.extend(rule.rules.iter().rev());
+            }
+            CssRule::Media(_) => {}
+        }
+    }
+    active
+}
+
+fn media_query_list_matches(queries: &MediaQueryList, media: MediaContext) -> bool {
+    match queries {
+        MediaQueryList::Always => true,
+        MediaQueryList::Any(queries) => queries.iter().any(|query| match query {
+            MediaQuery::Type {
+                negated,
+                media_type,
+            } => {
+                let matched = match media_type.as_str() {
+                    "all" => true,
+                    "screen" => media.target == MediaTarget::Screen,
+                    "print" => media.target == MediaTarget::Print,
+                    _ => false,
+                };
+                matched != *negated
+            }
+            MediaQuery::Never => false,
+        }),
     }
 }
 
@@ -336,7 +399,7 @@ mod tests {
             vec![Attr::plain("style", "display: inline")],
         );
         let sheet = CssparserParser.parse("main > p.note { display: none; margin: 2px 3px }");
-        let styles = BasicCascade.apply(&[sheet], &document);
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         assert_eq!(styles.get(main).display, Display::Block);
         assert_eq!(styles.get(p).display, Display::None);
         assert_eq!(styles.get(p).margin.left, 3);
@@ -353,7 +416,7 @@ mod tests {
             vec![Attr::plain("style", "display: block")],
         );
         let sheet = CssparserParser.parse("p { display: none !important }");
-        let styles = BasicCascade.apply(&[sheet], &document);
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         assert_eq!(styles.get(p).display, Display::None);
     }
 
@@ -364,9 +427,80 @@ mod tests {
         let pre = document.insert_element(Some(p), "pre", ElementNs::Html, vec![]);
         let sheet = CssparserParser
             .parse("p { display: block /**/; border: none /**/ } pre { white-space: invalid }");
-        let styles = BasicCascade.apply(&[sheet], &document);
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         assert_eq!(styles.get(p).display, Display::Block);
         assert!(!styles.get(p).border);
         assert_eq!(styles.get(pre).white_space, WhiteSpace::Pre);
+    }
+
+    fn cascade_contract(cascade: &dyn Cascade) {
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(
+            "p { display: inline }
+             @media screen { p { display: block } }
+             @media print { p { display: none } }
+             @media not unknown { p { border: solid } }",
+        );
+        let screen = cascade.apply(
+            std::slice::from_ref(&sheet),
+            &document,
+            MediaContext::screen(),
+        );
+        assert_eq!(screen.get(p).display, Display::Block);
+        assert!(screen.get(p).border);
+        let print = cascade.apply(&[sheet], &document, MediaContext::print());
+        assert_eq!(print.get(p).display, Display::None);
+        assert!(print.get(p).border);
+    }
+
+    #[test]
+    fn basic_cascade_passes_the_cascade_contract() {
+        cascade_contract(&BasicCascade);
+    }
+
+    #[test]
+    fn nested_media_preserves_lexical_source_order() {
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(
+            "p { display: inline }
+             @media screen {
+                 p { display: none }
+                 @media not print { p { display: block } }
+             }
+             p { border: solid }",
+        );
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(styles.get(p).display, Display::Block);
+        assert!(styles.get(p).border);
+    }
+
+    #[test]
+    fn unsupported_layout_modes_follow_the_degradation_contract() {
+        for value in [
+            "table",
+            "inline-block",
+            "flex",
+            "grid",
+            "flow-root",
+            "list-item",
+            "inline-flex",
+            "inline-grid",
+        ] {
+            let mut document = Document::new();
+            let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+            let sheet = CssparserParser.parse(&format!("p {{ display: {value} }}"));
+            let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+            assert_eq!(styles.get(p).display, Display::Block, "{value}");
+        }
+
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let baseline = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let sheet =
+            CssparserParser.parse("p { position: absolute; inset: 4px; top: 1px; height: 50% }");
+        let degraded = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(degraded.get(p), baseline.get(p));
     }
 }

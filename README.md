@@ -51,8 +51,10 @@ Ready                              https://example.com
   while superseded responses are discarded
 - DOS/QBasic-style menu, tab strip, navigation toolbar, grapheme-safe address editor, unbounded
   scrolling and centralized resize/mouse geometry
-- First real rendering path: cssparser + selectors cascade embedded and inline CSS, Taffy places
-  block boxes, textwrap wraps Unicode text, and the painter emits clipped terminal-cell lines
+- First real rendering path: cssparser + selectors cascade embedded and inline CSS, including
+  type-only conditional `@media` rules; ignored imports and unsupported queries produce bounded
+  diagnostics, Taffy places block boxes, textwrap wraps Unicode text, and the painter emits clipped
+  terminal-cell lines
 - WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
 
 **Next on the roadmap** (see `ROADMAP.md`, the single source of truth): complete CSS box/inline
