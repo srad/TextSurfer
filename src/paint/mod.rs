@@ -1,3 +1,3 @@
 pub mod painter;
 
-pub use painter::{DisplayList, Painter};
+pub use painter::{BasicPainter, DisplayList, HitRegion, Painter};

@@ -82,7 +82,7 @@ impl HtmlParser for Html5everParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::dom::{Document, Node, NodeId};
+    use crate::core::dom::{Document, DomQuirksMode, Node, NodeId};
     use crate::html::tree_dump;
 
     fn parser() -> Html5everParser {
@@ -295,6 +295,27 @@ mod tests {
         assert_eq!(clean.parse_errors, 0);
         let broken = parser().parse_document("<!DOCTYPE html><p>x</p");
         assert!(broken.parse_errors > 0);
+    }
+
+    #[test]
+    fn parser_preserves_the_document_quirks_mode() {
+        let standards = parser().parse_document("<!doctype html><p>x</p>");
+        assert_eq!(
+            standards.document.borrow().quirks_mode(),
+            DomQuirksMode::NoQuirks
+        );
+        let quirks = parser().parse_document("<p>x</p>");
+        assert_eq!(
+            quirks.document.borrow().quirks_mode(),
+            DomQuirksMode::Quirks
+        );
+        let limited = parser().parse_document(
+            "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><p>x</p>",
+        );
+        assert_eq!(
+            limited.document.borrow().quirks_mode(),
+            DomQuirksMode::LimitedQuirks
+        );
     }
 
     #[test]

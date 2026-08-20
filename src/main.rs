@@ -2,13 +2,9 @@ use std::io;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::{DefaultTerminal, Terminal};
+use clap::{Parser, ValueEnum};
+use ratatui::DefaultTerminal;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use textsurf::app::App;
 use textsurf::app::net::{Navigate, PoolNet};
@@ -17,43 +13,70 @@ use textsurf::core::geom::Size;
 use textsurf::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
 use textsurf::ui::chrome;
 
-fn main() -> io::Result<()> {
-    let start_url = parse_start_url();
-    let mut terminal = try_init()?;
-    let fetch: Arc<dyn textsurf::net::Fetch> = Arc::new(SchemeFetch {
-        http: Arc::new(UreqFetch::new()),
-        file: Arc::new(FileFetch),
-    });
-    let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
-    let mut app = App::with_net(net);
-    if let Some(url) = start_url {
-        app.submit_url(&url);
-    }
-    let result = run(&mut terminal, &mut app);
-    try_restore(&mut terminal)?;
-    result
+#[derive(Debug, Parser)]
+#[command(version, about)]
+struct Cli {
+    #[arg(long)]
+    url: Option<String>,
+    #[arg(long)]
+    user_agent: Option<String>,
+    #[arg(long, value_enum, default_value_t = JsMode::Auto)]
+    js: JsMode,
 }
 
-fn parse_start_url() -> Option<String> {
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--url" {
-            return args.next();
-        }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum JsMode {
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+fn main() -> io::Result<()> {
+    let cli = Cli::parse();
+    if cli.js == JsMode::On {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "JavaScript execution is not available before milestone M5",
+        ));
     }
-    None
+    ratatui::run(|terminal| {
+        let fetch: Arc<dyn textsurf::net::Fetch> = Arc::new(SchemeFetch {
+            http: Arc::new(match cli.user_agent {
+                Some(user_agent) => UreqFetch::with_user_agent(user_agent),
+                None => UreqFetch::new(),
+            }),
+            file: Arc::new(FileFetch),
+        });
+        let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
+        let mut app = App::with_net(net);
+        let area = terminal.size()?;
+        app.on_resize(Size {
+            cols: area.width,
+            rows: area.height,
+        });
+        if let Some(url) = cli.url {
+            app.submit_url(&url);
+        }
+        run(terminal, &mut app)
+    })
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
+    let started = Instant::now();
     loop {
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
-                Event::Key(key) => app.handle_key(from_terminal_key(key)),
+                Event::Key(key) => {
+                    if let Some(event) = from_terminal_key(key) {
+                        app.handle_key(event);
+                    }
+                }
                 Event::Resize(cols, rows) => app.on_resize(Size { cols, rows }),
                 _ => {}
             }
         }
-        app.step(Instant::now());
+        app.step(started.elapsed());
         if app.take_dirty() {
             terminal.draw(|frame| {
                 let view = app.chrome_view();
@@ -66,21 +89,10 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
     }
 }
 
-fn try_init() -> io::Result<DefaultTerminal> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    Terminal::new(CrosstermBackend::new(stdout))
-}
-
-fn try_restore(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    Ok(())
-}
-
-fn from_terminal_key(key: event::KeyEvent) -> KeyEvent {
+fn from_terminal_key(key: event::KeyEvent) -> Option<KeyEvent> {
+    if key.kind == KeyEventKind::Release {
+        return None;
+    }
     let code = match key.code {
         KeyCode::Char(ch) => Key::Char(ch),
         KeyCode::Backspace => Key::Backspace,
@@ -101,12 +113,59 @@ fn from_terminal_key(key: event::KeyEvent) -> KeyEvent {
         other => Key::Other(format!("{other:?}")),
     };
     let modifiers = key.modifiers;
-    KeyEvent {
+    Some(KeyEvent {
         code,
         modifiers: AppKeyModifiers {
             shift: modifiers.contains(KeyModifiers::SHIFT),
             ctrl: modifiers.contains(KeyModifiers::CONTROL),
             alt: modifiers.contains(KeyModifiers::ALT),
         },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn terminal_key(kind: KeyEventKind) -> event::KeyEvent {
+        event::KeyEvent::new_with_kind(KeyCode::Char('g'), KeyModifiers::NONE, kind)
+    }
+
+    #[test]
+    fn release_events_are_dropped() {
+        assert_eq!(
+            from_terminal_key(terminal_key(KeyEventKind::Release)),
+            None,
+            "a key-up must never reach the app"
+        );
+    }
+
+    #[test]
+    fn repeat_events_are_mapped_for_normal_key_repeat() {
+        assert!(from_terminal_key(terminal_key(KeyEventKind::Repeat)).is_some());
+    }
+
+    #[test]
+    fn press_events_are_mapped_with_modifiers() {
+        let key = event::KeyEvent::new_with_kind(
+            KeyCode::Char('x'),
+            KeyModifiers::SHIFT | KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        );
+        let mapped = from_terminal_key(key).unwrap();
+        assert_eq!(mapped.code, Key::Char('x'));
+        assert!(mapped.modifiers.shift && mapped.modifiers.ctrl && !mapped.modifiers.alt);
+    }
+
+    #[test]
+    fn cli_parses_the_start_url_and_rejects_unknown_flags() {
+        let cli = Cli::try_parse_from(["textsurf", "--url", "https://example.com"]).unwrap();
+        assert_eq!(cli.url.as_deref(), Some("https://example.com"));
+        assert_eq!(cli.js, JsMode::Auto);
+        let cli =
+            Cli::try_parse_from(["textsurf", "--user-agent", "test-agent", "--js", "off"]).unwrap();
+        assert_eq!(cli.user_agent.as_deref(), Some("test-agent"));
+        assert_eq!(cli.js, JsMode::Off);
+        assert!(Cli::try_parse_from(["textsurf", "--unknown"]).is_err());
     }
 }

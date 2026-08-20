@@ -1,0 +1,11 @@
+---
+source: src/ui/widgets/menu.rs
+expression: "crate::ui::test_util::buffer_string(terminal.backend().buffer())"
+---
+                                                                                
+ ┌────────────┐                                                                 
+ │New Tab     │                                                                 
+ │Close Tab   │                                                                 
+ │Reload      │                                                                 
+ │Quit        │                                                                 
+ └────────────┘

@@ -1,107 +1,236 @@
+use std::borrow::Cow;
+
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Position};
-use unicode_width::UnicodeWidthChar;
+use ratatui::layout::{Position, Rect};
+use ratatui::style::Style;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::mouse::ChromeGeometry;
+use crate::ui::theme::Theme;
 use crate::ui::widgets::content::{Content, ContentLines};
+use crate::ui::widgets::menu::{MenuBar, MenuPopup};
 use crate::ui::widgets::status::{StatusBar, StatusView};
-use crate::ui::widgets::tabs::{TabBar, TabChip};
-use crate::ui::widgets::toolbar::{NAV_BUTTONS_WIDTH, Toolbar};
+use crate::ui::widgets::tabs::{TabBar, TabChip, active_span};
+use crate::ui::widgets::toolbar::{FIELD_TEXT, Toolbar};
 
-pub struct ChromeView {
+pub struct ChromeView<'a> {
     pub geometry: ChromeGeometry,
-    pub tabs: Vec<TabChip>,
-    pub active_tab: usize,
-    pub address: String,
+    pub theme: Theme,
+    pub can_back: bool,
+    pub can_forward: bool,
+    pub address: Cow<'a, str>,
     pub address_cursor: usize,
     pub address_focused: bool,
-    pub content: ContentLines,
-    pub status: StatusView,
+    pub menu_open: bool,
+    pub menu_active: usize,
+    pub menu_item: usize,
+    pub tabs: Vec<TabChip<'a>>,
+    pub active_tab: usize,
+    pub content: ContentLines<'a>,
+    pub status: StatusView<'a>,
 }
 
-pub fn draw(frame: &mut Frame<'_>, view: &ChromeView) {
-    let rows = Layout::vertical([
-        Constraint::Length(view.geometry.tabs_rows),
-        Constraint::Length(view.geometry.toolbar_rows),
-        Constraint::Min(0),
-        Constraint::Length(view.geometry.status_rows),
-    ])
-    .split(frame.area());
+pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
+    let area = frame.area();
+    let layout = view.geometry.layout(area);
+    let frame_style = Style::default().fg(view.theme.frame);
+    frame
+        .buffer_mut()
+        .set_style(area, Style::default().bg(view.theme.bg));
 
-    frame.render_widget(
-        TabBar {
-            tabs: &view.tabs,
-            active: view.active_tab,
-        },
-        rows[0],
-    );
-    frame.render_widget(
-        Toolbar {
-            address: &view.address,
-            focused: view.address_focused,
-        },
-        rows[1],
-    );
-    frame.render_widget(
-        Content {
-            lines: &view.content,
-        },
-        rows[2],
-    );
-    frame.render_widget(StatusBar { view: &view.status }, rows[3]);
+    let divider = |frame: &mut Frame<'_>, rect: Rect| {
+        let width = rect.width;
+        buf_set_string(frame, rect, 0, "├", frame_style);
+        buf_set_string(frame, rect, width - 1, "┤", frame_style);
+        buf_set_string(
+            frame,
+            rect,
+            1,
+            &"─".repeat(usize::from(width.saturating_sub(2))),
+            frame_style,
+        );
+    };
 
-    if view.address_focused {
-        frame.set_cursor_position(Position::new(address_cursor_cell(view, rows[1]), rows[1].y));
+    let divider_with_opening = |frame: &mut Frame<'_>, rect: Rect, opening: Option<(u16, u16)>| {
+        let width = rect.width;
+        buf_set_string(frame, rect, 0, "├", frame_style);
+        buf_set_string(frame, rect, width - 1, "┤", frame_style);
+        for col in 1..width.saturating_sub(1) {
+            let glyph = match opening {
+                Some((left, _)) if col == left => "┘",
+                Some((_, right)) if col == right => "└",
+                Some((left, right)) if col > left && col < right => continue,
+                _ => "─",
+            };
+            buf_set_string(frame, rect, col, glyph, frame_style);
+        }
+    };
+
+    if let Some(rect) = layout.menu {
+        frame.render_widget(
+            MenuBar {
+                active: view.menu_active,
+                open: view.menu_open,
+                theme: &view.theme,
+            },
+            rect,
+        );
+    }
+    if let Some(rect) = layout.tabs {
+        frame.render_widget(
+            TabBar {
+                tabs: &view.tabs,
+                active: view.active_tab,
+                theme: &view.theme,
+            },
+            rect,
+        );
+    }
+    let opening = if layout.tab_divider.is_some_and(|rect| rect.width >= 2) {
+        active_span(&view.tabs, view.active_tab, area.width - 2)
+    } else {
+        None
+    };
+    if let Some(rect) = layout.tab_divider {
+        divider_with_opening(frame, rect, opening);
+    }
+    if let Some(rect) = layout.toolbar {
+        frame.render_widget(
+            Toolbar {
+                address: &view.address,
+                focused: view.address_focused,
+                back_enabled: view.can_back,
+                forward_enabled: view.can_forward,
+                theme: &view.theme,
+            },
+            rect,
+        );
+    }
+    if let Some(rect) = layout.toolbar_divider {
+        divider(frame, rect);
+    }
+    if let Some(rect) = layout.content.filter(|rect| rect.width >= 2) {
+        frame.render_widget(
+            Content {
+                lines: &view.content,
+                theme: &view.theme,
+            },
+            rect,
+        );
+    }
+    if let Some(rect) = layout.status {
+        frame.render_widget(
+            StatusBar {
+                view: &view.status,
+                theme: &view.theme,
+            },
+            rect,
+        );
+    }
+
+    if view.menu_open {
+        frame.render_widget(
+            MenuPopup {
+                menu: view.menu_active,
+                selected: view.menu_item,
+                theme: &view.theme,
+            },
+            area,
+        );
+    }
+
+    if view.address_focused
+        && let Some(toolbar) = layout.toolbar
+    {
+        frame.set_cursor_position(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
     }
 }
 
-fn address_cursor_cell(view: &ChromeView, toolbar: ratatui::layout::Rect) -> u16 {
-    let budget = usize::from(toolbar.width.saturating_sub(NAV_BUTTONS_WIDTH));
+fn buf_set_string(frame: &mut Frame<'_>, rect: Rect, col: u16, text: &str, style: Style) {
+    frame
+        .buffer_mut()
+        .set_string(rect.x + col, rect.y, text, style);
+}
+
+fn address_cursor_cell(view: &ChromeView<'_>, toolbar: Rect) -> u16 {
+    let budget = usize::from(toolbar.width.saturating_sub(FIELD_TEXT + 1));
     let mut width = 0usize;
-    for ch in view.address.chars().take(view.address_cursor) {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+    for grapheme in view.address.graphemes(true).take(view.address_cursor) {
+        let ch_width = UnicodeWidthStr::width(grapheme);
         if width + ch_width > budget {
             break;
         }
         width += ch_width;
     }
-    NAV_BUTTONS_WIDTH + width as u16
+    toolbar.x + FIELD_TEXT + width as u16
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::geom::Size;
+    use crate::ui::mouse::ChromeGeometry;
+    use crate::ui::theme::NORTON;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    fn draft() -> ChromeView {
+    fn draft() -> ChromeView<'static> {
         ChromeView {
             geometry: ChromeGeometry::for_size(Size { cols: 60, rows: 10 }),
-            tabs: vec![TabChip {
-                title: "example.com".to_string(),
-                url: String::new(),
-            }],
-            active_tab: 0,
-            address: "https://example.com".to_string(),
+            theme: NORTON,
+            can_back: false,
+            can_forward: false,
+            address: "https://example.com".to_string().into(),
             address_cursor: 0,
             address_focused: false,
+            menu_open: false,
+            menu_active: 0,
+            menu_item: 0,
+            tabs: Vec::new(),
+            active_tab: 0,
             content: ContentLines {
-                lines: vec!["hello".to_string()],
+                lines: vec!["hello".to_string()].into(),
                 scroll: 0,
             },
             status: StatusView {
-                url: "https://example.com".to_string(),
-                message: "Ready".to_string(),
+                url: "https://example.com".to_string().into(),
+                message: "Ready".to_string().into(),
             },
         }
     }
 
-    #[test]
-    fn full_chrome_snapshot() {
-        let backend = TestBackend::new(60, 10);
+    fn snapshot(size: Size) -> String {
+        let backend = TestBackend::new(size.cols, size.rows);
         let mut terminal = Terminal::new(backend).unwrap();
         let view = draft();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        crate::ui::test_util::buffer_string(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn full_chrome_snapshot() {
+        insta::assert_snapshot!(snapshot(Size { cols: 60, rows: 10 }));
+    }
+
+    #[test]
+    fn standard_sized_chrome_snapshot() {
+        insta::assert_snapshot!(snapshot(Size { cols: 80, rows: 24 }));
+    }
+
+    #[test]
+    fn tiny_window_still_draws_chrome() {
+        insta::assert_snapshot!(snapshot(Size { cols: 40, rows: 4 }));
+    }
+
+    #[test]
+    fn open_menu_overlays_a_dropdown() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = draft();
+        view.menu_open = true;
+        view.menu_active = 1;
+        view.menu_item = 1;
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         insta::assert_snapshot!(crate::ui::test_util::buffer_string(
             terminal.backend().buffer()
@@ -109,13 +238,54 @@ mod tests {
     }
 
     #[test]
+    fn the_frame_interior_has_the_theme_background() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let view = draft();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let cells = terminal.backend().buffer().content();
+        let blank = &cells[80 + 40];
+        assert_eq!(blank.symbol(), " ");
+        assert_eq!(
+            blank.style().bg,
+            Some(NORTON.bg),
+            "blank chrome cells must carry the theme background"
+        );
+        let blank_content = &cells[8 * 80 + 20];
+        assert_eq!(
+            blank_content.style().bg,
+            Some(NORTON.bg),
+            "blank content cells must carry the theme background"
+        );
+        let bar = &cells[23 * 80 + 10];
+        assert_eq!(
+            bar.style().bg,
+            Some(NORTON.bar_bg),
+            "the bottom bar must carry the bar background"
+        );
+    }
+
+    #[test]
     fn focused_address_places_the_cursor() {
-        let backend = TestBackend::new(60, 10);
+        let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = draft();
         view.address_focused = true;
         view.address_cursor = view.address.chars().count();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
-        assert_eq!(terminal.backend().cursor_position(), Position::new(28, 1));
+        assert_eq!(terminal.backend().cursor_position(), Position::new(43, 3));
+    }
+
+    #[test]
+    fn cursor_stays_inside_the_field_when_the_address_is_long() {
+        let backend = TestBackend::new(40, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = draft();
+        view.address = "x".repeat(200).into();
+        view.address_focused = true;
+        view.address_cursor = view.address.chars().count();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let position = terminal.backend().cursor_position();
+        assert!(position.x < 40, "cursor must stay inside the field");
     }
 }

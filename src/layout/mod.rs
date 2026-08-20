@@ -1,3 +1,5 @@
 pub mod engine;
 
-pub use engine::{BoxTree, LayoutEngine};
+pub use engine::{
+    BoxTree, LayoutBox, LayoutEngine, LayoutLine, LayoutRect, LinkBox, TaffyLayoutEngine,
+};

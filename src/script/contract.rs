@@ -1,6 +1,4 @@
-use slotmap::Key;
-
-use crate::core::dom::NodeId;
+use crate::core::dom::{Document, ElementNs};
 use crate::script::host::{JsEvent, JsHost};
 use crate::script::{Capabilities, JsEngine, MutateOp};
 
@@ -44,12 +42,9 @@ pub fn run_inert_suite<E: JsEngine>(engine: &mut E, host: &mut RecordingHost) {
         0,
         "inert engines perform no steps"
     );
-    engine.dispatch_event(
-        &JsEvent::Click {
-            target: NodeId::null(),
-        },
-        host,
-    );
+    let mut document = Document::new();
+    let target = document.insert_element(None, "button", ElementNs::Html, vec![]);
+    engine.dispatch_event(&JsEvent::Click { target }, host);
     assert!(
         host.logs.is_empty() && host.mutations.is_empty(),
         "inert engines must leave the host untouched"

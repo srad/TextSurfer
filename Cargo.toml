@@ -6,9 +6,18 @@ rust-version = "1.88"
 description = "A text-mode web browser for the terminal."
 
 [dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+crossbeam-channel = "0.5.16"
+cssparser = "0.37.0"
+indextree = { version = "4.8.1", default-features = false }
+mediatype = "0.23.0"
+precomputed-hash = "0.1.1"
 ratatui = "0.30.2"
+selectors = "0.40.0"
+taffy = { version = "0.13.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "content_size"] }
+textwrap = { version = "0.16.2", default-features = false, features = ["unicode-linebreak", "unicode-width"] }
+unicode-segmentation = "1.13.3"
 url = "2.5.8"
-slotmap = "1.1.1"
 unicode-width = "0.2.2"
 thiserror = "2.0.20"
 html5ever = "0.39.0"
@@ -24,3 +33,5 @@ js = ["dep:boa_engine"]
 insta = "1.48.0"
 proptest = "1.11.0"
 pretty_assertions = "1.4.1"
+sha2 = "0.11.0"
+tempfile = "3.27.0"

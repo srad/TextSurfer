@@ -1,5 +1,0 @@
----
-source: src/ui/widgets/toolbar.rs
-expression: "render(\"https://example.com/very/long/path\", false)"
----
-‹  ›  ↻  https://example.com/very/long/p

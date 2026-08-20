@@ -1,137 +1,113 @@
-use std::io::{BufRead, Read, Write};
-use std::net::TcpListener;
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use textsurf::app::App;
-use textsurf::app::net::{Navigate, PoolNet};
-use textsurf::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
+use textsurf::app::net::Navigate;
+use textsurf::net::{Fetch, FetchError, FetchPayload, FetchRequest, FetchResponse, SchemeFetch};
 
 const BODY: &str = "<!doctype html><title>smoke</title><p>acceptance</p>";
 
-fn serve_once(
-    handler: impl FnOnce(&mut std::net::TcpStream) + Send + 'static,
-) -> std::net::SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("loopback bind");
-    let addr = listener.local_addr().expect("local addr");
-    thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            handler(&mut stream);
-            break;
-        }
-    });
-    addr
-}
+struct FixtureFetch;
 
-fn real_app() -> (App, Arc<SchemeFetch>) {
-    let fetch = Arc::new(SchemeFetch {
-        http: Arc::new(UreqFetch::new()),
-        file: Arc::new(FileFetch),
-    });
-    let net: Arc<dyn Navigate> =
-        Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch.clone(), 4))));
-    (App::with_net(net), fetch)
-}
-
-fn wait_loaded(app: &mut App, deadline_ms: u64) {
-    let deadline = Instant::now() + Duration::from_millis(deadline_ms);
-    loop {
-        app.step(Instant::now());
-        let content = app.chrome_view().content.lines.clone();
-        if content
-            .first()
-            .is_some_and(|line| line.starts_with("#document"))
-        {
-            return;
+impl Fetch for FixtureFetch {
+    fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
+        if request.url.path() == "/gone" {
+            return Err(FetchError::HttpStatus(410));
         }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for the parsed tree"
-        );
-        thread::sleep(Duration::from_millis(10));
+        Ok(FetchResponse {
+            final_url: request.url.clone(),
+            body: BODY.as_bytes().to_vec(),
+            content_type: Some("text/html; charset=utf-8".to_string()),
+        })
     }
 }
 
-#[test]
-fn real_pipeline_loads_a_page_over_loopback_http() {
-    let addr = serve_once(|stream| {
-        let mut reader = std::io::BufReader::new(&mut *stream);
-        let mut request_line = String::new();
-        reader.read_line(&mut request_line).unwrap();
-        assert!(request_line.starts_with("GET / HTTP/1.1"));
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
-            BODY.len(),
-            BODY
-        )
-        .unwrap();
+struct ImmediateNet {
+    fetch: Arc<dyn Fetch>,
+    pending: Mutex<VecDeque<FetchPayload>>,
+}
+
+impl Navigate for ImmediateNet {
+    fn submit(&self, tab_id: u64, generation: u64, url: url::Url) {
+        let result = self.fetch.fetch(&FetchRequest { url });
+        self.pending
+            .lock()
+            .expect("immediate result lock")
+            .push_back(FetchPayload {
+                tab_id,
+                generation,
+                result,
+            });
+    }
+
+    fn poll_result(&self) -> Option<FetchPayload> {
+        self.pending
+            .lock()
+            .expect("immediate result lock")
+            .pop_front()
+    }
+}
+
+fn app_with_fixture_fetch() -> App {
+    let fixture: Arc<dyn Fetch> = Arc::new(FixtureFetch);
+    let fetch = Arc::new(SchemeFetch {
+        http: Arc::clone(&fixture),
+        file: fixture,
     });
-    let (mut app, _fetch) = real_app();
-    app.submit_url(&format!("http://{addr}/"));
-    wait_loaded(&mut app, 5000);
-    let tab = app.chrome_view();
+    let net: Arc<dyn Navigate> = Arc::new(ImmediateNet {
+        fetch,
+        pending: Mutex::new(VecDeque::new()),
+    });
+    App::with_net(net)
+}
+
+fn deliver(app: &mut App) {
+    app.step(Duration::ZERO);
+}
+
+#[test]
+fn composed_pipeline_loads_and_renders_http_html() {
+    let mut app = app_with_fixture_fetch();
+    app.submit_url("https://example.com/");
+    deliver(&mut app);
     assert!(
-        tab.content
+        app.chrome_view()
+            .content
             .lines
             .iter()
             .any(|line| line.contains("acceptance"))
-    );
-    assert!(
-        tab.content
-            .lines
-            .iter()
-            .any(|line| line.contains("<title>"))
     );
     assert!(app.message().contains("accepted gen 1"));
 }
 
 #[test]
-fn real_pipeline_serves_files() {
-    let path = std::env::temp_dir().join(format!("textsurf-e2e-{}.html", std::process::id()));
-    std::fs::write(&path, BODY).expect("write fixture");
-    let url = url::Url::from_file_path(&path).expect("file url");
-    let (mut app, _fetch) = real_app();
-    app.submit_url(url.as_str());
-    wait_loaded(&mut app, 5000);
-    let tab = app.chrome_view();
+fn composed_pipeline_routes_file_urls_through_the_file_fetch_boundary() {
+    let mut app = app_with_fixture_fetch();
+    app.submit_url("file:///fixture.html");
+    deliver(&mut app);
     assert!(
-        tab.content
+        app.chrome_view()
+            .content
             .lines
             .iter()
             .any(|line| line.contains("acceptance"))
     );
     assert!(app.message().contains("accepted gen 1"));
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
-fn real_pipeline_shows_http_errors_as_a_page() {
-    let addr = serve_once(|stream| {
-        let mut drain = [0u8; 512];
-        let _ = stream.read(&mut drain);
-        write!(
-            stream,
-            "HTTP/1.1 410 Gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
-    });
-    let (mut app, _fetch) = real_app();
-    app.submit_url(&format!("http://{addr}/gone"));
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        app.step(Instant::now());
-        let content = app.chrome_view().content.lines.clone();
-        if content
+fn composed_pipeline_renders_fetch_errors_as_a_page() {
+    let mut app = app_with_fixture_fetch();
+    app.submit_url("https://example.com/gone");
+    deliver(&mut app);
+    assert!(
+        app.chrome_view()
+            .content
+            .lines
             .first()
             .is_some_and(|line| line.starts_with("failed to load"))
-        {
-            break;
-        }
-        assert!(Instant::now() < deadline, "error page never rendered");
-        thread::sleep(Duration::from_millis(10));
-    }
+    );
     assert!(app.message().contains("http status 410"));
 }

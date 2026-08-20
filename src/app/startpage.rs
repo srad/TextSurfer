@@ -5,7 +5,7 @@ pub fn start_page() -> Vec<String> {
         "  press / to type a URL or search terms, Enter to go".to_string(),
         "  Ctrl+T new tab  Ctrl+W close  Ctrl+N/P switch".to_string(),
         "  j/k or arrows scroll  Home/End jump  q quits".to_string(),
-        "  the network pipeline lands in M1-A; help overlay in M2".to_string(),
+        "  HTML and embedded CSS render as terminal text; help arrives in M2".to_string(),
     ]
 }
 
@@ -17,6 +17,6 @@ pub fn content_for(url: &str) -> Vec<String> {
         url.to_string(),
         String::new(),
         format!("  fetching {url}"),
-        "  parsing, styles and layout arrive in M1-A / M1-B".to_string(),
+        "  loading through the HTML, style, layout and paint pipeline".to_string(),
     ]
 }

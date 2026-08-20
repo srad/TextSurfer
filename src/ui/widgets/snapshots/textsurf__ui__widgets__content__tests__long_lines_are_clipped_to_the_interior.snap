@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/content.rs
+expression: "render(&long, 0, 1)"
+---
+│xxxxxxxxxxxxxxxxxxxxxx│

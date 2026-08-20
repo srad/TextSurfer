@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/menu.rs
+expression: "render_bar(0, false, 80)"
+---
+ File  Navigate  View  Help                       TextSurf

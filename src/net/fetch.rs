@@ -3,6 +3,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use url::Url;
 
+pub const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchRequest {
     pub url: Url,
@@ -23,6 +25,8 @@ pub enum FetchError {
     HttpStatus(u16),
     #[error("unsupported scheme: {0}")]
     UnsupportedScheme(String),
+    #[error("response body exceeds {limit} bytes")]
+    BodyTooLarge { limit: usize },
 }
 
 pub trait Fetch: Send + Sync {
@@ -46,6 +50,7 @@ impl Fetch for SchemeFetch {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchPayload {
+    pub tab_id: u64,
     pub generation: u64,
     pub result: Result<FetchResponse, FetchError>,
 }

@@ -1,48 +1,64 @@
+use std::borrow::Cow;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::style::Style;
+use ratatui::widgets::Widget;
 
-pub struct ContentLines {
-    pub lines: Vec<String>,
-    pub scroll: u16,
+use crate::ui::theme::Theme;
+
+pub struct ContentLines<'a> {
+    pub lines: Cow<'a, [String]>,
+    pub scroll: usize,
 }
 
 pub struct Content<'a> {
-    pub lines: &'a ContentLines,
+    pub lines: &'a ContentLines<'a>,
+    pub theme: &'a Theme,
 }
 
 impl Widget for Content<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let start = usize::from(self.lines.scroll);
-        let visible: Vec<Line<'_>> = self
-            .lines
-            .lines
-            .iter()
-            .skip(start)
-            .take(usize::from(area.height))
-            .map(|line| Line::from(line.as_str()))
-            .collect();
-        Paragraph::new(Text::from(visible)).render(area, buf);
+        let frame = Style::default().fg(self.theme.frame);
+        if area.width < 2 || area.height == 0 {
+            return;
+        }
+        let start = self.lines.scroll;
+        for row in 0..area.height {
+            let y = area.y + row;
+            buf.set_string(area.x, y, "│", frame);
+            buf.set_string(area.right() - 1, y, "│", frame);
+            if let Some(line) = self.lines.lines.get(start + usize::from(row)) {
+                let clipped = super::clip_width(line, area.width - 2);
+                buf.set_string(
+                    area.x + 1,
+                    y,
+                    &clipped,
+                    Style::default().fg(self.theme.text),
+                );
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::theme::NORTON;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    fn render(lines: &[String], scroll: u16, height: u16) -> String {
+    fn render(lines: &[String], scroll: usize, height: u16) -> String {
         let backend = TestBackend::new(24, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
                 Content {
                     lines: &ContentLines {
-                        lines: lines.to_vec(),
+                        lines: lines.to_vec().into(),
                         scroll,
                     },
+                    theme: &NORTON,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -62,5 +78,11 @@ mod tests {
     #[test]
     fn short_documents_render_blank_rows_below() {
         insta::assert_snapshot!(render(&lines(1), 0, 3));
+    }
+
+    #[test]
+    fn long_lines_are_clipped_to_the_interior() {
+        let long = vec!["x".repeat(100)];
+        insta::assert_snapshot!(render(&long, 0, 1));
     }
 }

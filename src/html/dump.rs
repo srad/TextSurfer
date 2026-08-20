@@ -38,8 +38,10 @@ fn dump_node(document: &Document, id: NodeId, depth: usize, out: &mut String) {
             if name == "template" && *ns == ElementNs::Html {
                 indent(out, depth + 1);
                 out.push_str("content\n");
-                for child in document.children(id) {
-                    dump_node(document, child, depth + 2, out);
+                if let Some(contents) = document.template_contents(id) {
+                    for child in document.children(contents) {
+                        dump_node(document, child, depth + 2, out);
+                    }
                 }
             } else {
                 for child in document.children(id) {
@@ -83,6 +85,11 @@ fn dump_node(document: &Document, id: NodeId, depth: usize, out: &mut String) {
                 out.push('"');
             }
             out.push_str(">\n");
+        }
+        Some(Node::DocumentFragment) => {
+            for child in document.children(id) {
+                dump_node(document, child, depth, out);
+            }
         }
         None => {}
     }
@@ -287,7 +294,8 @@ mod tests {
         let html = elem(None, &mut document, "html");
         let head = elem(Some(html), &mut document, "head");
         let template = document.insert_element(Some(head), "template", ElementNs::Html, vec![]);
-        document.insert_text(Some(template), "Hello");
+        let contents = document.create_template_contents(template).unwrap();
+        document.insert_text(Some(contents), "Hello");
         assert_eq!(
             tree_dump(&document, false),
             "#document\n\
@@ -304,7 +312,8 @@ mod tests {
         let mut document = doc();
         let html = elem(None, &mut document, "html");
         let head = elem(Some(html), &mut document, "head");
-        document.insert_element(Some(head), "template", ElementNs::Html, vec![]);
+        let template = document.insert_element(Some(head), "template", ElementNs::Html, vec![]);
+        document.create_template_contents(template).unwrap();
         let body = elem(Some(html), &mut document, "body");
         document.insert_element(Some(body), "div", ElementNs::Html, vec![]);
         assert_eq!(

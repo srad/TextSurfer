@@ -5,6 +5,7 @@ use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
+use sha2::{Digest, Sha256};
 use support::dat::{DatCase, parse_file};
 use support::xfail::Xfail;
 use textsurf::core::dom::ElementNs;
@@ -23,7 +24,12 @@ struct FileStats {
     bad_xfail: Vec<(usize, String)>,
 }
 
-fn run_case(case: &DatCase) -> Result<(), String> {
+enum CaseFailure {
+    Mismatch(String),
+    Panic(String),
+}
+
+fn run_case(case: &DatCase) -> Result<(), CaseFailure> {
     let context = ElementContext {
         name: case
             .context
@@ -47,13 +53,13 @@ fn run_case(case: &DatCase) -> Result<(), String> {
             .map(|s| s.to_string())
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "unknown panic payload".to_string());
-        format!("parser panicked: {message}")
+        CaseFailure::Panic(message)
     })?;
     let actual = tree_dump(&outcome.document.borrow(), case.is_fragment);
     if actual == case.expected {
         Ok(())
     } else {
-        Err(first_diff(&case.expected, &actual))
+        Err(CaseFailure::Mismatch(first_diff(&case.expected, &actual)))
     }
 }
 
@@ -93,7 +99,7 @@ fn run_file(file: &str, xfail: &Xfail, used: &mut HashSet<(String, usize)>) -> F
                     stats.passed += 1;
                 }
             }
-            Err(detail) => {
+            Err(CaseFailure::Mismatch(detail)) => {
                 if manifest_reason.is_some() {
                     used.insert((file.to_string(), number));
                     stats.xfailed += 1;
@@ -101,6 +107,9 @@ fn run_file(file: &str, xfail: &Xfail, used: &mut HashSet<(String, usize)>) -> F
                     stats.unexpected.push((number, detail));
                 }
             }
+            Err(CaseFailure::Panic(detail)) => stats
+                .unexpected
+                .push((number, format!("parser panicked: {detail}"))),
         }
     }
     stats
@@ -153,11 +162,10 @@ fn corpus_conformance() {
     }
 
     let run = grand_total - grand_skipped;
-    let green = grand_passed + grand_xfailed;
     let rate = if run == 0 {
         1.0
     } else {
-        green as f64 / run as f64
+        grand_passed as f64 / run as f64
     };
     println!(
         "corpus: run={run} passed={grand_passed} xfailed={grand_xfailed} unexpected={} pass-rate={rate:.4}",
@@ -199,5 +207,37 @@ fn manifest_references_only_vendored_files() {
     assert!(
         unknown.is_empty(),
         "manifest references unknown files: {unknown:?}"
+    );
+}
+
+#[test]
+fn vendored_files_exactly_match_the_sha256_manifest() {
+    let manifest =
+        fs::read_to_string(Path::new(TESTDATA).join("wpt-parsing.sha256")).expect("hash manifest");
+    let mut expected = HashSet::new();
+    for (line_number, line) in manifest.lines().enumerate() {
+        let mut fields = line.split_whitespace();
+        let hash = fields.next().expect("manifest hash");
+        let file = fields.next().expect("manifest file");
+        assert!(
+            fields.next().is_none(),
+            "extra field on hash manifest line {}",
+            line_number + 1
+        );
+        assert!(
+            expected.insert(file.to_string()),
+            "duplicate hash entry for {file}"
+        );
+        let bytes = fs::read(Path::new(TESTDATA).join(file)).expect("vendored corpus file");
+        let actual = Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<String>();
+        assert_eq!(actual, hash, "hash mismatch for {file}");
+    }
+    let actual: HashSet<String> = corpus_files().into_iter().collect();
+    assert_eq!(
+        actual, expected,
+        "hash manifest membership differs from corpus files"
     );
 }

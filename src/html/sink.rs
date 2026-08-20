@@ -1,4 +1,6 @@
-use crate::core::dom::{Attr, AttrNs, Document, ElementNs, Node, NodeId, SharedDocument};
+use crate::core::dom::{
+    Attr, AttrNs, Document, DomQuirksMode, ElementNs, Node, NodeId, SharedDocument,
+};
 use crate::html::parser::ParseOutcome;
 use html5ever::tendril::StrTendril;
 use html5ever::tree_builder::{ElemName, ElementFlags, NodeOrText, QuirksMode, TreeSink};
@@ -173,8 +175,12 @@ impl ArenaTreeSink {
                 .expect("fragment parse must produce the synthetic html root");
             document
                 .borrow_mut()
-                .reparent_children(html_root, Some(context));
-            document.borrow_mut().remove_node(html_root);
+                .reparent_children(html_root, Some(context))
+                .expect("fragment reparenting must be acyclic");
+            document
+                .borrow_mut()
+                .remove_node(html_root)
+                .expect("synthetic fragment root must exist");
         }
         let doc = document.borrow();
         let base = base_href(&doc);
@@ -231,6 +237,12 @@ impl TreeSink for ArenaTreeSink {
         if flags.mathml_annotation_xml_integration_point {
             self.integration_points.borrow_mut().insert(id);
         }
+        if flags.template {
+            self.document
+                .borrow_mut()
+                .create_template_contents(id)
+                .expect("template element must exist");
+        }
         Handle::Node(id)
     }
 
@@ -254,7 +266,9 @@ impl TreeSink for ArenaTreeSink {
         let parent_id = parent.parent_slot();
         let mut document = self.document.borrow_mut();
         match child {
-            NodeOrText::AppendNode(node) => document.attach(node.node(), parent_id),
+            NodeOrText::AppendNode(node) => document
+                .attach(node.node(), parent_id)
+                .expect("tree builder append must be acyclic"),
             NodeOrText::AppendText(text) => {
                 document.append_merged_text(parent_id, text.as_ref());
             }
@@ -273,9 +287,13 @@ impl TreeSink for ArenaTreeSink {
         let mut document = self.document.borrow_mut();
         match child {
             NodeOrText::AppendNode(node) if has_parent => {
-                document.attach_before(node.node(), element_id);
+                document
+                    .attach_before(node.node(), element_id)
+                    .expect("foster parenting must be acyclic");
             }
-            NodeOrText::AppendNode(node) => document.attach(node.node(), Some(prev_id)),
+            NodeOrText::AppendNode(node) => document
+                .attach(node.node(), Some(prev_id))
+                .expect("tree builder append must be acyclic"),
             NodeOrText::AppendText(text) if has_parent => {
                 document.insert_merged_text_before(element_id, text.as_ref());
             }
@@ -300,20 +318,35 @@ impl TreeSink for ArenaTreeSink {
     }
 
     fn get_template_contents(&self, target: &Self::Handle) -> Self::Handle {
-        Handle::Template(target.node())
+        let template = target.node();
+        Handle::Template(
+            self.document
+                .borrow()
+                .template_contents(template)
+                .expect("template contents must be created with the element"),
+        )
     }
 
     fn same_node(&self, x: &Self::Handle, y: &Self::Handle) -> bool {
         x == y
     }
 
-    fn set_quirks_mode(&self, _mode: QuirksMode) {}
+    fn set_quirks_mode(&self, mode: QuirksMode) {
+        let mode = match mode {
+            QuirksMode::Quirks => DomQuirksMode::Quirks,
+            QuirksMode::LimitedQuirks => DomQuirksMode::LimitedQuirks,
+            QuirksMode::NoQuirks => DomQuirksMode::NoQuirks,
+        };
+        self.document.borrow_mut().set_quirks_mode(mode);
+    }
 
     fn append_before_sibling(&self, sibling: &Self::Handle, new_node: NodeOrText<Self::Handle>) {
         let sibling_id = sibling.node();
         let mut document = self.document.borrow_mut();
         match new_node {
-            NodeOrText::AppendNode(node) => document.attach_before(node.node(), sibling_id),
+            NodeOrText::AppendNode(node) => document
+                .attach_before(node.node(), sibling_id)
+                .expect("tree builder sibling insertion must be acyclic"),
             NodeOrText::AppendText(text) => {
                 document.insert_merged_text_before(sibling_id, text.as_ref());
             }
@@ -328,14 +361,18 @@ impl TreeSink for ArenaTreeSink {
 
     fn remove_from_parent(&self, target: &Self::Handle) {
         let id = target.node();
-        self.document.borrow_mut().detach(id);
+        self.document
+            .borrow_mut()
+            .detach(id)
+            .expect("tree builder target must exist");
     }
 
     fn reparent_children(&self, node: &Self::Handle, new_parent: &Self::Handle) {
         let node_id = node.node();
         self.document
             .borrow_mut()
-            .reparent_children(node_id, new_parent.parent_slot());
+            .reparent_children(node_id, new_parent.parent_slot())
+            .expect("tree builder reparenting must be acyclic");
     }
 
     fn is_mathml_annotation_xml_integration_point(&self, handle: &Self::Handle) -> bool {

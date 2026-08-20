@@ -24,7 +24,8 @@ pub fn route(url: &Url) -> Route {
 }
 
 pub trait Navigate: Send {
-    fn submit(&self, generation: u64, url: Url);
+    fn submit(&self, tab_id: u64, generation: u64, url: Url);
+    fn cancel(&self, _tab_id: u64, _generation: u64) {}
     fn poll_result(&self) -> Option<FetchPayload>;
 }
 
@@ -39,8 +40,12 @@ impl PoolNet {
 }
 
 impl Navigate for PoolNet {
-    fn submit(&self, generation: u64, url: Url) {
-        self.pool.submit(generation, FetchRequest { url });
+    fn submit(&self, tab_id: u64, generation: u64, url: Url) {
+        self.pool.submit(tab_id, generation, FetchRequest { url });
+    }
+
+    fn cancel(&self, tab_id: u64, generation: u64) {
+        self.pool.cancel(tab_id, generation);
     }
 
     fn poll_result(&self) -> Option<FetchPayload> {
@@ -51,7 +56,7 @@ impl Navigate for PoolNet {
 pub struct NoopNet;
 
 impl Navigate for NoopNet {
-    fn submit(&self, _generation: u64, _url: Url) {}
+    fn submit(&self, _tab_id: u64, _generation: u64, _url: Url) {}
 
     fn poll_result(&self) -> Option<FetchPayload> {
         None

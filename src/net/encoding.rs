@@ -1,4 +1,5 @@
 use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE, WINDOWS_1252, X_USER_DEFINED};
+use mediatype::{MediaType, ReadParams, names::CHARSET};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decoded {
@@ -9,11 +10,23 @@ pub struct Decoded {
 const PRESCAN_WINDOW: usize = 1024;
 
 pub fn decode(body: &[u8], header_charset: Option<&str>) -> Decoded {
+    decode_inner(body, header_charset, true)
+}
+
+pub fn decode_text(body: &[u8], header_charset: Option<&str>) -> Decoded {
+    decode_inner(body, header_charset, false)
+}
+
+fn decode_inner(body: &[u8], header_charset: Option<&str>, html_prescan: bool) -> Decoded {
     let (mut encoding, offset) = sniff_bom(body);
     if offset == 0 {
         let header = header_charset.and_then(|label| Encoding::for_label(label.trim().as_bytes()));
         encoding = header
-            .or_else(|| prescan_encoding(&body[..body.len().min(PRESCAN_WINDOW)]))
+            .or_else(|| {
+                html_prescan
+                    .then(|| prescan_encoding(&body[..body.len().min(PRESCAN_WINDOW)]))
+                    .flatten()
+            })
             .unwrap_or(UTF_8);
         encoding = post_process(encoding);
     }
@@ -25,16 +38,11 @@ pub fn decode(body: &[u8], header_charset: Option<&str>) -> Decoded {
 }
 
 pub fn charset_from_content_type(content_type: &str) -> Option<String> {
-    for part in content_type.split(';').skip(1) {
-        if let Some((name, value)) = part.split_once('=') {
-            let name = name.trim();
-            let value = value.trim();
-            if name.eq_ignore_ascii_case("charset") && !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
+    MediaType::parse(content_type)
+        .ok()?
+        .get_param(CHARSET)
+        .map(|value| value.unquoted_str().into_owned())
+        .filter(|value| !value.is_empty())
 }
 
 fn post_process(encoding: &'static Encoding) -> &'static Encoding {
@@ -387,6 +395,14 @@ mod tests {
     }
 
     #[test]
+    fn plain_text_does_not_treat_html_meta_as_an_encoding_hint() {
+        let body = b"<meta charset=windows-1252>caf\xe9";
+        let d = decode_text(body, None);
+        assert_eq!(d.encoding, UTF_8);
+        assert!(d.text.ends_with("caf\u{fffd}"));
+    }
+
+    #[test]
     fn meta_charset_attribute_is_sniffed() {
         let mut body = b"<html><meta charset=windows-1252>".to_vec();
         body.extend(latin1_cafe());
@@ -514,7 +530,7 @@ mod tests {
         );
         assert_eq!(
             charset_from_content_type("text/html; charset=\"utf-8\""),
-            Some("\"utf-8\"".to_string())
+            Some("utf-8".to_string())
         );
         assert_eq!(
             charset_from_content_type("text/html; foo=bar; Charset=shift_jis"),

@@ -1,29 +1,41 @@
+use std::borrow::Cow;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
-pub struct StatusView {
-    pub url: String,
-    pub message: String,
+use crate::ui::theme::Theme;
+
+pub struct StatusView<'a> {
+    pub url: Cow<'a, str>,
+    pub message: Cow<'a, str>,
 }
 
 pub struct StatusBar<'a> {
-    pub view: &'a StatusView,
+    pub view: &'a StatusView<'a>,
+    pub theme: &'a Theme,
 }
 
 impl Widget for StatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let bar = Style::default()
+            .bg(self.theme.bar_bg)
+            .fg(self.theme.bar_text);
+        if area.width < 2 {
+            return;
+        }
+        buf.set_style(area, bar);
+        let inner = usize::from(area.width);
         let message = &self.view.message;
         let url = &self.view.url;
-        let message_width = unicode_width::UnicodeWidthStr::width(message.as_str());
-        let url_width = unicode_width::UnicodeWidthStr::width(url.as_str());
-        let total = usize::from(area.width);
-        let pad = total.saturating_sub(message_width + 1 + url_width);
+        let message_width = unicode_width::UnicodeWidthStr::width(message.as_ref());
+        let url_width = unicode_width::UnicodeWidthStr::width(url.as_ref());
+        let pad = inner.saturating_sub(message_width + 1 + url_width);
         let line = Line::from(vec![
-            Span::raw(format!("{message}{}", " ".repeat(pad))),
-            Span::styled(url.clone(), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{message}{}", " ".repeat(pad)), bar),
+            Span::styled(url.as_ref(), bar),
         ]);
         Paragraph::new(line).render(area, buf);
     }
@@ -32,6 +44,7 @@ impl Widget for StatusBar<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::theme::NORTON;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -39,11 +52,17 @@ mod tests {
         let backend = TestBackend::new(40, 1);
         let mut terminal = Terminal::new(backend).unwrap();
         let view = StatusView {
-            url: url.to_string(),
-            message: message.to_string(),
+            url: url.to_string().into(),
+            message: message.to_string().into(),
         };
         terminal
-            .draw(|frame| StatusBar { view: &view }.render(frame.area(), frame.buffer_mut()))
+            .draw(|frame| {
+                StatusBar {
+                    view: &view,
+                    theme: &NORTON,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
             .unwrap();
         crate::ui::test_util::buffer_string(terminal.backend().buffer())
     }

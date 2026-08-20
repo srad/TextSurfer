@@ -1,4 +1,5 @@
 pub mod content;
+pub mod menu;
 pub mod status;
 pub mod tabs;
 pub mod toolbar;

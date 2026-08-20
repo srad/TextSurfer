@@ -1,6 +1,8 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditBuffer {
-    chars: Vec<char>,
+    text: String,
     cursor: usize,
 }
 
@@ -10,25 +12,36 @@ impl EditBuffer {
     }
 
     pub fn set_text(&mut self, text: &str) {
-        self.chars = text.chars().collect();
-        self.cursor = self.chars.len();
+        self.text.clear();
+        self.text.push_str(text);
+        self.cursor = self.len();
     }
 
     pub fn insert(&mut self, ch: char) {
-        self.chars.insert(self.cursor, ch);
-        self.cursor += 1;
+        let byte = self.byte_at(self.cursor);
+        self.text.insert(byte, ch);
+        let inserted_end = byte + ch.len_utf8();
+        self.cursor = self
+            .text
+            .grapheme_indices(true)
+            .position(|(start, grapheme)| start + grapheme.len() >= inserted_end)
+            .map_or_else(|| self.len(), |index| index + 1);
     }
 
     pub fn backspace(&mut self) {
         if self.cursor > 0 {
-            self.chars.remove(self.cursor - 1);
+            let start = self.byte_at(self.cursor - 1);
+            let end = self.byte_at(self.cursor);
+            self.text.replace_range(start..end, "");
             self.cursor -= 1;
         }
     }
 
     pub fn delete(&mut self) {
-        if self.cursor < self.chars.len() {
-            self.chars.remove(self.cursor);
+        if self.cursor < self.len() {
+            let start = self.byte_at(self.cursor);
+            let end = self.byte_at(self.cursor + 1);
+            self.text.replace_range(start..end, "");
         }
     }
 
@@ -37,7 +50,7 @@ impl EditBuffer {
     }
 
     pub fn right(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.chars.len());
+        self.cursor = (self.cursor + 1).min(self.len());
     }
 
     pub fn home(&mut self) {
@@ -45,11 +58,11 @@ impl EditBuffer {
     }
 
     pub fn end(&mut self) {
-        self.cursor = self.chars.len();
+        self.cursor = self.len();
     }
 
-    pub fn text(&self) -> String {
-        self.chars.iter().collect()
+    pub fn text(&self) -> &str {
+        &self.text
     }
 
     pub fn cursor(&self) -> usize {
@@ -57,11 +70,18 @@ impl EditBuffer {
     }
 
     pub fn len(&self) -> usize {
-        self.chars.len()
+        self.text.graphemes(true).count()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.chars.is_empty()
+        self.text.is_empty()
+    }
+
+    fn byte_at(&self, grapheme: usize) -> usize {
+        self.text
+            .grapheme_indices(true)
+            .nth(grapheme)
+            .map_or(self.text.len(), |(byte, _)| byte)
     }
 }
 
@@ -166,5 +186,27 @@ mod tests {
         buffer.set_text("hello");
         assert_eq!(buffer.cursor(), 5);
         assert_eq!(buffer.text(), "hello");
+    }
+
+    #[test]
+    fn movement_and_deletion_operate_on_grapheme_clusters() {
+        let mut buffer = EditBuffer::new();
+        buffer.set_text("a\u{301}👩‍💻z");
+        assert_eq!(buffer.len(), 3);
+        buffer.left();
+        buffer.backspace();
+        assert_eq!(buffer.text(), "a\u{301}z");
+        buffer.home();
+        buffer.delete();
+        assert_eq!(buffer.text(), "z");
+    }
+
+    #[test]
+    fn typed_combining_sequences_remain_one_cursor_step() {
+        let mut buffer = EditBuffer::new();
+        buffer.insert('a');
+        buffer.insert('\u{301}');
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer.cursor(), 1);
     }
 }

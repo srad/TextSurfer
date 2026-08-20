@@ -1,4 +1,4 @@
-use url::Url;
+use url::{Host, Url};
 
 const SEARCH_ENDPOINT: &str = "https://lite.duckduckgo.com/lite/";
 
@@ -27,18 +27,23 @@ pub fn parse_scheme(input: &str) -> Scheme {
 }
 
 fn looks_like_host(input: &str) -> bool {
-    let (host, port) = match input.split_once(':') {
-        Some((host, port)) => (host, Some(port)),
-        None => (input, None),
-    };
-    let host_ok = host == "localhost"
-        || (host.contains('.') && !host.starts_with('.') && !host.ends_with('.'));
-    if !host_ok {
+    if input.chars().any(char::is_whitespace) {
         return false;
     }
-    match port {
-        None => true,
-        Some(port) => !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()),
+    let Ok(candidate) = Url::parse(&format!("https://{input}")) else {
+        return false;
+    };
+    if !candidate.username().is_empty() || candidate.password().is_some() {
+        return false;
+    }
+    match candidate.host() {
+        Some(Host::Domain(host)) => {
+            let host = host.strip_suffix('.').unwrap_or(host);
+            host == "localhost"
+                || host.split('.').count() >= 2 && host.split('.').all(|label| !label.is_empty())
+        }
+        Some(Host::Ipv4(_) | Host::Ipv6(_)) => true,
+        None => false,
     }
 }
 
@@ -58,6 +63,9 @@ pub fn url_fix(input: &str) -> String {
     }
     if looks_like_host(trimmed) {
         return format!("https://{trimmed}");
+    }
+    if Url::parse(trimmed).is_ok() {
+        return trimmed.to_string();
     }
     search_url(trimmed)
 }
@@ -86,9 +94,11 @@ mod tests {
 
         #[test]
         fn terms_without_a_scheme_route_to_the_search_engine(s in "\\PC{1,64}") {
-            prop_assume!(parse_scheme(&s) == Scheme::Unknown);
-            prop_assume!(!looks_like_host(&s));
-            prop_assume!(!s.trim().is_empty());
+            let trimmed = s.trim();
+            prop_assume!(parse_scheme(trimmed) == Scheme::Unknown);
+            prop_assume!(!looks_like_host(trimmed));
+            prop_assume!(Url::parse(trimmed).is_err());
+            prop_assume!(!trimmed.is_empty());
             let out = url_fix(&s);
             prop_assert!(out.starts_with(SEARCH_ENDPOINT));
         }
@@ -106,6 +116,21 @@ mod tests {
     fn host_like_terms_get_an_https_prefix() {
         assert_eq!(url_fix("example.com"), "https://example.com");
         assert_eq!(url_fix("localhost:8080"), "https://localhost:8080");
+        assert_eq!(
+            url_fix("localhost:8080/path?q=1"),
+            "https://localhost:8080/path?q=1"
+        );
+        assert_eq!(url_fix("127.0.0.1:8080"), "https://127.0.0.1:8080");
+        assert_eq!(url_fix("[::1]:8080"), "https://[::1]:8080");
+    }
+
+    #[test]
+    fn explicit_unsupported_schemes_remain_urls_for_routing() {
+        assert_eq!(url_fix("gopher://example.com"), "gopher://example.com");
+        assert_eq!(
+            url_fix("mailto:user@example.com"),
+            "mailto:user@example.com"
+        );
     }
 
     #[test]
@@ -114,6 +139,7 @@ mod tests {
             url_fix("rust text browser"),
             format!("{SEARCH_ENDPOINT}?q=rust+text+browser")
         );
+        assert_eq!(url_fix("."), format!("{SEARCH_ENDPOINT}?q=."));
     }
 
     #[test]

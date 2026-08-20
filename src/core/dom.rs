@@ -1,11 +1,11 @@
-use slotmap::{SlotMap, new_key_type};
+use indextree::Arena;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use thiserror::Error;
 
-new_key_type! {
-    pub struct NodeId;
-}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NodeId(indextree::NodeId);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ElementNs {
@@ -70,22 +70,37 @@ pub enum Node {
         public_id: String,
         system_id: String,
     },
+    DocumentFragment,
 }
 
 impl Node {}
 
 pub type SharedDocument = Rc<RefCell<Document>>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DomQuirksMode {
+    Quirks,
+    LimitedQuirks,
+    #[default]
+    NoQuirks,
+}
+
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum DomError {
+    #[error("node does not exist")]
+    InvalidNode,
+    #[error("mutation would create a cycle")]
+    Cycle,
+    #[error("a node cannot be inserted relative to itself")]
+    SameNode,
+}
+
 #[derive(Debug, Default)]
 pub struct Document {
-    arena: SlotMap<NodeId, Node>,
-    parent: HashMap<NodeId, Option<NodeId>>,
-    first_child: HashMap<NodeId, Option<NodeId>>,
-    last_child: HashMap<NodeId, Option<NodeId>>,
-    prev_sibling: HashMap<NodeId, Option<NodeId>>,
-    next_sibling: HashMap<NodeId, Option<NodeId>>,
-    id_index: HashMap<String, NodeId>,
+    arena: Arena<Node>,
     roots: Vec<NodeId>,
+    template_contents: HashMap<NodeId, NodeId>,
+    quirks_mode: DomQuirksMode,
 }
 
 impl Document {
@@ -98,7 +113,7 @@ impl Document {
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.arena.get(id)
+        self.arena.get(id.0).map(indextree::Node::get)
     }
 
     pub fn root(&self) -> Option<NodeId> {
@@ -110,37 +125,79 @@ impl Document {
     }
 
     pub fn element_by_id(&self, id_attr: &str) -> Option<NodeId> {
-        self.id_index.get(id_attr).copied()
+        self.roots.iter().find_map(|root| {
+            root.0.descendants(&self.arena).find_map(|id| {
+                let node = self.arena.get(id)?.get();
+                match node {
+                    Node::Element { attrs, .. }
+                        if attrs.iter().any(|attr| {
+                            attr.ns == AttrNs::None && attr.name == "id" && attr.value == id_attr
+                        }) =>
+                    {
+                        Some(NodeId(id))
+                    }
+                    _ => None,
+                }
+            })
+        })
     }
 
     pub fn parent(&self, id: NodeId) -> Option<NodeId> {
-        self.parent.get(&id).copied().flatten()
+        self.arena.get(id.0)?.parent().map(NodeId)
     }
 
     pub fn first_child(&self, id: NodeId) -> Option<NodeId> {
-        self.first_child.get(&id).copied().flatten()
+        self.arena.get(id.0)?.first_child().map(NodeId)
     }
 
     pub fn last_child(&self, id: NodeId) -> Option<NodeId> {
-        self.last_child.get(&id).copied().flatten()
+        self.arena.get(id.0)?.last_child().map(NodeId)
     }
 
     pub fn next_sibling(&self, id: NodeId) -> Option<NodeId> {
-        self.next_sibling.get(&id).copied().flatten()
+        if self.parent(id).is_none() {
+            let position = self.roots.iter().position(|root| *root == id)?;
+            self.roots.get(position + 1).copied()
+        } else {
+            self.arena.get(id.0)?.next_sibling().map(NodeId)
+        }
     }
 
     pub fn prev_sibling(&self, id: NodeId) -> Option<NodeId> {
-        self.prev_sibling.get(&id).copied().flatten()
+        if self.parent(id).is_none() {
+            let position = self.roots.iter().position(|root| *root == id)?;
+            position
+                .checked_sub(1)
+                .and_then(|index| self.roots.get(index).copied())
+        } else {
+            self.arena.get(id.0)?.previous_sibling().map(NodeId)
+        }
     }
 
     pub fn children(&self, id: NodeId) -> Vec<NodeId> {
-        let mut out = Vec::new();
-        let mut cursor = self.first_child(id);
-        while let Some(child) = cursor {
-            out.push(child);
-            cursor = self.next_sibling(child);
+        if self.arena.get(id.0).is_none() {
+            return Vec::new();
         }
-        out
+        id.0.children(&self.arena).map(NodeId).collect()
+    }
+
+    pub fn quirks_mode(&self) -> DomQuirksMode {
+        self.quirks_mode
+    }
+
+    pub fn set_quirks_mode(&mut self, mode: DomQuirksMode) {
+        self.quirks_mode = mode;
+    }
+
+    pub fn template_contents(&self, template: NodeId) -> Option<NodeId> {
+        self.template_contents.get(&template).copied()
+    }
+
+    pub fn create_template_contents(&mut self, template: NodeId) -> Result<NodeId, DomError> {
+        self.ensure_node(template)?;
+        let fragment = self.create_detached(Node::DocumentFragment);
+        self.template_contents.insert(template, fragment);
+        Ok(fragment)
     }
 
     pub fn insert_element(
@@ -206,51 +263,33 @@ impl Document {
     }
 
     pub fn append(&mut self, parent: Option<NodeId>, node: Node) -> NodeId {
-        if let Some(p) = parent {
-            assert!(self.arena.contains_key(p), "parent node must exist");
-        }
-        let id = self.insert_raw(node);
-        self.parent.insert(id, parent);
+        let id = self.create_detached(node);
         match parent {
             None => self.roots.push(id),
-            Some(p) => match self.last_child(p) {
-                None => {
-                    self.first_child.insert(p, Some(id));
-                    self.last_child.insert(p, Some(id));
-                }
-                Some(last) => {
-                    self.next_sibling.insert(last, Some(id));
-                    self.prev_sibling.insert(id, Some(last));
-                    self.last_child.insert(p, Some(id));
-                }
-            },
+            Some(parent) => parent
+                .0
+                .checked_append(id.0, &mut self.arena)
+                .expect("parent node must exist and a new node cannot create a cycle"),
         }
         id
     }
 
     pub fn insert_before(&mut self, sibling: NodeId, node: Node) -> NodeId {
-        assert!(self.arena.contains_key(sibling), "sibling node must exist");
+        self.ensure_node(sibling).expect("sibling node must exist");
         let parent = self.parent(sibling);
-        let id = self.insert_raw(node);
-        self.parent.insert(id, parent);
-        let prev = self.prev_sibling(sibling);
-        if let Some(pr) = prev {
-            self.next_sibling.insert(pr, Some(id));
-        }
-        self.prev_sibling.insert(id, prev);
-        self.next_sibling.insert(id, Some(sibling));
-        self.prev_sibling.insert(sibling, Some(id));
-        if prev.is_none() {
-            if let Some(p) = parent {
-                self.first_child.insert(p, Some(id));
-            } else {
-                let pos = self
-                    .roots
-                    .iter()
-                    .position(|&root| root == sibling)
-                    .expect("sibling must be a root");
-                self.roots.insert(pos, id);
-            }
+        let id = self.create_detached(node);
+        if parent.is_some() {
+            sibling
+                .0
+                .checked_insert_before(id.0, &mut self.arena)
+                .expect("new sibling cannot create a cycle");
+        } else {
+            let position = self
+                .roots
+                .iter()
+                .position(|root| *root == sibling)
+                .expect("parentless sibling must be a document root");
+            self.roots.insert(position, id);
         }
         id
     }
@@ -267,71 +306,58 @@ impl Document {
         }
     }
 
-    pub fn detach(&mut self, id: NodeId) {
-        assert!(self.arena.contains_key(id), "node must exist");
-        self.unlink(id);
-        self.parent.insert(id, None);
-        self.prev_sibling.insert(id, None);
-        self.next_sibling.insert(id, None);
+    pub fn detach(&mut self, id: NodeId) -> Result<(), DomError> {
+        self.ensure_node(id)?;
+        id.0.detach(&mut self.arena);
+        self.roots.retain(|root| *root != id);
+        Ok(())
     }
 
-    pub fn attach(&mut self, id: NodeId, parent: Option<NodeId>) {
-        assert!(self.arena.contains_key(id), "node must exist");
-        if let Some(p) = parent {
-            assert!(self.arena.contains_key(p), "parent node must exist");
-        }
-        self.unlink(id);
-        self.parent.insert(id, parent);
+    pub fn attach(&mut self, id: NodeId, parent: Option<NodeId>) -> Result<(), DomError> {
+        self.validate_move(id, parent)?;
+        id.0.detach(&mut self.arena);
+        self.roots.retain(|root| *root != id);
         match parent {
             None => self.roots.push(id),
-            Some(p) => {
-                let prev = self.last_child(p);
-                self.prev_sibling.insert(id, prev);
-                self.next_sibling.insert(id, None);
-                if let Some(pr) = prev {
-                    self.next_sibling.insert(pr, Some(id));
-                } else {
-                    self.first_child.insert(p, Some(id));
-                }
-                self.last_child.insert(p, Some(id));
-            }
+            Some(parent) => parent
+                .0
+                .checked_append(id.0, &mut self.arena)
+                .map_err(|_| DomError::Cycle)?,
         }
+        Ok(())
     }
 
-    pub fn attach_before(&mut self, id: NodeId, sibling: NodeId) {
-        assert!(self.arena.contains_key(id), "node must exist");
-        assert!(self.arena.contains_key(sibling), "sibling node must exist");
-        let parent = self.parent(sibling);
-        self.unlink(id);
-        self.parent.insert(id, parent);
-        let prev = self.prev_sibling(sibling);
-        if let Some(pr) = prev {
-            self.next_sibling.insert(pr, Some(id));
+    pub fn attach_before(&mut self, id: NodeId, sibling: NodeId) -> Result<(), DomError> {
+        if id == sibling {
+            return Err(DomError::SameNode);
         }
-        self.prev_sibling.insert(id, prev);
-        self.next_sibling.insert(id, Some(sibling));
-        self.prev_sibling.insert(sibling, Some(id));
+        self.ensure_node(sibling)?;
+        let parent = self.parent(sibling);
+        self.validate_move(id, parent)?;
+        id.0.detach(&mut self.arena);
+        self.roots.retain(|root| *root != id);
         match parent {
-            Some(p) => {
-                if prev.is_none() {
-                    self.first_child.insert(p, Some(id));
-                }
-            }
+            Some(_) => sibling
+                .0
+                .checked_insert_before(id.0, &mut self.arena)
+                .map_err(|_| DomError::Cycle)?,
             None => {
-                let pos = self
+                let position = self
                     .roots
                     .iter()
-                    .position(|&root| root == sibling)
+                    .position(|root| *root == sibling)
                     .expect("sibling must be a root");
-                self.roots.insert(pos, id);
+                self.roots.insert(position, id);
             }
         }
+        Ok(())
     }
 
     pub fn append_merged_text(&mut self, parent: Option<NodeId>, data: &str) -> NodeId {
         let last = parent.and_then(|p| self.last_child(p));
         if let Some(last) = last
-            && let Some(Node::Text { data: existing }) = self.arena.get_mut(last)
+            && let Some(Node::Text { data: existing }) =
+                self.arena.get_mut(last.0).map(indextree::Node::get_mut)
         {
             existing.push_str(data);
             return last;
@@ -341,7 +367,8 @@ impl Document {
 
     pub fn insert_merged_text_before(&mut self, sibling: NodeId, data: &str) -> NodeId {
         if let Some(prev) = self.prev_sibling(sibling)
-            && let Some(Node::Text { data: existing }) = self.arena.get_mut(prev)
+            && let Some(Node::Text { data: existing }) =
+                self.arena.get_mut(prev.0).map(indextree::Node::get_mut)
         {
             existing.push_str(data);
             return prev;
@@ -354,155 +381,90 @@ impl Document {
         )
     }
 
-    fn unlink(&mut self, id: NodeId) {
-        if let Some(p) = self.parent(id) {
-            if self.first_child(p) == Some(id) {
-                self.first_child.insert(p, self.next_sibling(id));
+    pub fn reparent_children(
+        &mut self,
+        node: NodeId,
+        new_parent: Option<NodeId>,
+    ) -> Result<(), DomError> {
+        self.ensure_node(node)?;
+        if new_parent == Some(node) {
+            return Ok(());
+        }
+        if let Some(parent) = new_parent {
+            self.ensure_node(parent)?;
+            if parent
+                .0
+                .ancestors(&self.arena)
+                .any(|ancestor| ancestor == node.0)
+            {
+                return Err(DomError::Cycle);
             }
-            if self.last_child(p) == Some(id) {
-                self.last_child.insert(p, self.prev_sibling(id));
-            }
         }
-        if let Some(pr) = self.prev_sibling(id) {
-            self.next_sibling.insert(pr, self.next_sibling(id));
-        }
-        if let Some(nx) = self.next_sibling(id) {
-            self.prev_sibling.insert(nx, self.prev_sibling(id));
-        }
-        if let Some(pos) = self.roots.iter().position(|&root| root == id) {
-            self.roots.remove(pos);
-        }
-    }
-
-    pub fn reparent_children(&mut self, node: NodeId, new_parent: Option<NodeId>) {
         let kids = self.children(node);
-        if kids.is_empty() {
-            return;
+        for child in kids {
+            self.attach(child, new_parent)?;
         }
-        assert!(
-            !new_parent.is_some_and(|p| kids.contains(&p)),
-            "new parent must not be inside the moved subtree"
-        );
-        self.first_child.insert(node, None);
-        self.last_child.insert(node, None);
-        let first = kids[0];
-        let last = kids[kids.len() - 1];
-        for &kid in &kids {
-            self.parent.insert(kid, new_parent);
-        }
-        match new_parent {
-            Some(p) => {
-                let old_last = self.last_child(p);
-                if let Some(ol) = old_last {
-                    self.next_sibling.insert(ol, Some(first));
-                }
-                self.prev_sibling.insert(first, old_last);
-                self.last_child.insert(p, Some(last));
-                if old_last.is_none() {
-                    self.first_child.insert(p, Some(first));
-                }
-            }
-            None => {
-                self.prev_sibling.insert(first, None);
-                self.next_sibling.insert(last, None);
-                self.roots.extend(kids);
-            }
-        }
+        Ok(())
     }
 
     pub fn add_attrs_if_missing(&mut self, id: NodeId, attrs: Vec<Attr>) {
-        let mut added_id: Option<String> = None;
         if let Some(Node::Element {
             attrs: existing, ..
-        }) = self.arena.get_mut(id)
+        }) = self.arena.get_mut(id.0).map(indextree::Node::get_mut)
         {
             for attr in attrs {
                 if !existing
                     .iter()
                     .any(|a| a.ns == attr.ns && a.name == attr.name)
                 {
-                    if attr.ns == AttrNs::None && attr.name == "id" {
-                        added_id = Some(attr.value.clone());
-                    }
                     existing.push(attr);
                 }
             }
         }
-        if let Some(value) = added_id {
-            self.id_index.insert(value, id);
+    }
+
+    pub fn set_root(&mut self, id: NodeId) -> Result<(), DomError> {
+        self.ensure_node(id)?;
+        if !self.roots.contains(&id) {
+            self.attach(id, None)?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_node(&mut self, id: NodeId) -> Result<bool, DomError> {
+        self.ensure_node(id)?;
+        let connected = self.parent(id).is_some() || self.roots.contains(&id);
+        if connected {
+            self.detach(id)?;
+        }
+        Ok(connected)
+    }
+
+    fn create_detached(&mut self, node: Node) -> NodeId {
+        NodeId(self.arena.new_node(node))
+    }
+
+    fn ensure_node(&self, id: NodeId) -> Result<(), DomError> {
+        if self.arena.get(id.0).is_some() {
+            Ok(())
+        } else {
+            Err(DomError::InvalidNode)
         }
     }
 
-    pub fn set_root(&mut self, id: NodeId) {
-        if self.arena.contains_key(id) && !self.roots.contains(&id) {
-            self.roots.push(id);
-        }
-    }
-
-    pub fn remove_node(&mut self, id: NodeId) -> bool {
-        if !self.arena.contains_key(id) {
-            return false;
-        }
-        for child in self.children(id) {
-            self.remove_node(child);
-        }
-        let parent = self.parent(id);
-        let prev = self.prev_sibling(id);
-        let next = self.next_sibling(id);
-        if let Some(p) = parent {
-            if self.first_child(p) == Some(id) {
-                self.first_child.insert(p, next);
+    fn validate_move(&self, id: NodeId, parent: Option<NodeId>) -> Result<(), DomError> {
+        self.ensure_node(id)?;
+        if let Some(parent) = parent {
+            self.ensure_node(parent)?;
+            if parent
+                .0
+                .ancestors(&self.arena)
+                .any(|ancestor| ancestor == id.0)
+            {
+                return Err(DomError::Cycle);
             }
-            if self.last_child(p) == Some(id) {
-                self.last_child.insert(p, next);
-            }
         }
-        if let Some(pr) = prev {
-            self.next_sibling.insert(pr, next);
-        }
-        if let Some(nx) = next {
-            self.prev_sibling.insert(nx, prev);
-        }
-        if let Some(pos) = self.roots.iter().position(|&root| root == id) {
-            self.roots.remove(pos);
-        }
-        let id_attr = match self.arena.get(id) {
-            Some(Node::Element { attrs, .. }) => attrs
-                .iter()
-                .find(|attr| attr.ns == AttrNs::None && attr.name == "id")
-                .map(|attr| attr.value.clone()),
-            _ => None,
-        };
-        if let Some(value) = id_attr {
-            self.id_index.remove(&value);
-        }
-        self.arena.remove(id);
-        self.parent.remove(&id);
-        self.first_child.remove(&id);
-        self.last_child.remove(&id);
-        self.prev_sibling.remove(&id);
-        self.next_sibling.remove(&id);
-        true
-    }
-
-    fn insert_raw(&mut self, node: Node) -> NodeId {
-        let id_attr = match &node {
-            Node::Element { attrs, .. } => attrs
-                .iter()
-                .find(|attr| attr.ns == AttrNs::None && attr.name == "id")
-                .map(|attr| attr.value.clone()),
-            _ => None,
-        };
-        let id = self.arena.insert(node);
-        self.parent.insert(id, None);
-        self.first_child.insert(id, None);
-        self.last_child.insert(id, None);
-        self.prev_sibling.insert(id, None);
-        self.next_sibling.insert(id, None);
-        if let Some(value) = id_attr {
-            self.id_index.insert(value, id);
-        }
-        id
+        Ok(())
     }
 }
 
@@ -529,7 +491,7 @@ mod tests {
     fn children_follow_sibling_order() {
         let mut document = Document::new();
         let parent = document.insert_element(None, "html", ElementNs::Html, vec![]);
-        document.set_root(parent);
+        document.set_root(parent).unwrap();
         let head = document.insert_element(Some(parent), "head", ElementNs::Html, vec![]);
         let body = document.insert_element(Some(parent), "body", ElementNs::Html, vec![]);
         assert_eq!(document.children(parent), vec![head, body]);
@@ -604,31 +566,33 @@ mod tests {
         let mut document = Document::new();
         let parent =
             document.insert_element(None, "div", ElementNs::Html, vec![Attr::plain("id", "x")]);
-        document.set_root(parent);
+        document.set_root(parent).unwrap();
         let a = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
         let b = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
-        assert!(document.remove_node(a));
-        assert!(!document.remove_node(a));
+        assert_eq!(document.remove_node(a), Ok(true));
+        assert_eq!(document.remove_node(a), Ok(false));
         assert_eq!(document.children(parent), vec![b]);
         assert_eq!(document.prev_sibling(b), None);
-        assert!(document.remove_node(parent));
+        assert_eq!(document.remove_node(parent), Ok(true));
         assert_eq!(document.element_by_id("x"), None);
         assert_eq!(document.root(), None);
-        assert!(document.is_empty());
+        assert!(document.node(parent).is_some());
+        assert!(document.node(a).is_some());
     }
 
     #[test]
-    fn removal_drops_descendants() {
+    fn removal_detaches_a_subtree_without_invalidating_handles() {
         let mut document = Document::new();
         let article = document.insert_element(None, "article", ElementNs::Html, vec![]);
         let section = document.insert_element(Some(article), "section", ElementNs::Html, vec![]);
         let paragraph = document.insert_element(Some(section), "p", ElementNs::Html, vec![]);
         let text = document.insert_text(Some(paragraph), "deep text");
-        assert!(document.remove_node(section));
+        assert_eq!(document.remove_node(section), Ok(true));
         assert_eq!(document.children(article), Vec::<NodeId>::new());
-        assert!(document.node(section).is_none());
-        assert!(document.node(paragraph).is_none());
-        assert!(document.node(text).is_none());
+        assert!(document.node(section).is_some());
+        assert!(document.node(paragraph).is_some());
+        assert!(document.node(text).is_some());
+        assert_eq!(document.children(section), vec![paragraph]);
         assert!(document.node(article).is_some());
         assert_eq!(document.root(), Some(article));
     }
@@ -665,7 +629,7 @@ mod tests {
     fn append_based_on_parent_node_fosters_before_sibling() {
         let mut document = Document::new();
         let body = document.insert_element(None, "body", ElementNs::Html, vec![]);
-        document.set_root(body);
+        document.set_root(body).unwrap();
         let table = document.insert_element(Some(body), "table", ElementNs::Html, vec![]);
         let row = document.insert_element(Some(table), "tr", ElementNs::Html, vec![]);
         let revolution = document.insert_element(Some(row), "div", ElementNs::Html, vec![]);
@@ -704,7 +668,7 @@ mod tests {
         let title = document.insert_element(Some(head), "title", ElementNs::Html, vec![]);
         let meta = document.insert_element(Some(head), "meta", ElementNs::Html, vec![]);
         let template = document.insert_element(None, "template", ElementNs::Html, vec![]);
-        document.reparent_children(head, Some(template));
+        document.reparent_children(head, Some(template)).unwrap();
         assert_eq!(document.children(head), Vec::<NodeId>::new());
         assert_eq!(document.children(template), vec![title, meta]);
         assert_eq!(document.parent(title), Some(template));
@@ -719,10 +683,10 @@ mod tests {
         let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
         let f1 = document.insert_element(Some(html), "frameset", ElementNs::Html, vec![]);
         let f2 = document.insert_element(Some(html), "frameset", ElementNs::Html, vec![]);
-        document.reparent_children(html, None);
+        document.reparent_children(html, None).unwrap();
         assert_eq!(document.children(html), Vec::<NodeId>::new());
         assert_eq!(document.roots(), &[html, f1, f2]);
-        assert_eq!(document.prev_sibling(f1), None);
+        assert_eq!(document.prev_sibling(f1), Some(html));
         assert_eq!(document.next_sibling(f2), None);
     }
 
@@ -769,7 +733,7 @@ mod tests {
         let div = document.insert_element(None, "div", ElementNs::Html, vec![]);
         document.add_attrs_if_missing(div, vec![Attr::plain("id", "late")]);
         assert_eq!(document.element_by_id("late"), Some(div));
-        document.remove_node(div);
+        document.remove_node(div).unwrap();
         assert_eq!(document.element_by_id("late"), None);
     }
 
@@ -780,7 +744,7 @@ mod tests {
         let a = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
         let text = document.insert_text(Some(a), "x");
         let b = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
-        document.detach(a);
+        document.detach(a).unwrap();
         assert_eq!(document.children(parent), vec![b]);
         assert_eq!(document.prev_sibling(b), None);
         assert_eq!(document.first_child(parent), Some(b));
@@ -789,7 +753,7 @@ mod tests {
         assert_eq!(document.children(a), vec![text]);
         assert!(document.node(a).is_some());
         let root = document.insert_element(None, "section", ElementNs::Html, vec![]);
-        document.detach(root);
+        document.detach(root).unwrap();
         assert_eq!(document.roots(), &[parent]);
         assert!(document.node(root).is_some());
     }
@@ -800,12 +764,12 @@ mod tests {
         let div = document.insert_element(None, "div", ElementNs::Html, vec![]);
         let span = document.insert_element(None, "span", ElementNs::Html, vec![]);
         document.insert_text(Some(span), "words");
-        document.attach(span, Some(div));
+        document.attach(span, Some(div)).unwrap();
         assert_eq!(document.children(div), vec![span]);
         assert_eq!(document.parent(span), Some(div));
         assert_eq!(document.root(), Some(div));
         let p = document.insert_element(Some(div), "p", ElementNs::Html, vec![]);
-        document.attach(span, Some(div));
+        document.attach(span, Some(div)).unwrap();
         assert_eq!(document.children(div), vec![p, span]);
         assert_eq!(document.last_child(div), Some(span));
         assert_eq!(document.prev_sibling(span), Some(p));
@@ -816,7 +780,7 @@ mod tests {
         let mut document = Document::new();
         let section = document.insert_element(None, "section", ElementNs::Html, vec![]);
         let p = document.insert_element(Some(section), "p", ElementNs::Html, vec![]);
-        document.attach(p, None);
+        document.attach(p, None).unwrap();
         assert_eq!(document.roots(), &[section, p]);
         assert_eq!(document.parent(p), None);
         assert_eq!(document.children(section), Vec::<NodeId>::new());
@@ -829,13 +793,13 @@ mod tests {
         let a = document.insert_element(Some(ul), "li", ElementNs::Html, vec![]);
         let c = document.insert_element(Some(ul), "li", ElementNs::Html, vec![]);
         let b = document.insert_element(None, "li", ElementNs::Html, vec![]);
-        document.attach_before(b, c);
+        document.attach_before(b, c).unwrap();
         assert_eq!(document.children(ul), vec![a, b, c]);
         assert_eq!(document.parent(b), Some(ul));
         assert_eq!(document.prev_sibling(b), Some(a));
         assert_eq!(document.next_sibling(a), Some(b));
         let z = document.insert_element(None, "li", ElementNs::Html, vec![]);
-        document.attach_before(z, a);
+        document.attach_before(z, a).unwrap();
         assert_eq!(document.children(ul), vec![z, a, b, c]);
         assert_eq!(document.first_child(ul), Some(z));
         assert_eq!(document.prev_sibling(z), None);
@@ -847,12 +811,12 @@ mod tests {
         let head = document.insert_element(None, "head", ElementNs::Html, vec![]);
         let body = document.insert_element(None, "body", ElementNs::Html, vec![]);
         let title = document.insert_element(None, "title", ElementNs::Html, vec![]);
-        document.attach_before(title, body);
+        document.attach_before(title, body).unwrap();
         assert_eq!(document.roots(), &[head, title, body]);
         assert_eq!(document.next_sibling(title), Some(body));
         assert_eq!(document.prev_sibling(body), Some(title));
         let meta = document.insert_element(None, "meta", ElementNs::Html, vec![]);
-        document.attach_before(meta, head);
+        document.attach_before(meta, head).unwrap();
         assert_eq!(document.roots(), &[meta, head, title, body]);
         assert_eq!(document.prev_sibling(meta), None);
     }
@@ -910,7 +874,7 @@ mod tests {
             })
         );
         let draft = document.insert_element(None, "span", ElementNs::Html, vec![]);
-        document.attach_before(draft, br);
+        document.attach_before(draft, br).unwrap();
         let final_merge = document.insert_merged_text_before(draft, "zz");
         assert_eq!(final_merge, first);
         assert_eq!(
@@ -920,5 +884,49 @@ mod tests {
             })
         );
         assert_eq!(document.children(p), vec![first, draft, br, tail, third]);
+    }
+
+    #[test]
+    fn checked_moves_reject_cycles_without_changing_the_tree() {
+        let mut document = Document::new();
+        let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
+        let child = document.insert_element(Some(root), "section", ElementNs::Html, vec![]);
+        let grandchild = document.insert_element(Some(child), "p", ElementNs::Html, vec![]);
+        assert_eq!(
+            document.attach(root, Some(grandchild)),
+            Err(DomError::Cycle)
+        );
+        assert_eq!(
+            document.attach_before(root, grandchild),
+            Err(DomError::Cycle)
+        );
+        assert_eq!(
+            document.reparent_children(root, Some(grandchild)),
+            Err(DomError::Cycle)
+        );
+        assert_eq!(document.root(), Some(root));
+        assert_eq!(document.children(root), vec![child]);
+        assert_eq!(document.children(child), vec![grandchild]);
+    }
+
+    #[test]
+    fn duplicate_ids_resolve_to_the_first_connected_element_in_tree_order() {
+        let mut document = Document::new();
+        let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
+        let first = document.insert_element(
+            Some(root),
+            "p",
+            ElementNs::Html,
+            vec![Attr::plain("id", "duplicate")],
+        );
+        let second = document.insert_element(
+            Some(root),
+            "p",
+            ElementNs::Html,
+            vec![Attr::plain("id", "duplicate")],
+        );
+        assert_eq!(document.element_by_id("duplicate"), Some(first));
+        document.remove_node(first).unwrap();
+        assert_eq!(document.element_by_id("duplicate"), Some(second));
     }
 }

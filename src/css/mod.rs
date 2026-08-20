@@ -1,5 +1,6 @@
 pub mod cascade;
 pub mod parser;
+mod selectors;
 
-pub use cascade::Cascade;
-pub use parser::{CssParser, StyleSheet};
+pub use cascade::{BasicCascade, Cascade};
+pub use parser::{CssParser, CssparserParser, Declaration, StyleRule, StyleSheet};
