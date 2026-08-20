@@ -260,10 +260,13 @@ pass rate in the updates log. (done — first run: 1829/1922 raw = 95.16%, 100% 
 - [x] Complete conditional CSS and cascade degradation: type-only `@media` with an injected screen
       context; `@import` ignored+diagnosed; table/inline-block/flex/grid→block, position→static,
       percentage heights→auto, and overflow-wrap break-word enforced. (done)
-- [ ] Complete the box model: Taffy block/content-size engine stays behind `LayoutEngine`; add CSS anonymous
-      block boxes and annotated textwrap fragments for inline cell layout; honor `box-sizing` through
-      Taffy; unbounded height, vertical inline margin/padding ignored, whitespace collapse/trim/pre,
-      viewport-width-dependent reflow.
+- [x] Complete the box model: Taffy block/content-size engine stays behind `LayoutEngine`; add CSS
+      anonymous block boxes and node-owned textwrap fragments for inline cell layout; support fixed
+      author widths plus `content-box`/`border-box` through Taffy while keeping height intrinsic and
+      unbounded; model all six supported `white-space` modes with inheritance, normalize segment
+      breaks and tab stops, ignore vertical inline edges, and reflow against the final content width.
+      Layout emits geometry and text fragments only; paint owns border glyphs and allocates touched
+      rows lazily. Individual CSS cell lengths are capped at 65,535. (done)
 - [ ] Complete paint: depth-order (bg bottom-up, borders box-drawing ≥2 cells doubled, text clipped);
       DisplayList with NodeId hit-tags; interactive-element list (`<a>`).
 - [ ] Corpus fixtures + golden screen snapshots (margins, headings, borders, links, wide chars, `pre`).
@@ -578,3 +581,20 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   bounded structured diagnostics with exact aggregate counts, nested source order, app warning
   reporting, fallback display/position/height behavior, and deliberate long-word splitting are
   covered by contracts. No dependency changes; default and `js` strict gates are green.
+- 2026-08-21 — M1-B box-model outline corrected before implementation: `box-sizing` now has the
+  required fixed author-width input; author height remains intrinsic to preserve unbounded document
+  flow; the two-state whitespace shorthand is replaced by the six accepted CSS modes with
+  inheritance; node-owned fragments replace glyph-bearing layout lines so border drawing remains a
+  paint responsibility; lengths are capped at 65,535 cells and paint uses sparse touched rows.
+  Registry refresh retained Taffy 0.13.0, textwrap 0.16.2, cssparser 0.37.0,
+  unicode-segmentation 1.13.3, and unicode-width 0.2.2.
+- 2026-08-21 — M1-B box model completed: iterative formatting-tree construction now preserves
+  nested block hierarchy and creates private anonymous runs around mixed inline/block content;
+  Taffy owns intrinsic block geometry, margin collapse, padding, one-cell borders, fixed widths,
+  and content-box/border-box sizing. Layout exports absolute border/content rectangles plus
+  text-node-owned Unicode fragments; paint owns border glyphs and allocates cell buffers only for
+  touched rows. The six accepted whitespace modes inherit and cover collapse/trim, hard breaks,
+  wrapping, 8-cell tabs, segment-break normalization, `<br>`, cross-node graphemes, zero-width
+  progress, and unbounded height. No dependency changes; 251 library, 4 binary, 3 pipeline, and 14
+  corpus tests pass under default and `js`; default/all-feature strict clippy and fmt are green.
+  M1-B remains in progress at complete paint; manual milestone smoke remains human-run.

@@ -1,21 +1,23 @@
 use taffy::prelude::{
-    AvailableSpace, Dimension, Display as TaffyDisplay, LengthPercentageAuto, Rect as TaffyRect,
-    Size as TaffySize, Style as TaffyStyle, TaffyTree,
+    AvailableSpace, BoxSizing as TaffyBoxSizing, Dimension, Display as TaffyDisplay,
+    LengthPercentage, LengthPercentageAuto, Rect as TaffyRect, Size as TaffySize,
+    Style as TaffyStyle, TaffyTree,
 };
-use textwrap::Options;
+use textwrap::core::Fragment as WrapFragment;
+use textwrap::wrap_algorithms::wrap_first_fit;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::geom::Size;
-use crate::core::style::{ComputedStyle, Display, StyleTree, WhiteSpace};
+use crate::core::style::{BoxSizing, ComputedStyle, CssWidth, Display, StyleTree, WhiteSpace};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BoxTree {
     pub width: usize,
     pub height: usize,
     pub boxes: Vec<LayoutBox>,
-    pub lines: Vec<LayoutLine>,
+    pub fragments: Vec<TextFragment>,
     pub links: Vec<LinkBox>,
 }
 
@@ -30,12 +32,14 @@ pub struct LayoutRect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutBox {
     pub node: NodeId,
-    pub rect: LayoutRect,
+    pub border_rect: LayoutRect,
+    pub content_rect: LayoutRect,
     pub depth: usize,
+    pub border: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LayoutLine {
+pub struct TextFragment {
     pub node: NodeId,
     pub col: usize,
     pub row: usize,
@@ -58,149 +62,326 @@ pub struct TaffyLayoutEngine;
 
 impl LayoutEngine for TaffyLayoutEngine {
     fn layout(&self, document: &Document, styles: &StyleTree, viewport: Size) -> BoxTree {
-        let width = usize::from(viewport.cols).max(1);
-        let mut drafts = Vec::new();
+        let width = usize::from(viewport.cols);
+        let flow = build_flow_tree(document, styles);
         let mut links = Vec::new();
         for root in document.roots() {
             collect_links(document, styles, *root, &mut links);
-            collect_blocks(document, styles, *root, &mut drafts, 0);
         }
         let mut taffy: TaffyTree<usize> = TaffyTree::new();
-        let mut nodes = Vec::with_capacity(drafts.len());
-        for (index, draft) in drafts.iter_mut().enumerate() {
-            let chrome = usize::from(draft.style.border) * 2
-                + draft.style.padding.left
-                + draft.style.padding.right;
-            let content_width = width
-                .saturating_sub(draft.style.margin.left + draft.style.margin.right + chrome)
-                .max(1);
-            draft.lines = wrap_text(&draft.text, content_width, draft.style.white_space);
-            let height = draft.lines.len()
-                + draft.style.padding.top
-                + draft.style.padding.bottom
-                + usize::from(draft.style.border) * 2;
-            let style = TaffyStyle {
-                display: TaffyDisplay::Block,
-                size: TaffySize {
-                    width: Dimension::percent(1.0),
-                    height: Dimension::length(height as f32),
-                },
-                margin: TaffyRect {
-                    left: LengthPercentageAuto::length(draft.style.margin.left as f32),
-                    right: LengthPercentageAuto::length(draft.style.margin.right as f32),
-                    top: LengthPercentageAuto::length(draft.style.margin.top as f32),
-                    bottom: LengthPercentageAuto::length(draft.style.margin.bottom as f32),
-                },
-                ..Default::default()
-            };
-            nodes.push(
+        let mut taffy_nodes = vec![None; flow.len()];
+        for index in (0..flow.len()).rev() {
+            let style = taffy_style(&flow[index], index == 0, width);
+            let node = if !flow[index].inline.is_empty() {
                 taffy
                     .new_leaf_with_context(style, index)
-                    .expect("taffy leaf"),
-            );
+                    .expect("taffy measured leaf")
+            } else {
+                let children: Vec<_> = flow[index]
+                    .children
+                    .iter()
+                    .map(|child| taffy_nodes[*child].expect("taffy child"))
+                    .collect();
+                taffy
+                    .new_with_children(style, &children)
+                    .expect("taffy block")
+            };
+            taffy_nodes[index] = Some(node);
         }
-        let root = taffy
-            .new_with_children(
-                TaffyStyle {
-                    display: TaffyDisplay::Block,
-                    size: TaffySize {
-                        width: Dimension::length(width as f32),
-                        height: Dimension::auto(),
-                    },
-                    ..Default::default()
-                },
-                &nodes,
-            )
-            .expect("taffy root");
+        let root = taffy_nodes[0].expect("taffy root");
         taffy
-            .compute_layout(
+            .compute_layout_with_measure(
                 root,
                 TaffySize {
                     width: AvailableSpace::Definite(width as f32),
                     height: AvailableSpace::MaxContent,
                 },
+                |known, available, _, context, _| {
+                    let Some(index) = context.map(|context| *context) else {
+                        return TaffySize::ZERO;
+                    };
+                    let natural = intrinsic_width(&flow[index].inline);
+                    let measured_width = known.width.unwrap_or_else(|| match available.width {
+                        AvailableSpace::Definite(value) => value,
+                        AvailableSpace::MinContent => min_content_width(&flow[index].inline) as f32,
+                        AvailableSpace::MaxContent => natural as f32,
+                    });
+                    let lines =
+                        format_inline(&flow[index].inline, measured_width.max(0.0) as usize);
+                    TaffySize {
+                        width: known.width.unwrap_or(measured_width),
+                        height: known.height.unwrap_or(lines.len() as f32),
+                    }
+                },
             )
             .expect("taffy block layout");
 
+        let root_height = taffy
+            .layout(root)
+            .expect("root layout")
+            .size
+            .height
+            .max(0.0) as usize;
         let mut tree = BoxTree {
             width,
-            height: taffy.layout(root).expect("root layout").size.height.ceil() as usize,
+            height: root_height,
             links,
             ..Default::default()
         };
-        for (draft, node) in drafts.iter().zip(nodes) {
-            let layout = taffy.layout(node).expect("leaf layout");
-            let rect = LayoutRect {
-                col: layout.location.x.max(0.0).round() as usize,
-                row: layout.location.y.max(0.0).round() as usize,
-                width: layout.size.width.max(0.0).round() as usize,
-                height: layout.size.height.max(0.0).round() as usize,
-            };
-            tree.boxes.push(LayoutBox {
-                node: draft.node,
-                rect,
-                depth: draft.depth,
-            });
-            append_box_lines(&mut tree.lines, draft, rect);
+        let mut stack = vec![(0usize, 0.0f32, 0.0f32)];
+        while let Some((index, parent_col, parent_row)) = stack.pop() {
+            let node = taffy_nodes[index].expect("taffy node");
+            let layout = *taffy.layout(node).expect("node layout");
+            let absolute_col = parent_col + layout.location.x;
+            let absolute_row = parent_row + layout.location.y;
+            if let Some(owner) = flow[index].owner {
+                let border_rect = layout_rect(absolute_col, absolute_row, layout.size);
+                let left = layout.border.left + layout.padding.left;
+                let right = layout.border.right + layout.padding.right;
+                let top = layout.border.top + layout.padding.top;
+                let bottom = layout.border.bottom + layout.padding.bottom;
+                let content_rect = layout_rect(
+                    absolute_col + left,
+                    absolute_row + top,
+                    TaffySize {
+                        width: (layout.size.width - left - right).max(0.0),
+                        height: (layout.size.height - top - bottom).max(0.0),
+                    },
+                );
+                tree.height = tree
+                    .height
+                    .max(border_rect.row.saturating_add(border_rect.height));
+                tree.boxes.push(LayoutBox {
+                    node: owner,
+                    border_rect,
+                    content_rect,
+                    depth: flow[index].depth,
+                    border: flow[index].style.border,
+                });
+            }
+            if !flow[index].inline.is_empty() {
+                let rect = layout_rect(absolute_col, absolute_row, layout.size);
+                append_fragments(
+                    &mut tree.fragments,
+                    &flow[index].inline,
+                    rect.col,
+                    rect.row,
+                    rect.width,
+                );
+                tree.height = tree.height.max(rect.row.saturating_add(rect.height));
+            }
+            for child in flow[index].children.iter().rev() {
+                stack.push((*child, absolute_col, absolute_row));
+            }
         }
+        tree.boxes.sort_by_key(|layout_box| layout_box.depth);
+        tree.fragments
+            .sort_by_key(|fragment| (fragment.row, fragment.col, fragment.depth));
         tree
     }
 }
 
-struct BlockDraft {
+#[derive(Clone)]
+struct FlowBox {
+    owner: Option<NodeId>,
+    style: ComputedStyle,
+    depth: usize,
+    inline: Vec<InlinePiece>,
+    children: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct InlinePiece {
     node: NodeId,
     text: String,
-    lines: Vec<String>,
-    style: ComputedStyle,
+    white_space: WhiteSpace,
     depth: usize,
 }
 
-fn collect_blocks(
-    document: &Document,
-    styles: &StyleTree,
-    id: NodeId,
-    drafts: &mut Vec<BlockDraft>,
-    depth: usize,
-) {
-    let mut stack = vec![(id, depth)];
-    while let Some((id, depth)) = stack.pop() {
-        match document.node(id) {
-            Some(Node::Element { name, ns, .. }) => {
-                let style = styles.get(id);
-                if style.display == Display::None {
-                    continue;
+enum FlowEvent {
+    Enter(NodeId, WhiteSpace, usize),
+    RightEdge(NodeId, ComputedStyle, usize),
+}
+
+fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
+    let mut flow = vec![FlowBox {
+        owner: None,
+        style: ComputedStyle {
+            display: Display::Block,
+            ..Default::default()
+        },
+        depth: 0,
+        inline: Vec::new(),
+        children: Vec::new(),
+    }];
+    let mut tasks = vec![(0usize, None)];
+    while let Some((flow_index, container)) = tasks.pop() {
+        let inherited = container
+            .map(|node| styles.get(node).white_space)
+            .unwrap_or_default();
+        let depth = container.map(|_| flow[flow_index].depth + 1).unwrap_or(0);
+        let roots = container
+            .map(|node| document.children(node))
+            .unwrap_or_else(|| document.roots().to_vec());
+        let mut events: Vec<_> = roots
+            .into_iter()
+            .rev()
+            .map(|node| FlowEvent::Enter(node, inherited, depth))
+            .collect();
+        let mut buffer = Vec::new();
+        if let Some(node) = container {
+            append_prefix(
+                document,
+                node,
+                inherited,
+                flow[flow_index].depth,
+                &mut buffer,
+            );
+        }
+        let mut children = Vec::new();
+        let mut nested_tasks = Vec::new();
+        while let Some(event) = events.pop() {
+            match event {
+                FlowEvent::RightEdge(node, style, depth) => {
+                    append_edge(node, style, false, depth, &mut buffer);
                 }
-                if style.display == Display::Block {
-                    let mut text = inline_text(document, styles, id);
-                    if *ns == ElementNs::Html {
-                        if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-                            let level = name[1..].parse::<usize>().unwrap_or(1);
-                            text = format!("{} {text}", "#".repeat(level));
-                        } else if name == "li" {
-                            text = format!("• {text}");
-                        } else if name == "hr" {
-                            text = "─".to_string();
+                FlowEvent::Enter(node, inherited, depth) => match document.node(node) {
+                    Some(Node::Text { data }) => buffer.push(InlinePiece {
+                        node,
+                        text: normalize_segment_breaks(data),
+                        white_space: inherited,
+                        depth,
+                    }),
+                    Some(Node::Element { name, .. }) => {
+                        let style = styles.get(node);
+                        if style.display == Display::None {
+                            continue;
+                        }
+                        if style.display == Display::Block {
+                            flush_inline(&mut flow, &mut children, &mut buffer, depth);
+                            let child = flow.len();
+                            flow.push(FlowBox {
+                                owner: Some(node),
+                                style,
+                                depth,
+                                inline: Vec::new(),
+                                children: Vec::new(),
+                            });
+                            children.push(child);
+                            nested_tasks.push((child, Some(node)));
+                        } else if name == "br" {
+                            buffer.push(InlinePiece {
+                                node,
+                                text: "\n".to_string(),
+                                white_space: WhiteSpace::Pre,
+                                depth,
+                            });
+                        } else {
+                            append_edge(node, style, true, depth, &mut buffer);
+                            events.push(FlowEvent::RightEdge(node, style, depth));
+                            events.extend(document.children(node).into_iter().rev().map(|child| {
+                                FlowEvent::Enter(child, style.white_space, depth + 1)
+                            }));
                         }
                     }
-                    if !text.trim().is_empty() || style.border {
-                        drafts.push(BlockDraft {
-                            node: id,
-                            text,
-                            lines: Vec::new(),
-                            style,
-                            depth,
-                        });
-                    }
-                }
-                let children = document.children(id);
-                stack.extend(children.into_iter().rev().map(|child| (child, depth + 1)));
+                    Some(Node::DocumentFragment) => events.extend(
+                        document
+                            .children(node)
+                            .into_iter()
+                            .rev()
+                            .map(|child| FlowEvent::Enter(child, inherited, depth)),
+                    ),
+                    _ => {}
+                },
             }
-            Some(Node::DocumentFragment) => {
-                let children = document.children(id);
-                stack.extend(children.into_iter().rev().map(|child| (child, depth)));
-            }
-            _ => {}
         }
+        flush_inline(&mut flow, &mut children, &mut buffer, depth);
+        flow[flow_index].children = children;
+        tasks.extend(nested_tasks.into_iter().rev());
+    }
+    flow
+}
+
+fn flush_inline(
+    flow: &mut Vec<FlowBox>,
+    children: &mut Vec<usize>,
+    buffer: &mut Vec<InlinePiece>,
+    depth: usize,
+) {
+    if buffer.is_empty()
+        || buffer.iter().all(|piece| {
+            matches!(
+                piece.white_space,
+                WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
+            ) && piece.text.chars().all(char::is_whitespace)
+        })
+    {
+        buffer.clear();
+        return;
+    }
+    let child = flow.len();
+    flow.push(FlowBox {
+        owner: None,
+        style: ComputedStyle {
+            display: Display::Block,
+            ..Default::default()
+        },
+        depth,
+        inline: std::mem::take(buffer),
+        children: Vec::new(),
+    });
+    children.push(child);
+}
+
+fn append_prefix(
+    document: &Document,
+    node: NodeId,
+    white_space: WhiteSpace,
+    depth: usize,
+    buffer: &mut Vec<InlinePiece>,
+) {
+    let Some(Node::Element { name, ns, .. }) = document.node(node) else {
+        return;
+    };
+    if *ns != ElementNs::Html {
+        return;
+    }
+    let text = if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+        format!("{} ", "#".repeat(name[1..].parse::<usize>().unwrap_or(1)))
+    } else if name == "li" {
+        "• ".to_string()
+    } else if name == "hr" {
+        "─".to_string()
+    } else {
+        return;
+    };
+    buffer.push(InlinePiece {
+        node,
+        text,
+        white_space,
+        depth,
+    });
+}
+
+fn append_edge(
+    node: NodeId,
+    style: ComputedStyle,
+    left: bool,
+    depth: usize,
+    buffer: &mut Vec<InlinePiece>,
+) {
+    let cells = if left {
+        style.margin.left.saturating_add(style.padding.left)
+    } else {
+        style.margin.right.saturating_add(style.padding.right)
+    };
+    if cells > 0 {
+        buffer.push(InlinePiece {
+            node,
+            text: " ".repeat(cells),
+            white_space: WhiteSpace::BreakSpaces,
+            depth,
+        });
     }
 }
 
@@ -210,117 +391,499 @@ fn collect_links(document: &Document, styles: &StyleTree, id: NodeId, links: &mu
         if styles.get(id).display == Display::None {
             continue;
         }
-        if let Some(Node::Element { name, ns, attrs }) = document.node(id) {
-            if *ns == ElementNs::Html
-                && name == "a"
-                && let Some(href) = attrs
-                    .iter()
-                    .find(|attr| attr.ns == AttrNs::None && attr.name == "href")
-            {
-                links.push(LinkBox {
-                    node: id,
-                    href: href.value.clone(),
-                });
-            }
-            let children = document.children(id);
-            stack.extend(children.into_iter().rev());
-        }
-    }
-}
-
-fn inline_text(document: &Document, styles: &StyleTree, id: NodeId) -> String {
-    let mut text = String::new();
-    let mut stack: Vec<_> = document.children(id).into_iter().rev().collect();
-    while let Some(child) = stack.pop() {
-        match document.node(child) {
-            Some(Node::Text { data }) => text.push_str(data),
-            Some(Node::Element { .. }) if styles.get(child).display == Display::None => {}
-            Some(Node::Element { .. }) if styles.get(child).display == Display::Block => {}
-            Some(Node::Element { name, .. }) => {
-                if name == "br" {
-                    text.push('\n');
-                } else {
-                    let children = document.children(child);
-                    stack.extend(children.into_iter().rev());
+        match document.node(id) {
+            Some(Node::Element { name, ns, attrs }) => {
+                if *ns == ElementNs::Html
+                    && name == "a"
+                    && let Some(href) = attrs
+                        .iter()
+                        .find(|attr| attr.ns == AttrNs::None && attr.name == "href")
+                {
+                    links.push(LinkBox {
+                        node: id,
+                        href: href.value.clone(),
+                    });
                 }
+                let children = document.children(id);
+                stack.extend(children.into_iter().rev());
+            }
+            Some(Node::DocumentFragment) => {
+                let children = document.children(id);
+                stack.extend(children.into_iter().rev());
             }
             _ => {}
         }
     }
-    text
 }
 
-fn wrap_text(text: &str, width: usize, white_space: WhiteSpace) -> Vec<String> {
-    if white_space == WhiteSpace::Pre {
-        return text.split('\n').map(str::to_string).collect();
+fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> TaffyStyle {
+    if root {
+        return TaffyStyle {
+            display: TaffyDisplay::Block,
+            box_sizing: TaffyBoxSizing::BorderBox,
+            size: TaffySize {
+                width: Dimension::length(viewport_width as f32),
+                height: Dimension::auto(),
+            },
+            ..Default::default()
+        };
     }
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return Vec::new();
+    if flow.owner.is_none() {
+        return TaffyStyle {
+            display: TaffyDisplay::Block,
+            size: TaffySize {
+                width: Dimension::auto(),
+                height: Dimension::auto(),
+            },
+            ..Default::default()
+        };
     }
-    textwrap::wrap(&collapsed, Options::new(width).break_words(true))
-        .into_iter()
-        .map(|line| line.into_owned())
+    let border = if flow.style.border { 1.0 } else { 0.0 };
+    TaffyStyle {
+        display: TaffyDisplay::Block,
+        box_sizing: match flow.style.box_sizing {
+            BoxSizing::ContentBox => TaffyBoxSizing::ContentBox,
+            BoxSizing::BorderBox => TaffyBoxSizing::BorderBox,
+        },
+        size: TaffySize {
+            width: match flow.style.width {
+                CssWidth::Auto => Dimension::auto(),
+                CssWidth::Cells(value) => Dimension::length(value as f32),
+            },
+            height: Dimension::auto(),
+        },
+        margin: TaffyRect {
+            left: LengthPercentageAuto::length(flow.style.margin.left as f32),
+            right: LengthPercentageAuto::length(flow.style.margin.right as f32),
+            top: LengthPercentageAuto::length(flow.style.margin.top as f32),
+            bottom: LengthPercentageAuto::length(flow.style.margin.bottom as f32),
+        },
+        padding: TaffyRect {
+            left: LengthPercentage::length(flow.style.padding.left as f32),
+            right: LengthPercentage::length(flow.style.padding.right as f32),
+            top: LengthPercentage::length(flow.style.padding.top as f32),
+            bottom: LengthPercentage::length(flow.style.padding.bottom as f32),
+        },
+        border: TaffyRect {
+            left: LengthPercentage::length(border),
+            right: LengthPercentage::length(border),
+            top: LengthPercentage::length(border),
+            bottom: LengthPercentage::length(border),
+        },
+        ..Default::default()
+    }
+}
+
+fn layout_rect(col: f32, row: f32, size: TaffySize<f32>) -> LayoutRect {
+    LayoutRect {
+        col: col.max(0.0).round() as usize,
+        row: row.max(0.0).round() as usize,
+        width: size.width.max(0.0).round() as usize,
+        height: size.height.max(0.0).round() as usize,
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Glyph {
+    node: NodeId,
+    text: String,
+    width: usize,
+    depth: usize,
+    white_space: WhiteSpace,
+}
+
+#[derive(Debug)]
+struct Word {
+    glyphs: Vec<Glyph>,
+    whitespace: Option<Glyph>,
+}
+
+impl WrapFragment for Word {
+    fn width(&self) -> f64 {
+        self.glyphs.iter().map(|glyph| glyph.width).sum::<usize>() as f64
+    }
+
+    fn whitespace_width(&self) -> f64 {
+        self.whitespace.as_ref().map_or(0, |glyph| glyph.width) as f64
+    }
+
+    fn penalty_width(&self) -> f64 {
+        0.0
+    }
+}
+
+fn flatten_glyphs(pieces: &[InlinePiece]) -> Vec<Glyph> {
+    let mut source = String::new();
+    let mut spans = Vec::new();
+    for piece in pieces {
+        let start = source.len();
+        source.push_str(&piece.text);
+        spans.push((
+            start,
+            source.len(),
+            piece.node,
+            piece.white_space,
+            piece.depth,
+        ));
+    }
+    let mut span = 0;
+    source
+        .grapheme_indices(true)
+        .map(|(offset, text)| {
+            while span + 1 < spans.len() && offset >= spans[span].1 {
+                span += 1;
+            }
+            let (_, _, node, white_space, depth) = spans[span];
+            Glyph {
+                node,
+                text: text.to_string(),
+                width: UnicodeWidthStr::width(text),
+                depth,
+                white_space,
+            }
+        })
         .collect()
 }
 
-fn append_box_lines(lines: &mut Vec<LayoutLine>, draft: &BlockDraft, rect: LayoutRect) {
-    let border = usize::from(draft.style.border);
-    if draft.style.border && rect.width >= 2 {
-        lines.push(LayoutLine {
-            node: draft.node,
-            col: rect.col,
-            row: rect.row,
-            text: format!("┌{}┐", "─".repeat(rect.width.saturating_sub(2))),
-            depth: draft.depth,
-        });
-    }
-    let content_col = rect.col + border + draft.style.padding.left;
-    let content_row = rect.row + border + draft.style.padding.top;
-    for (offset, text) in draft.lines.iter().enumerate() {
-        let text = if draft.style.border && rect.width >= 2 {
-            let inner = rect.width.saturating_sub(2);
-            let text = fit_cells(text, inner);
-            let padding = inner.saturating_sub(UnicodeWidthStr::width(text.as_str()));
-            format!("│{text}{}│", " ".repeat(padding))
-        } else {
-            text.clone()
-        };
-        lines.push(LayoutLine {
-            node: draft.node,
-            col: if draft.style.border {
-                rect.col
-            } else {
-                content_col
-            },
-            row: content_row + offset,
-            text,
-            depth: draft.depth,
-        });
-    }
-    if draft.style.border && rect.width >= 2 {
-        lines.push(LayoutLine {
-            node: draft.node,
-            col: rect.col,
-            row: rect.row + rect.height.saturating_sub(1),
-            text: format!("└{}┘", "─".repeat(rect.width.saturating_sub(2))),
-            depth: draft.depth,
-        });
+fn format_inline(pieces: &[InlinePiece], width: usize) -> Vec<Vec<Glyph>> {
+    let glyphs = flatten_glyphs(pieces);
+    let mode = glyphs.first().map(|glyph| glyph.white_space);
+    if glyphs.iter().all(|glyph| Some(glyph.white_space) == mode) {
+        match mode.unwrap_or_default() {
+            WhiteSpace::Normal => format_collapsed(&glyphs, width, true),
+            WhiteSpace::NoWrap => format_collapsed(&glyphs, width, false),
+            WhiteSpace::Pre => format_preserved(&glyphs, width, false),
+            WhiteSpace::PreWrap | WhiteSpace::BreakSpaces => format_preserved(&glyphs, width, true),
+            WhiteSpace::PreLine => format_pre_line(&glyphs, width),
+        }
+    } else {
+        format_mixed(&glyphs, width)
     }
 }
 
-fn fit_cells(text: &str, width: usize) -> String {
-    let mut fitted = String::new();
-    let mut used = 0;
-    for grapheme in text.graphemes(true) {
-        let cells = UnicodeWidthStr::width(grapheme);
-        if used + cells > width {
-            break;
+fn format_collapsed(glyphs: &[Glyph], width: usize, wrap: bool) -> Vec<Vec<Glyph>> {
+    let mut words = Vec::new();
+    let mut current = Vec::new();
+    let mut whitespace = None;
+    for glyph in glyphs {
+        if glyph.text.chars().all(char::is_whitespace) {
+            if !current.is_empty() {
+                let mut space = glyph.clone();
+                space.text = " ".to_string();
+                space.width = 1;
+                whitespace = Some(space);
+            }
+        } else {
+            if whitespace.is_some() {
+                words.push(Word {
+                    glyphs: std::mem::take(&mut current),
+                    whitespace: whitespace.take(),
+                });
+            }
+            current.push(glyph.clone());
         }
-        fitted.push_str(grapheme);
-        used += cells;
     }
-    fitted
+    if !current.is_empty() {
+        words.push(Word {
+            glyphs: current,
+            whitespace: None,
+        });
+    }
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let words = split_long_words(words, width.max(1));
+    if !wrap {
+        return vec![join_words(&words)];
+    }
+    wrap_first_fit(&words, &[width.max(1) as f64])
+        .into_iter()
+        .map(join_words)
+        .collect()
+}
+
+fn split_long_words(words: Vec<Word>, width: usize) -> Vec<Word> {
+    let mut split = Vec::new();
+    for word in words {
+        let mut chunk = Vec::new();
+        let mut used = 0usize;
+        for glyph in word.glyphs {
+            if !chunk.is_empty() && used.saturating_add(glyph.width) > width {
+                split.push(Word {
+                    glyphs: std::mem::take(&mut chunk),
+                    whitespace: None,
+                });
+                used = 0;
+            }
+            used = used.saturating_add(glyph.width);
+            chunk.push(glyph);
+        }
+        split.push(Word {
+            glyphs: chunk,
+            whitespace: word.whitespace,
+        });
+    }
+    split
+}
+
+fn join_words(words: &[Word]) -> Vec<Glyph> {
+    let mut glyphs = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        glyphs.extend(word.glyphs.iter().cloned());
+        if index + 1 < words.len()
+            && let Some(whitespace) = &word.whitespace
+        {
+            glyphs.push(whitespace.clone());
+        }
+    }
+    glyphs
+}
+
+fn format_pre_line(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
+    let mut lines = Vec::new();
+    let mut segment = Vec::new();
+    for glyph in glyphs {
+        if glyph.text == "\n" {
+            let wrapped = format_collapsed(&segment, width, true);
+            if wrapped.is_empty() {
+                lines.push(Vec::new());
+            } else {
+                lines.extend(wrapped);
+            }
+            segment.clear();
+        } else {
+            segment.push(glyph.clone());
+        }
+    }
+    let wrapped = format_collapsed(&segment, width, true);
+    if wrapped.is_empty()
+        && !glyphs.is_empty()
+        && glyphs.last().is_some_and(|glyph| glyph.text == "\n")
+    {
+        lines.push(Vec::new());
+    } else {
+        lines.extend(wrapped);
+    }
+    lines
+}
+
+fn format_preserved(glyphs: &[Glyph], width: usize, wrap: bool) -> Vec<Vec<Glyph>> {
+    let mut items = Vec::new();
+    for glyph in glyphs {
+        if glyph.text == "\n" {
+            items.push(LineItem::Break);
+        } else if glyph.text == "\t" {
+            items.push(LineItem::Tab(glyph.clone(), wrap));
+        } else {
+            items.push(LineItem::Glyph(glyph.clone(), wrap, false));
+        }
+    }
+    layout_items(items, width)
+}
+
+fn format_mixed(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
+    let mut items = Vec::new();
+    let mut pending = None;
+    let mut has_content = false;
+    for glyph in glyphs {
+        let collapses = matches!(
+            glyph.white_space,
+            WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
+        );
+        if collapses && glyph.text.chars().all(char::is_whitespace) {
+            if glyph.white_space == WhiteSpace::PreLine && glyph.text == "\n" {
+                pending = None;
+                items.push(LineItem::Break);
+                has_content = false;
+            } else if has_content {
+                let mut space = glyph.clone();
+                space.text = " ".to_string();
+                space.width = 1;
+                pending = Some(space);
+            }
+            continue;
+        }
+        if let Some(space) = pending.take() {
+            let wraps = space.white_space != WhiteSpace::NoWrap;
+            items.push(LineItem::Glyph(space, wraps, true));
+        }
+        if glyph.text == "\n" {
+            items.push(LineItem::Break);
+            has_content = false;
+        } else if glyph.text == "\t" {
+            let wraps = matches!(
+                glyph.white_space,
+                WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
+            );
+            items.push(LineItem::Tab(glyph.clone(), wraps));
+            has_content = true;
+        } else {
+            let wraps = matches!(
+                glyph.white_space,
+                WhiteSpace::Normal
+                    | WhiteSpace::PreWrap
+                    | WhiteSpace::PreLine
+                    | WhiteSpace::BreakSpaces
+            );
+            items.push(LineItem::Glyph(glyph.clone(), wraps, false));
+            has_content = true;
+        }
+    }
+    layout_items(items, width)
+}
+
+enum LineItem {
+    Glyph(Glyph, bool, bool),
+    Tab(Glyph, bool),
+    Break,
+}
+
+fn layout_items(items: Vec<LineItem>, width: usize) -> Vec<Vec<Glyph>> {
+    let width = width.max(1);
+    let mut state = LineState::default();
+    let mut ended_with_break = false;
+    for item in items {
+        match item {
+            LineItem::Break => {
+                trim_collapsed(&mut state.line);
+                state.lines.push(std::mem::take(&mut state.line));
+                state.used = 0;
+                state.last_break = None;
+                ended_with_break = true;
+            }
+            LineItem::Tab(glyph, wrap) => {
+                ended_with_break = false;
+                let count = 8 - state.used % 8;
+                for _ in 0..count {
+                    let mut space = glyph.clone();
+                    space.text = " ".to_string();
+                    space.width = 1;
+                    push_glyph(space, wrap, false, width, &mut state);
+                }
+            }
+            LineItem::Glyph(glyph, wrap, trimmable) => {
+                ended_with_break = false;
+                push_glyph(glyph, wrap, trimmable, width, &mut state);
+            }
+        }
+    }
+    trim_collapsed(&mut state.line);
+    if !state.line.is_empty() || state.lines.is_empty() || ended_with_break {
+        state.lines.push(state.line);
+    }
+    state.lines
+}
+
+#[derive(Default)]
+struct LineState {
+    line: Vec<Glyph>,
+    used: usize,
+    last_break: Option<usize>,
+    lines: Vec<Vec<Glyph>>,
+}
+
+fn push_glyph(glyph: Glyph, wrap: bool, trimmable: bool, width: usize, state: &mut LineState) {
+    if wrap && !state.line.is_empty() && state.used.saturating_add(glyph.width) > width {
+        if let Some(index) = state.last_break.take() {
+            let remainder = state.line.split_off(index);
+            trim_collapsed(&mut state.line);
+            state.lines.push(std::mem::take(&mut state.line));
+            state.line = remainder;
+            state.used = state.line.iter().map(|glyph| glyph.width).sum();
+        } else {
+            trim_collapsed(&mut state.line);
+            state.lines.push(std::mem::take(&mut state.line));
+            state.used = 0;
+        }
+        state.last_break = state
+            .line
+            .iter()
+            .rposition(is_break_opportunity)
+            .map(|index| index + 1);
+        if !state.line.is_empty() && state.used.saturating_add(glyph.width) > width {
+            state.lines.push(std::mem::take(&mut state.line));
+            state.used = 0;
+            state.last_break = None;
+        }
+    }
+    if trimmable && state.line.is_empty() {
+        return;
+    }
+    state.used = state.used.saturating_add(glyph.width);
+    let break_after = wrap && is_break_opportunity(&glyph);
+    state.line.push(glyph);
+    if break_after {
+        state.last_break = Some(state.line.len());
+    }
+}
+
+fn is_break_opportunity(glyph: &Glyph) -> bool {
+    glyph.text.chars().all(char::is_whitespace) || !glyph.text.is_ascii()
+}
+
+fn trim_collapsed(line: &mut Vec<Glyph>) {
+    while line.last().is_some_and(|glyph| {
+        glyph.text == " "
+            && matches!(
+                glyph.white_space,
+                WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
+            )
+    }) {
+        line.pop();
+    }
+}
+
+fn intrinsic_width(pieces: &[InlinePiece]) -> usize {
+    format_inline(pieces, usize::MAX / 4)
+        .iter()
+        .map(|line| line.iter().map(|glyph| glyph.width).sum())
+        .max()
+        .unwrap_or(0)
+}
+
+fn min_content_width(pieces: &[InlinePiece]) -> usize {
+    flatten_glyphs(pieces)
+        .iter()
+        .map(|glyph| glyph.width)
+        .max()
+        .unwrap_or(0)
+}
+
+fn append_fragments(
+    fragments: &mut Vec<TextFragment>,
+    pieces: &[InlinePiece],
+    col: usize,
+    row: usize,
+    width: usize,
+) {
+    for (row_offset, line) in format_inline(pieces, width).into_iter().enumerate() {
+        let mut current_col = col;
+        for glyph in line {
+            if let Some(last) = fragments.last_mut()
+                && last.node == glyph.node
+                && last.row == row + row_offset
+                && last.depth == glyph.depth
+                && last.col + UnicodeWidthStr::width(last.text.as_str()) == current_col
+            {
+                last.text.push_str(&glyph.text);
+            } else {
+                fragments.push(TextFragment {
+                    node: glyph.node,
+                    col: current_col,
+                    row: row + row_offset,
+                    text: glyph.text,
+                    depth: glyph.depth,
+                });
+            }
+            current_col = current_col.saturating_add(glyph.width);
+        }
+    }
+}
+
+fn normalize_segment_breaks(source: &str) -> String {
+    source
+        .replace("\r\n", "\n")
+        .replace(['\r', '\u{000c}'], "\n")
 }
 
 #[cfg(test)]
@@ -337,6 +900,13 @@ mod tests {
         document.insert_text(Some(p), text);
         let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         (document, styles)
+    }
+
+    fn fragment_text(tree: &BoxTree) -> Vec<&str> {
+        tree.fragments
+            .iter()
+            .map(|fragment| fragment.text.as_str())
+            .collect()
     }
 
     proptest! {
@@ -390,9 +960,12 @@ mod tests {
         document.insert_text(Some(p), "one two three four");
         let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 9, rows: 5 });
-        let text: Vec<&str> = tree.lines.iter().map(|line| line.text.as_str()).collect();
-        assert_eq!(text, vec!["one two", "three", "four"]);
-        assert!(!text.iter().any(|line| line.contains("hidden")));
+        assert_eq!(fragment_text(&tree), vec!["one two", "three", "four"]);
+        assert!(
+            !fragment_text(&tree)
+                .iter()
+                .any(|line| line.contains("hidden"))
+        );
     }
 
     #[test]
@@ -403,13 +976,7 @@ mod tests {
         let sheet = CssparserParser.parse("p { overflow-wrap: normal }");
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
-        assert_eq!(
-            tree.lines
-                .iter()
-                .map(|line| line.text.as_str())
-                .collect::<Vec<_>>(),
-            vec!["abcd", "efgh", "ijk"]
-        );
+        assert_eq!(fragment_text(&tree), vec!["abcd", "efgh", "ijk"]);
     }
 
     #[test]
@@ -419,13 +986,7 @@ mod tests {
         document.insert_text(Some(pre), "  a\n b");
         let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
-        assert_eq!(
-            tree.lines
-                .iter()
-                .map(|line| line.text.as_str())
-                .collect::<Vec<_>>(),
-            vec!["  a", " b"]
-        );
+        assert_eq!(fragment_text(&tree), vec!["  a", " b"]);
     }
 
     #[test]
@@ -468,7 +1029,7 @@ mod tests {
             },
         );
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
-        assert_eq!(tree.lines[0].text, "deep");
+        assert_eq!(fragment_text(&tree), vec!["deep"]);
     }
 
     #[test]
@@ -486,7 +1047,165 @@ mod tests {
             },
         );
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 6, rows: 5 });
-        assert_eq!(tree.lines[1].text, "│界x │");
-        assert_eq!(UnicodeWidthStr::width(tree.lines[1].text.as_str()), 6);
+        let display = BasicPainter.paint(&tree);
+        assert_eq!(display.lines[1], "│界x │");
+        assert_eq!(UnicodeWidthStr::width(display.lines[1].as_str()), 6);
+    }
+
+    #[test]
+    fn mixed_inline_and_block_children_create_ordered_anonymous_runs() {
+        let mut document = Document::new();
+        let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+        let before = document.insert_text(Some(outer), "before");
+        let inner = document.insert_element(Some(outer), "p", ElementNs::Html, vec![]);
+        let inside = document.insert_text(Some(inner), "inside");
+        let after = document.insert_text(Some(outer), "after");
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 1 });
+        assert_eq!(
+            tree.fragments
+                .iter()
+                .map(|fragment| fragment.node)
+                .collect::<Vec<_>>(),
+            vec![before, inside, after]
+        );
+        assert_eq!(fragment_text(&tree), vec!["before", "inside", "after"]);
+        let outer_box = tree
+            .boxes
+            .iter()
+            .find(|layout_box| layout_box.node == outer)
+            .unwrap();
+        let inner_box = tree
+            .boxes
+            .iter()
+            .find(|layout_box| layout_box.node == inner)
+            .unwrap();
+        assert!(inner_box.border_rect.row >= outer_box.content_rect.row);
+        assert!(
+            inner_box.border_rect.row + inner_box.border_rect.height
+                <= outer_box.content_rect.row + outer_box.content_rect.height
+        );
+    }
+
+    #[test]
+    fn box_sizing_changes_fixed_width_border_geometry() {
+        let mut document = Document::new();
+        let content = document.insert_element(
+            None,
+            "div",
+            ElementNs::Html,
+            vec![crate::core::dom::Attr::plain(
+                "style",
+                "width: 6px; padding: 1px; border: solid; box-sizing: content-box",
+            )],
+        );
+        document.insert_text(Some(content), "x");
+        let border = document.insert_element(
+            None,
+            "div",
+            ElementNs::Html,
+            vec![crate::core::dom::Attr::plain(
+                "style",
+                "width: 6px; padding: 1px; border: solid; box-sizing: border-box",
+            )],
+        );
+        document.insert_text(Some(border), "x");
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 1 });
+        let content_box = tree
+            .boxes
+            .iter()
+            .find(|layout_box| layout_box.node == content)
+            .unwrap();
+        let border_box = tree
+            .boxes
+            .iter()
+            .find(|layout_box| layout_box.node == border)
+            .unwrap();
+        assert_eq!(content_box.border_rect.width, 10);
+        assert_eq!(content_box.content_rect.width, 6);
+        assert_eq!(border_box.border_rect.width, 6);
+        assert_eq!(border_box.content_rect.width, 2);
+    }
+
+    #[test]
+    fn intrinsic_height_is_not_limited_by_viewport_rows() {
+        let mut document = Document::new();
+        let pre = document.insert_element(None, "pre", ElementNs::Html, vec![]);
+        let text = (0..300).map(|_| "x").collect::<Vec<_>>().join("\n");
+        document.insert_text(Some(pre), &text);
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 1 });
+        assert_eq!(tree.fragments.len(), 300);
+        assert!(tree.height >= 300);
+    }
+
+    #[test]
+    fn all_white_space_modes_apply_their_collapse_break_and_wrap_rules() {
+        let cases = [
+            ("normal", " a  b c ", 4, vec!["a b", "c"]),
+            ("nowrap", " a  b c ", 4, vec!["a b c"]),
+            ("pre", " a\nb ", 2, vec![" a", "b "]),
+            ("pre-wrap", "ab cd", 3, vec!["ab ", "cd"]),
+            ("pre-line", " a  b\n c ", 4, vec!["a b", "c"]),
+            ("break-spaces", "a  b", 2, vec!["a ", " b"]),
+        ];
+        for (mode, text, width, expected) in cases {
+            let mut document = Document::new();
+            let declaration = format!("white-space: {mode}");
+            let p = document.insert_element(
+                None,
+                "p",
+                ElementNs::Html,
+                vec![crate::core::dom::Attr::plain("style", &declaration)],
+            );
+            document.insert_text(Some(p), text);
+            let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+            let tree = TaffyLayoutEngine.layout(
+                &document,
+                &styles,
+                Size {
+                    cols: width,
+                    rows: 1,
+                },
+            );
+            assert_eq!(fragment_text(&tree), expected, "{mode}");
+        }
+    }
+
+    #[test]
+    fn segment_breaks_tabs_forced_breaks_and_cross_node_graphemes_stay_owned() {
+        let mut document = Document::new();
+        let pre = document.insert_element(None, "pre", ElementNs::Html, vec![]);
+        let first = document.insert_text(Some(pre), "a\tX\r\nb\u{000c}c\n");
+        let br = document.insert_element(Some(pre), "br", ElementNs::Html, vec![]);
+        let base = document.insert_text(Some(pre), "e");
+        document.insert_text(Some(pre), "\u{301}");
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 1 });
+        assert_eq!(
+            tree.fragments
+                .iter()
+                .map(|fragment| (fragment.node, fragment.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (first, "a       X"),
+                (first, "b"),
+                (first, "c"),
+                (base, "e\u{301}")
+            ]
+        );
+        assert_eq!(tree.fragments.last().unwrap().row, 4);
+        assert!(tree.fragments.iter().all(|fragment| fragment.node != br));
+    }
+
+    #[test]
+    fn zero_width_keeps_zero_geometry_but_text_layout_makes_progress() {
+        let (document, styles) = paragraph("ab");
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 0, rows: 1 });
+        assert_eq!(tree.width, 0);
+        assert_eq!(tree.boxes[0].border_rect.width, 0);
+        assert!(tree.height >= 2);
+        assert!(BasicPainter.paint(&tree).lines.iter().all(String::is_empty));
     }
 }

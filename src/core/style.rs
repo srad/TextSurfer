@@ -14,7 +14,25 @@ pub enum Display {
 pub enum WhiteSpace {
     #[default]
     Normal,
+    NoWrap,
     Pre,
+    PreWrap,
+    PreLine,
+    BreakSpaces,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CssWidth {
+    #[default]
+    Auto,
+    Cells(usize),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BoxSizing {
+    #[default]
+    ContentBox,
+    BorderBox,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,6 +47,8 @@ pub struct EdgeSizes {
 pub struct ComputedStyle {
     pub display: Display,
     pub white_space: WhiteSpace,
+    pub width: CssWidth,
+    pub box_sizing: BoxSizing,
     pub margin: EdgeSizes,
     pub padding: EdgeSizes,
     pub border: bool,

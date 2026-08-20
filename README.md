@@ -51,15 +51,15 @@ Ready                              https://example.com
   while superseded responses are discarded
 - DOS/QBasic-style menu, tab strip, navigation toolbar, grapheme-safe address editor, unbounded
   scrolling and centralized resize/mouse geometry
-- First real rendering path: cssparser + selectors cascade embedded and inline CSS, including
-  type-only conditional `@media` rules; ignored imports and unsupported queries produce bounded
-  diagnostics, Taffy places block boxes, textwrap wraps Unicode text, and the painter emits clipped
-  terminal-cell lines
+- Hierarchical rendering path: cssparser + selectors cascade embedded and inline CSS, including
+  inherited whitespace and type-only conditional `@media` rules; Taffy sizes nested and anonymous
+  block flow with fixed content-box/border-box widths, textwrap and Unicode-aware fragments reflow
+  six whitespace modes, and sparse paint emits clipped terminal-cell lines and borders
 - WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): complete CSS box/inline
-layout and paint laws (M1-B), external stylesheets (M1-C), links/forms/search (M2), mouse (M3), and
-the JavaScript seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): complete paint, rendering
+goldens and the remaining layout laws (M1-B), external stylesheets (M1-C), links/forms/search (M2),
+mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 
