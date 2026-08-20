@@ -1,0 +1,14 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<svg viewBox=\\\"0 0 1 1\\\"><linearGradient/><foreignObject><p>x</p></foreignObject></svg>\")"
+---
+#document
+| <html>
+|   <head>
+|   <body>
+|     <svg svg>
+|       viewBox="0 0 1 1"
+|       <svg linearGradient>
+|       <svg foreignObject>
+|         <p>
+|           "x"

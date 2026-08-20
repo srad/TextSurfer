@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/toolbar.rs
+expression: "render(\"https://example.com\", false)"
+---
+‹  ›  ↻  https://example.com

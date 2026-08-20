@@ -1,0 +1,23 @@
+# Rust build output
+/target
+
+# Insta pending snapshots (review, never commit blindly)
+*.snap.new
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Coding-agent files (per-project agent config, not source)
+AGENTS.md
+CLAUDE.md
+.claude/
+.opencode/
+.cursor/
+.cursorrules
+.codex/
+.github/copilot-instructions.md

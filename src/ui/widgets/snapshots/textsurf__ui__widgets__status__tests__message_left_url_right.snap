@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/status.rs
+expression: "render(\"https://example.com\", \"Loaded\")"
+---
+Loaded              https://example.com

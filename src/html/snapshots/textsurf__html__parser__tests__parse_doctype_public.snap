@@ -1,0 +1,11 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<!DOCTYPE HTML PUBLIC \\\"-//W3C//DTD HTML 4.01//EN\\\" \\\"http://www.w3.org/TR/html4/strict.dtd\\\"><p>x</p>\")"
+---
+#document
+| <!DOCTYPE html "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "x"

@@ -1,0 +1,9 @@
+---
+source: src/html/parser.rs
+expression: "fragment_dump(\"<td>aaa</td>bbb\", \"table\", ElementNs::Html)"
+---
+| <tbody>
+|   <tr>
+|     <td>
+|       "aaa"
+| "bbb"

@@ -1,0 +1,10 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<p>&amp;&#65;&#x42;&auml;</p>\")"
+---
+#document
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "&ABä"

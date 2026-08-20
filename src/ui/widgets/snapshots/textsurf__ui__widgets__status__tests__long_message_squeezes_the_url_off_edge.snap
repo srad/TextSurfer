@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/status.rs
+expression: "render(\"https://example.com\",\n\"this message is much longer than the status row can possibly hold\")"
+---
+this message is much longer than the sta

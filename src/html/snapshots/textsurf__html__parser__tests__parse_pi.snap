@@ -1,0 +1,11 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<?target data?><div>x</div>\")"
+---
+#document
+| <!-- ?target data? -->
+| <html>
+|   <head>
+|   <body>
+|     <div>
+|       "x"

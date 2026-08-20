@@ -1,0 +1,14 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<textarea>\\n  indented\\n</textarea><pre>\\n  \\tpre\\n</pre>\")"
+---
+#document
+| <html>
+|   <head>
+|   <body>
+|     <textarea>
+|       "  indented
+"
+|     <pre>
+|       "  	pre
+"

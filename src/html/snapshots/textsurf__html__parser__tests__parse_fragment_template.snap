@@ -1,0 +1,7 @@
+---
+source: src/html/parser.rs
+expression: "fragment_dump(\"<div>Hi</div><td>x</td>\", \"template\", ElementNs::Html)"
+---
+| <div>
+|   "Hi"
+| "x"

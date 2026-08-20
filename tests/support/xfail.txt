@@ -1,0 +1,98 @@
+# xfail manifest: expected corpus divergences, exact case ids.
+# Format: <file>.dat#<case>  <reason>. Case numbers are 1-based per file.
+# Generated from the first corpus run on 2026-08-20; every entry must have
+# a failed case and every failing case must have an entry.
+
+html5test-com.dat#12  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#1  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#10  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#101  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#102  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#103  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#104  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#105  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#106  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#108  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#109  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#11  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#110  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#111  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#114  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#115  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#116  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#117  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#118  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#119  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#12  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#120  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#123  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#124  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#13  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#14  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#15  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#16  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#17  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#18  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#19  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#2  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#20  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#21  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#22  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#23  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#24  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#25  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#26  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#27  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#28  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#29  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#3  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#30  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#31  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#32  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#33  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#34  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#35  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#36  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#37  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#38  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#39  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#4  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#40  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#41  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#42  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#43  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#44  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#45  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#46  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#47  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#48  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#49  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#5  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#50  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#51  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#52  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#53  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#54  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#55  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#56  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#57  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#58  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#59  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#6  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#60  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#61  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#62  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#63  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#64  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#65  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#7  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#8  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+processing-instructions.dat#9  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+tests_innerHTML_1.dat#76  <input> in <select> fragment; spec-undefined (XXX-undefined-error), html5ever 0.39 resolves differently
+tests1.dat#40  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+tests1.dat#44  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+tests1.dat#47  PI nodes are unreachable from the HTML tokenizer (bogus comment instead); script/DOM tooling only
+webkit02.dat#45  <selectedcontent>/customizable-select postdates html5ever 0.39.0 tree-builder
+webkit02.dat#46  <selectedcontent>/customizable-select postdates html5ever 0.39.0 tree-builder
+webkit02.dat#47  <selectedcontent>/customizable-select postdates html5ever 0.39.0 tree-builder
+webkit02.dat#48  <selectedcontent>/customizable-select postdates html5ever 0.39.0 tree-builder

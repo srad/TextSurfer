@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/tabs.rs
+expression: "render(&tabs, 1, 40)"
+---
+ example.com  duckduckgo  wikipedia +

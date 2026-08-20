@@ -1,0 +1,17 @@
+---
+source: src/html/dump.rs
+expression: "tree_dump(&document, false)"
+---
+#document
+| <html>
+|   xml lang="en"
+|   <head>
+|     <title>
+|     " "
+|   <body>
+|     <ul>
+|       data-n="1"
+|       <li>
+|         "one"
+|       <li>
+|         "two"

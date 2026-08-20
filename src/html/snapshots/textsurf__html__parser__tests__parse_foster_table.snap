@@ -1,0 +1,18 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<table><b><tr><td>aaa</td></tr>bbb</table>ccc\")"
+---
+#document
+| <html>
+|   <head>
+|   <body>
+|     <b>
+|     <b>
+|       "bbb"
+|     <table>
+|       <tbody>
+|         <tr>
+|           <td>
+|             "aaa"
+|     <b>
+|       "ccc"

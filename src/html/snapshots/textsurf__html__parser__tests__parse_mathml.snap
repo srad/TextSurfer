@@ -1,0 +1,15 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<math><mi>x</mi><annotation-xml encoding=\\\"text/html\\\"><p>y</p></annotation-xml></math>\")"
+---
+#document
+| <html>
+|   <head>
+|   <body>
+|     <math math>
+|       <math mi>
+|         "x"
+|       <math annotation-xml>
+|         encoding="text/html"
+|         <p>
+|           "y"

@@ -1,0 +1,13 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<b><i>x</b>y</i>\")"
+---
+#document
+| <html>
+|   <head>
+|   <body>
+|     <b>
+|       <i>
+|         "x"
+|     <i>
+|       "y"

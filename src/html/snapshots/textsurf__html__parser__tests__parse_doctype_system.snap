@@ -1,0 +1,11 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<!DOCTYPE html SYSTEM \\\"about:legacy-compat\\\"><p>x</p>\")"
+---
+#document
+| <!DOCTYPE html "" "about:legacy-compat">
+| <html>
+|   <head>
+|   <body>
+|     <p>
+|       "x"

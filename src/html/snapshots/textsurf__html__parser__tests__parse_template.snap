@@ -1,0 +1,12 @@
+---
+source: src/html/parser.rs
+expression: "document_dump(\"<template><div>Hello</div></template>\")"
+---
+#document
+| <html>
+|   <head>
+|     <template>
+|       content
+|         <div>
+|           "Hello"
+|   <body>

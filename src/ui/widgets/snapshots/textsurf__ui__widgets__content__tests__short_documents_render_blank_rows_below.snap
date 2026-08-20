@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/content.rs
+expression: "render(&lines(1), 0, 3)"
+---
+line 1

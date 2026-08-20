@@ -1,0 +1,8 @@
+---
+source: src/html/parser.rs
+expression: "fragment_dump(\"<path d=\\\"\\\"/><div>x</div>\", \"svg\", ElementNs::Svg)"
+---
+| <svg path>
+|   d=""
+| <div>
+|   "x"
