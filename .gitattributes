@@ -1,0 +1,18 @@
+# Normalize text files to LF in the repo; Windows checkouts get CRLF.
+* text=auto
+
+# Code and markup: always LF, on every platform.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+Cargo.lock text eol=lf
+
+# Insta snapshots embed exact newlines — keep them LF so comparisons are stable.
+*.snap text eol=lf
+
+# Byte-exact vendored WPT fixtures: their line endings are part of the corpus
+# and the sha256 manifest; never normalize, convert, or filter them.
+testdata/*.dat -text
+testdata/*.pin -text
+testdata/*.sha256 -text
