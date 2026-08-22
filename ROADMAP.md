@@ -311,9 +311,10 @@ panel · status panel — each an outlined panel.
       stack ends. (done)
 - [x] Address input as a bordered, labelled field (`URL:`); cursor math updated for the new inset;
       the whole field reverses when focused. (done)
-- [x] Tab strip as raised NC-style boxes (`┌ title ┐` joined by `│`) with an open bottom under the
-      active box — the shared `layout_tabs` walker feeds `active_span`, so the drawn boxes and the
-      divider gap can never drift; titles capped at 24 cells with ellipsis/`…»` clipping. (done)
+- [x] Tab strip as raised NC-style boxes (`┌ title ┐`) separated by one-cell gaps, with an open
+      bottom under the active box — the shared `layout_tabs` walker feeds `active_span`, so the
+      drawn boxes and the divider gap cannot drift; titles capped at 24 cells with ellipsis/`…»`
+      clipping. (done)
 - [x] Status/bottom panel: boxed, message left + URL right (existing arrangement inside the box).
       (done)
 - [x] `ChromeGeometry`/mouse zones preserved and remapped: row/col budget accounts for the new
@@ -598,3 +599,7 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   progress, and unbounded height. No dependency changes; 251 library, 4 binary, 3 pipeline, and 14
   corpus tests pass under default and `js`; default/all-feature strict clippy and fmt are green.
   M1-B remains in progress at complete paint; manual milestone smoke remains human-run.
+- 2026-08-22 — M1.5 tab-strip border follow-up completed: page-title work remains deferred to M2;
+  the active divider now translates tab-inner spans through the outer rail, both lower corners
+  align with the raised tab walls, the first active tab uses a straight left rail, and raised boxes
+  keep one-cell gaps without vertical separator glyphs.

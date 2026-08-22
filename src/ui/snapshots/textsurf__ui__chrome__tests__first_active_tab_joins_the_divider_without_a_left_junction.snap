@@ -1,0 +1,12 @@
+---
+source: src/ui/chrome.rs
+expression: rendered
+---
+ File  Navigate  View  Help   TextSurf  
+│┌ first ┐ ┌ + ┐                       │
+│┘       └─────────────────────────────┤
+│[‹] [›] [↻] [⌂]  URL: │https://example│
+├──────────────────────────────────────┤
+│hello                                 │
+│                                      │
+Ready               https://example.com

@@ -49,8 +49,9 @@ Ready                              https://example.com
   with a status error
 - Stable-tab-ID and generation-tagged fetch results: background-tab results land in the right tab,
   while superseded responses are discarded
-- DOS/QBasic-style menu, tab strip, navigation toolbar, grapheme-safe address editor, unbounded
-  scrolling and centralized resize/mouse geometry
+- DOS/QBasic-style menu, raised tab strip with clean gaps and an aligned active-tab divider,
+  navigation toolbar, grapheme-safe address editor, unbounded scrolling and centralized
+  resize/mouse geometry
 - Hierarchical rendering path: cssparser + selectors cascade embedded and inline CSS, including
   inherited whitespace and type-only conditional `@media` rules; Taffy sizes nested and anonymous
   block flow with fixed content-box/border-box widths, textwrap and Unicode-aware fragments reflow

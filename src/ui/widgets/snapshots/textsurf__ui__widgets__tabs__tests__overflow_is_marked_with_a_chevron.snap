@@ -2,4 +2,4 @@
 source: src/ui/widgets/tabs.rs
 expression: line
 ---
-│┌ example.com ┐│┌ duckduckgo ┐│┌ …»│
+│┌ example.com ┐ ┌ duckduckgo ┐ ┌ …»│

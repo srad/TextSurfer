@@ -105,9 +105,6 @@ impl Widget for TabBar<'_> {
         buf.set_string(area.right() - 1, area.y, "│", frame);
         for tab_box in layout_tabs(self.tabs, self.active, area.width - 2) {
             let col = area.x + 1 + tab_box.x;
-            if tab_box.x > 0 {
-                buf.set_string(col - 1, area.y, "│", frame);
-            }
             if tab_box.active {
                 let selected = self.theme.selected();
                 buf.set_string(col, area.y, "┌", selected);
@@ -160,6 +157,14 @@ mod tests {
     fn renders_tabs_as_raised_boxes() {
         let tabs = vec![chip("a"), chip("b"), chip("c")];
         insta::assert_snapshot!(render(&tabs, 1, 40));
+    }
+
+    #[test]
+    fn raised_boxes_use_blank_gaps_without_separator_bars() {
+        let tabs = vec![chip("a"), chip("b")];
+        let line = render(&tabs, 0, 24);
+        assert!(line.contains("┐ ┌"));
+        assert!(!line.contains("┐│┌"));
     }
 
     #[test]

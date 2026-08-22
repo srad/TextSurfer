@@ -54,7 +54,12 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
 
     let divider_with_opening = |frame: &mut Frame<'_>, rect: Rect, opening: Option<(u16, u16)>| {
         let width = rect.width;
-        buf_set_string(frame, rect, 0, "├", frame_style);
+        let left_rail = if opening.is_some_and(|(left, _)| left == 1) {
+            "│"
+        } else {
+            "├"
+        };
+        buf_set_string(frame, rect, 0, left_rail, frame_style);
         buf_set_string(frame, rect, width - 1, "┤", frame_style);
         for col in 1..width.saturating_sub(1) {
             let glyph = match opening {
@@ -87,8 +92,12 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
             rect,
         );
     }
-    let opening = if layout.tab_divider.is_some_and(|rect| rect.width >= 2) {
-        active_span(&view.tabs, view.active_tab, area.width - 2)
+    let opening = if let (Some(tabs), Some(divider)) = (layout.tabs, layout.tab_divider)
+        && tabs.width >= 2
+        && divider.width >= 2
+    {
+        active_span(&view.tabs, view.active_tab, tabs.width - 2)
+            .map(|(left, right)| (left + 1, right + 1))
     } else {
         None
     };
@@ -200,12 +209,22 @@ mod tests {
         }
     }
 
-    fn snapshot(size: Size) -> String {
+    fn render(view: &ChromeView<'_>, size: Size) -> String {
         let backend = TestBackend::new(size.cols, size.rows);
         let mut terminal = Terminal::new(backend).unwrap();
-        let view = draft();
-        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        terminal.draw(|frame| draw(frame, view)).unwrap();
         crate::ui::test_util::buffer_string(terminal.backend().buffer())
+    }
+
+    fn snapshot(size: Size) -> String {
+        render(&draft(), size)
+    }
+
+    fn chip(title: &'static str) -> TabChip<'static> {
+        TabChip {
+            title: Cow::Borrowed(title),
+            url: Cow::Borrowed("https://example.com"),
+        }
     }
 
     #[test]
@@ -235,6 +254,17 @@ mod tests {
         insta::assert_snapshot!(crate::ui::test_util::buffer_string(
             terminal.backend().buffer()
         ));
+    }
+
+    #[test]
+    fn first_active_tab_joins_the_divider_without_a_left_junction() {
+        let mut view = draft();
+        view.tabs = vec![chip("first")];
+        let rendered = render(&view, Size { cols: 40, rows: 8 });
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert!(rows[1].starts_with("│┌ first ┐ ┌ + ┐"));
+        assert!(rows[2].starts_with("│┘       └"));
+        insta::assert_snapshot!(rendered);
     }
 
     #[test]
