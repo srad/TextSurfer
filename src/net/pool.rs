@@ -5,18 +5,19 @@ use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 
-use super::fetch::{Fetch, FetchPayload, FetchRequest};
+use super::fetch::{Fetch, FetchPayload, FetchRequest, ResourceId};
 
 struct Job {
     tab_id: u64,
     generation: u64,
+    resource_id: ResourceId,
     request: FetchRequest,
 }
 
 #[derive(Default)]
 struct JobState {
-    live: HashSet<(u64, u64)>,
-    canceled: HashSet<(u64, u64)>,
+    live: HashSet<(u64, u64, ResourceId)>,
+    canceled: HashSet<(u64, u64, ResourceId)>,
 }
 
 struct Shared {
@@ -58,9 +59,15 @@ impl FetchPool {
         }
     }
 
-    pub fn submit(&self, tab_id: u64, generation: u64, request: FetchRequest) {
+    pub fn submit(
+        &self,
+        tab_id: u64,
+        generation: u64,
+        resource_id: ResourceId,
+        request: FetchRequest,
+    ) {
         if !self.shared.closed.load(Ordering::Acquire) {
-            let key = (tab_id, generation);
+            let key = (tab_id, generation, resource_id);
             if !self
                 .shared
                 .state
@@ -76,19 +83,27 @@ impl FetchPool {
                 .send(Some(Job {
                     tab_id,
                     generation,
+                    resource_id,
                     request,
                 }))
                 .is_err()
             {
-                finish(&self.shared, tab_id, generation);
+                finish(&self.shared, tab_id, generation, resource_id);
             }
         }
     }
 
     pub fn cancel(&self, tab_id: u64, generation: u64) {
-        let key = (tab_id, generation);
         let mut state = self.shared.state.lock().expect("pool job state lock");
-        if state.live.contains(&key) {
+        let resources: Vec<_> = state
+            .live
+            .iter()
+            .copied()
+            .filter(|(live_tab, live_generation, _)| {
+                *live_tab == tab_id && *live_generation == generation
+            })
+            .collect();
+        for key in resources {
             state.canceled.insert(key);
         }
     }
@@ -113,6 +128,17 @@ impl FetchPool {
             let _ = worker.join();
         }
     }
+
+    pub fn shutdown_without_waiting(&self) {
+        if self.shared.closed.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let mut workers = self.workers.lock().expect("pool workers lock");
+        for _ in 0..workers.len() {
+            let _ = self.jobs.send(None);
+        }
+        workers.clear();
+    }
 }
 
 impl Drop for FetchPool {
@@ -128,33 +154,34 @@ fn worker_loop(
     results: Sender<FetchPayload>,
 ) {
     while let Ok(Some(job)) = jobs.recv() {
-        if is_canceled(&shared, job.tab_id, job.generation) {
-            finish(&shared, job.tab_id, job.generation);
+        if is_canceled(&shared, job.tab_id, job.generation, job.resource_id) {
+            finish(&shared, job.tab_id, job.generation, job.resource_id);
             continue;
         }
         let result = fetch.fetch(&job.request);
-        if !is_canceled(&shared, job.tab_id, job.generation) {
+        if !is_canceled(&shared, job.tab_id, job.generation, job.resource_id) {
             let _ = results.send(FetchPayload {
                 tab_id: job.tab_id,
                 generation: job.generation,
+                resource_id: job.resource_id,
                 result,
             });
         }
-        finish(&shared, job.tab_id, job.generation);
+        finish(&shared, job.tab_id, job.generation, job.resource_id);
     }
 }
 
-fn is_canceled(shared: &Shared, tab_id: u64, generation: u64) -> bool {
+fn is_canceled(shared: &Shared, tab_id: u64, generation: u64, resource_id: ResourceId) -> bool {
     shared
         .state
         .lock()
         .expect("pool job state lock")
         .canceled
-        .contains(&(tab_id, generation))
+        .contains(&(tab_id, generation, resource_id))
 }
 
-fn finish(shared: &Shared, tab_id: u64, generation: u64) {
-    let key = (tab_id, generation);
+fn finish(shared: &Shared, tab_id: u64, generation: u64, resource_id: ResourceId) {
+    let key = (tab_id, generation, resource_id);
     let mut state = shared.state.lock().expect("pool job state lock");
     state.live.remove(&key);
     state.canceled.remove(&key);
@@ -268,7 +295,7 @@ mod tests {
         let probe = Arc::clone(&fetch);
         let pool = FetchPool::spawn(fetch, WORKERS);
         for i in 0..24 {
-            pool.submit(0, i, url(&format!("/job{i}")));
+            pool.submit(0, i, ResourceId::DOCUMENT, url(&format!("/job{i}")));
         }
         for _ in 0..WORKERS {
             started_rx.recv().expect("workers did not start");
@@ -294,10 +321,10 @@ mod tests {
             }),
             WORKERS,
         );
-        pool.submit(0, 0, url("/hung"));
+        pool.submit(0, 0, ResourceId::DOCUMENT, url("/hung"));
         hung_started_rx.recv().expect("hung worker did not start");
         for i in 1..=12 {
-            pool.submit(0, i, url(&format!("/job{i}")));
+            pool.submit(0, i, ResourceId::DOCUMENT, url(&format!("/job{i}")));
         }
         let mut fast = Vec::new();
         while fast.len() < 12 {
@@ -322,7 +349,7 @@ mod tests {
             WORKERS,
         );
         for i in 0..32 {
-            pool.submit(0, i, url(&format!("/job{i}")));
+            pool.submit(0, i, ResourceId::DOCUMENT, url(&format!("/job{i}")));
         }
         let results = drain_n(&pool, 32);
         let gens: HashSet<u64> = results.iter().map(|p| p.generation).collect();
@@ -346,11 +373,11 @@ mod tests {
             }),
             1,
         );
-        pool.submit(7, 1, url("/first"));
+        pool.submit(7, 1, ResourceId::DOCUMENT, url("/first"));
         first_started_rx.recv().expect("first job did not start");
-        pool.submit(7, 2, url("/canceled"));
+        pool.submit(7, 2, ResourceId::DOCUMENT, url("/canceled"));
         pool.cancel(7, 2);
-        pool.submit(7, 3, url("/sentinel"));
+        pool.submit(7, 3, ResourceId::DOCUMENT, url("/sentinel"));
         release_tx.send(()).expect("release first sender");
         let delivered = pool.results.recv().expect("first result");
         assert_eq!(delivered.generation, 1);
@@ -365,5 +392,93 @@ mod tests {
         let state = pool.shared.state.lock().expect("pool job state lock");
         assert!(state.live.is_empty());
         assert!(state.canceled.is_empty());
+    }
+
+    #[test]
+    fn distinct_resources_in_one_generation_are_both_delivered() {
+        let pool = FetchPool::spawn(
+            Arc::new(Mixed {
+                hung_started: unbounded().0,
+                hung_release: unbounded().1,
+            }),
+            WORKERS,
+        );
+        pool.submit(3, 9, ResourceId(1), url("/one"));
+        pool.submit(3, 9, ResourceId(2), url("/two"));
+        let ids: HashSet<_> = drain_n(&pool, 2)
+            .into_iter()
+            .map(|payload| payload.resource_id)
+            .collect();
+        assert_eq!(ids, HashSet::from([ResourceId(1), ResourceId(2)]));
+        pool.shutdown();
+    }
+
+    #[test]
+    fn duplicate_live_resource_jobs_are_coalesced() {
+        let (first_started_tx, first_started_rx) = unbounded();
+        let (release_tx, release_rx) = unbounded();
+        let pool = FetchPool::spawn(
+            Arc::new(GateFirst {
+                first_started: first_started_tx,
+                first_release: release_rx,
+                observed: unbounded().0,
+            }),
+            1,
+        );
+        pool.submit(1, 2, ResourceId(3), url("/first"));
+        first_started_rx.recv().expect("first job did not start");
+        pool.submit(1, 2, ResourceId(3), url("/duplicate"));
+        release_tx.send(()).expect("release first sender");
+        assert_eq!(drain_n(&pool, 1)[0].resource_id, ResourceId(3));
+        assert!(pool.results.try_recv().is_err());
+        pool.shutdown();
+    }
+
+    #[test]
+    fn canceling_a_generation_cancels_every_resource() {
+        let (first_started_tx, first_started_rx) = unbounded();
+        let (release_tx, release_rx) = unbounded();
+        let (observed_tx, observed_rx) = unbounded();
+        let pool = FetchPool::spawn(
+            Arc::new(GateFirst {
+                first_started: first_started_tx,
+                first_release: release_rx,
+                observed: observed_tx,
+            }),
+            1,
+        );
+        pool.submit(7, 1, ResourceId::DOCUMENT, url("/first"));
+        first_started_rx.recv().expect("first job did not start");
+        pool.submit(7, 2, ResourceId(1), url("/one"));
+        pool.submit(7, 2, ResourceId(2), url("/two"));
+        pool.cancel(7, 2);
+        pool.submit(7, 3, ResourceId::DOCUMENT, url("/sentinel"));
+        release_tx.send(()).expect("release first sender");
+        let _ = pool.results.recv().expect("first result");
+        assert_eq!(observed_rx.recv().expect("sentinel fetch"), "/sentinel");
+        let sentinel = pool.results.recv().expect("sentinel result");
+        assert_eq!(sentinel.generation, 3);
+        assert!(pool.results.try_recv().is_err());
+        pool.shutdown();
+    }
+
+    #[test]
+    fn shutdown_without_waiting_detaches_in_flight_workers() {
+        let (first_started_tx, first_started_rx) = unbounded();
+        let (release_tx, release_rx) = unbounded();
+        let pool = FetchPool::spawn(
+            Arc::new(GateFirst {
+                first_started: first_started_tx,
+                first_release: release_rx,
+                observed: unbounded().0,
+            }),
+            1,
+        );
+        pool.submit(1, 1, ResourceId::DOCUMENT, url("/first"));
+        first_started_rx.recv().expect("first job did not start");
+        pool.shutdown_without_waiting();
+        assert!(pool.shared.closed.load(Ordering::Acquire));
+        assert!(pool.workers.lock().expect("pool workers lock").is_empty());
+        release_tx.send(()).expect("release detached worker");
     }
 }

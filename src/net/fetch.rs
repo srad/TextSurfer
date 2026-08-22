@@ -5,6 +5,13 @@ use url::Url;
 
 pub const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ResourceId(pub u64);
+
+impl ResourceId {
+    pub const DOCUMENT: Self = Self(0);
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchRequest {
     pub url: Url,
@@ -52,5 +59,6 @@ impl Fetch for SchemeFetch {
 pub struct FetchPayload {
     pub tab_id: u64,
     pub generation: u64,
+    pub resource_id: ResourceId,
     pub result: Result<FetchResponse, FetchError>,
 }

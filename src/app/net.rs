@@ -3,7 +3,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::net::pool::FetchPool;
-use crate::net::{FetchPayload, FetchRequest};
+use crate::net::{FetchPayload, FetchRequest, ResourceId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Route {
@@ -24,7 +24,7 @@ pub fn route(url: &Url) -> Route {
 }
 
 pub trait Navigate: Send {
-    fn submit(&self, tab_id: u64, generation: u64, url: Url);
+    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url);
     fn cancel(&self, _tab_id: u64, _generation: u64) {}
     fn poll_result(&self) -> Option<FetchPayload>;
 }
@@ -40,8 +40,9 @@ impl PoolNet {
 }
 
 impl Navigate for PoolNet {
-    fn submit(&self, tab_id: u64, generation: u64, url: Url) {
-        self.pool.submit(tab_id, generation, FetchRequest { url });
+    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) {
+        self.pool
+            .submit(tab_id, generation, resource_id, FetchRequest { url });
     }
 
     fn cancel(&self, tab_id: u64, generation: u64) {
@@ -56,7 +57,7 @@ impl Navigate for PoolNet {
 pub struct NoopNet;
 
 impl Navigate for NoopNet {
-    fn submit(&self, _tab_id: u64, _generation: u64, _url: Url) {}
+    fn submit(&self, _tab_id: u64, _generation: u64, _resource_id: ResourceId, _url: Url) {}
 
     fn poll_result(&self) -> Option<FetchPayload> {
         None

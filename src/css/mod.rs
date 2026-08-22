@@ -4,6 +4,8 @@ mod selectors;
 
 pub use cascade::{BasicCascade, Cascade, MediaContext};
 pub use parser::{
-    CssDiagnostic, CssDiagnosticKind, CssDiagnostics, CssParser, CssRule, CssSourcePosition,
-    CssparserParser, Declaration, MediaQuery, MediaQueryList, MediaRule, StyleRule, StyleSheet,
+    ColorScheme, CssDiagnostic, CssDiagnosticKind, CssDiagnostics, CssParser, CssRule,
+    CssSourcePosition, CssparserParser, Declaration, ImportRule, MediaAxis, MediaComparison,
+    MediaFeature, MediaQuery, MediaQueryList, MediaRule, ScriptingValue, StyleRule, StyleSheet,
+    parse_media_queries,
 };

@@ -106,35 +106,23 @@ fn ns_string(ns: ElementNs) -> &'static str {
 }
 
 fn base_href(document: &Document) -> Option<String> {
-    fn walk(document: &Document, id: NodeId, found: &mut Option<String>) -> bool {
+    let mut stack: Vec<_> = document.roots().iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
         if let Some(Node::Element { name, ns, attrs }) = document.node(id) {
             if *ns == ElementNs::Html
                 && name == "base"
-                && found.is_none()
                 && let Some(href) = attrs
                     .iter()
                     .find(|attr| attr.ns == AttrNs::None && attr.name == "href")
             {
-                *found = Some(href.value.clone());
-                return true;
+                return Some(href.value.clone());
             }
             if !(*ns == ElementNs::Html && name == "template") {
-                for child in document.children(id) {
-                    if walk(document, child, found) {
-                        return true;
-                    }
-                }
+                stack.extend(document.children(id).into_iter().rev());
             }
         }
-        false
     }
-    let mut found = None;
-    for root in document.roots() {
-        if walk(document, *root, &mut found) {
-            break;
-        }
-    }
-    found
+    None
 }
 
 impl ArenaTreeSink {

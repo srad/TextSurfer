@@ -36,7 +36,7 @@ Ready                              https://example.com
 
 ## Features
 
-**Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke)**
+**Current (M0, M1-R and M1.5 complete; M1-A through M1-C done, awaiting the human terminal smoke)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit
@@ -47,13 +47,14 @@ Ready                              https://example.com
   valid types render a controlled error page
 - Scheme routing: `http(s)://`, `file://`, `about:blank` start page, unknown schemes rejected
   with a status error
-- Stable-tab-ID and generation-tagged fetch results: background-tab results land in the right tab,
-  while superseded responses are discarded
+- Stable tab, generation and resource-tagged fetch results: concurrent document stylesheets land in
+  the right load, background tabs render lazily, and superseded responses are discarded
 - DOS/QBasic-style menu, raised tab strip with clean gaps and an aligned active-tab divider,
   navigation toolbar, grapheme-safe address editor, unbounded scrolling and centralized
   resize/mouse geometry
-- Hierarchical rendering path: cssparser + selectors cascade embedded and inline CSS, including
-  inherited whitespace and type-only conditional `@media` rules; Taffy sizes nested and anonymous
+- Hierarchical rendering path: cssparser + selectors cascade inline, embedded, linked and recursively
+  imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
+  scripting, color scheme and viewport dimensions; Taffy sizes nested and anonymous
   block flow with fixed content-box/border-box widths, textwrap and Unicode-aware fragments reflow
   six whitespace modes, and sparse paint emits clipped terminal-cell lines and borders
 - Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
@@ -63,13 +64,13 @@ Ready                              https://example.com
 - Dynamic selectors: `:link`, `:any-link`, `:hover`, `:focus`, `:active`, `:checked`, `:enabled`
   and `:disabled` parse and match against injected state; `:visited` never matches, so page styling
   cannot observe history
-- `--dump` renders a page to stdout and exits — the same painter the TUI uses, handy for scripting
-  and for diffing goldens
+- `--dump` renders a page to stdout and exits through the same stylesheet loader and painter the TUI
+  uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
 - WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): external stylesheets with
-selector bucketing (M1-C), table layout and generated content (M1-D), links/forms/search (M2),
-mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): table layout and generated
+content (M1-D), links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa integration
+(M4–M5).
 
 ## Architecture
 
@@ -105,7 +106,7 @@ $ cargo build --release
 $ cargo run --release            # start page
 $ cargo run -- --url https://example.com
 $ cargo run -- --user-agent TextSurferDev/1 --js off
-$ cargo run -- --dump --cols 60 --url https://example.com   # render to stdout, no TUI
+$ cargo run -- --dump --cols 60 --rows 24 --url https://example.com   # render to stdout, no TUI
 ```
 
 Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurfer falls back
@@ -163,7 +164,7 @@ the real clock.
 Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
-style/layout/paint ✅ · M1-C external CSS · M1-D tables & generated content · M2
+style/layout/paint ✅ · M1-C external CSS ✅ · M1-D tables & generated content · M2
 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries

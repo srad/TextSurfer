@@ -23,6 +23,13 @@ pub struct StyleRule {
 pub enum CssRule {
     Style(StyleRule),
     Media(MediaRule),
+    Import(ImportRule),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportRule {
+    pub url: String,
+    pub queries: MediaQueryList,
 }
 
 #[derive(Clone, Debug)]
@@ -39,8 +46,53 @@ pub enum MediaQueryList {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MediaQuery {
-    Type { negated: bool, media_type: String },
+    Type {
+        negated: bool,
+        media_type: String,
+    },
+    Condition {
+        negated: bool,
+        media_type: Option<String>,
+        features: Vec<MediaFeature>,
+    },
     Never,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorScheme {
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptingValue {
+    None,
+    InitialOnly,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaAxis {
+    Width,
+    Height,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaComparison {
+    Equal,
+    Minimum,
+    Maximum,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaFeature {
+    Scripting(Option<ScriptingValue>),
+    PrefersColorScheme(Option<ColorScheme>),
+    Dimension {
+        axis: MediaAxis,
+        comparison: MediaComparison,
+        value: Option<u16>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,6 +168,14 @@ pub trait CssParser: Send + Sync {
     fn parse(&self, source: &str) -> StyleSheet;
 }
 
+pub fn parse_media_queries(source: &str) -> MediaQueryList {
+    let mut input = ParserInput::new(source);
+    let mut input = Parser::new(&mut input);
+    let mut diagnostics = CssDiagnostics::default();
+    parse_media_query_list(&mut input, &mut diagnostics)
+        .unwrap_or_else(|_| MediaQueryList::Any(vec![MediaQuery::Never]))
+}
+
 #[derive(Default)]
 pub struct CssparserParser;
 
@@ -126,6 +186,7 @@ impl CssParser for CssparserParser {
         let mut diagnostics = CssDiagnostics::default();
         let mut parser = SheetParser {
             media_depth: 0,
+            imports_allowed: true,
             diagnostics: &mut diagnostics,
         };
         let rules = StyleSheetParser::new(&mut input, &mut parser)
@@ -226,6 +287,7 @@ fn rule_has_content(rule: &CssRule) -> bool {
     match rule {
         CssRule::Style(rule) => !rule.declarations.is_empty(),
         CssRule::Media(_) => true,
+        CssRule::Import(_) => true,
     }
 }
 
@@ -243,7 +305,7 @@ fn parse_media_query_list<'i, 't>(
     }
     let queries = input.parse_comma_separated(|member| {
         let location = member.current_source_location();
-        match member.try_parse(parse_type_media_query) {
+        match member.try_parse(parse_media_query) {
             Ok(query) => Ok(query),
             Err(_) => {
                 consume_all(member)?;
@@ -255,36 +317,154 @@ fn parse_media_query_list<'i, 't>(
     Ok(MediaQueryList::Any(queries))
 }
 
-fn parse_type_media_query<'i, 't>(
-    input: &mut Parser<'i, 't>,
-) -> Result<MediaQuery, ParseError<'i, ()>> {
-    let first = input.expect_ident_cloned()?.to_ascii_lowercase();
-    let (negated, media_type) = if first == "not" || first == "only" {
-        (
-            first == "not",
-            input.expect_ident_cloned()?.to_ascii_lowercase(),
-        )
-    } else {
-        (false, first)
-    };
-    input.expect_exhausted()?;
-    if ["not", "only", "and", "or", "layer"].contains(&media_type.as_str()) {
+fn parse_media_query<'i, 't>(input: &mut Parser<'i, 't>) -> Result<MediaQuery, ParseError<'i, ()>> {
+    let modifier_start = input.state();
+    let modifier = input
+        .try_parse(Parser::expect_ident_cloned)
+        .ok()
+        .map(|ident| ident.to_ascii_lowercase())
+        .filter(|ident| ident == "not" || ident == "only");
+    if modifier.is_none() {
+        input.reset(&modifier_start);
+    }
+    let negated = modifier.as_deref() == Some("not");
+    let media_type = input
+        .try_parse(Parser::expect_ident_cloned)
+        .ok()
+        .map(|ident| ident.to_ascii_lowercase());
+    if modifier.as_deref() == Some("only") && media_type.is_none() {
         return Err(input.new_custom_error(()));
     }
-    Ok(MediaQuery::Type {
-        negated,
-        media_type,
-    })
+    if media_type
+        .as_deref()
+        .is_some_and(|name| ["not", "only", "and", "or", "layer"].contains(&name))
+    {
+        return Err(input.new_custom_error(()));
+    }
+    let mut features = Vec::new();
+    if media_type.is_none() {
+        features.push(parse_media_feature_block(input)?);
+    }
+    while !input.is_exhausted() {
+        if media_type.is_some() || !features.is_empty() {
+            input.expect_ident_matching("and")?;
+        }
+        features.push(parse_media_feature_block(input)?);
+    }
+    if features.is_empty() {
+        Ok(MediaQuery::Type {
+            negated,
+            media_type: media_type.expect("media type checked"),
+        })
+    } else {
+        Ok(MediaQuery::Condition {
+            negated,
+            media_type,
+            features,
+        })
+    }
+}
+
+fn parse_media_feature_block<'i, 't>(
+    input: &mut Parser<'i, 't>,
+) -> Result<MediaFeature, ParseError<'i, ()>> {
+    match input.next()? {
+        Token::ParenthesisBlock => input.parse_nested_block(parse_media_feature),
+        _ => Err(input.new_custom_error(())),
+    }
+}
+
+fn parse_media_feature<'i, 't>(
+    input: &mut Parser<'i, 't>,
+) -> Result<MediaFeature, ParseError<'i, ()>> {
+    let name = input.expect_ident_cloned()?.to_ascii_lowercase();
+    if input.is_exhausted() {
+        return match name.as_str() {
+            "scripting" => Ok(MediaFeature::Scripting(None)),
+            "prefers-color-scheme" => Ok(MediaFeature::PrefersColorScheme(None)),
+            "width" => Ok(MediaFeature::Dimension {
+                axis: MediaAxis::Width,
+                comparison: MediaComparison::Equal,
+                value: None,
+            }),
+            "height" => Ok(MediaFeature::Dimension {
+                axis: MediaAxis::Height,
+                comparison: MediaComparison::Equal,
+                value: None,
+            }),
+            _ => Err(input.new_custom_error(())),
+        };
+    }
+    input.expect_colon()?;
+    let feature = match name.as_str() {
+        "scripting" => {
+            let value = match input.expect_ident_cloned()?.to_ascii_lowercase().as_str() {
+                "none" => ScriptingValue::None,
+                "initial-only" => ScriptingValue::InitialOnly,
+                "enabled" => ScriptingValue::Enabled,
+                _ => return Err(input.new_custom_error(())),
+            };
+            MediaFeature::Scripting(Some(value))
+        }
+        "prefers-color-scheme" => {
+            let value = match input.expect_ident_cloned()?.to_ascii_lowercase().as_str() {
+                "light" => ColorScheme::Light,
+                "dark" => ColorScheme::Dark,
+                _ => return Err(input.new_custom_error(())),
+            };
+            MediaFeature::PrefersColorScheme(Some(value))
+        }
+        "width" | "min-width" | "max-width" | "height" | "min-height" | "max-height" => {
+            let axis = if name.ends_with("width") {
+                MediaAxis::Width
+            } else {
+                MediaAxis::Height
+            };
+            let comparison = if name.starts_with("min-") {
+                MediaComparison::Minimum
+            } else if name.starts_with("max-") {
+                MediaComparison::Maximum
+            } else {
+                MediaComparison::Equal
+            };
+            MediaFeature::Dimension {
+                axis,
+                comparison,
+                value: Some(parse_media_length(input)?),
+            }
+        }
+        _ => return Err(input.new_custom_error(())),
+    };
+    input.expect_exhausted()?;
+    Ok(feature)
+}
+
+fn parse_media_length<'i, 't>(input: &mut Parser<'i, 't>) -> Result<u16, ParseError<'i, ()>> {
+    let value = match input.next()? {
+        Token::Number { value, .. } if *value == 0.0 => 0.0,
+        Token::Dimension { value, unit, .. }
+            if value.is_finite()
+                && *value >= 0.0
+                && (unit.eq_ignore_ascii_case("px") || unit.eq_ignore_ascii_case("ch")) =>
+        {
+            *value
+        }
+        _ => return Err(input.new_custom_error(())),
+    };
+    Ok(value.round().clamp(0.0, u16::MAX as f32) as u16)
 }
 
 enum SheetAtRulePrelude {
     Media(MediaQueryList),
-    Import,
+    Import(ImportRule),
+    InvalidImport,
+    Charset,
     Unsupported,
 }
 
 struct SheetParser<'a> {
     media_depth: usize,
+    imports_allowed: bool,
     diagnostics: &'a mut CssDiagnostics,
 }
 
@@ -295,6 +475,7 @@ fn parse_nested_rule_list<'i, 't>(
 ) -> Vec<CssRule> {
     let mut parser = SheetParser {
         media_depth,
+        imports_allowed: false,
         diagnostics,
     };
     RuleBodyParser::new(input, &mut parser)
@@ -312,6 +493,7 @@ impl<'i> QualifiedRuleParser<'i> for SheetParser<'_> {
         &mut self,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Prelude, ParseError<'i, Self::Error>> {
+        self.imports_allowed = false;
         let start = input.position();
         while input.next_including_whitespace_and_comments().is_ok() {}
         selectors::parse(input.slice_from(start).trim()).ok_or_else(|| input.new_custom_error(()))
@@ -356,12 +538,39 @@ impl<'i> AtRuleParser<'i> for SheetParser<'_> {
         input: &mut Parser<'i, 't>,
     ) -> Result<Self::Prelude, ParseError<'i, Self::Error>> {
         if name.eq_ignore_ascii_case("media") {
+            self.imports_allowed = false;
             return parse_media_query_list(input, self.diagnostics).map(SheetAtRulePrelude::Media);
         }
-        consume_all(input)?;
         if name.eq_ignore_ascii_case("import") {
-            Ok(SheetAtRulePrelude::Import)
+            let location = input.current_source_location();
+            if !self.imports_allowed {
+                consume_all(input)?;
+                self.diagnostics
+                    .record(CssDiagnosticKind::InvalidImportForm, location);
+                return Ok(SheetAtRulePrelude::InvalidImport);
+            }
+            let url = match input.expect_url_or_string() {
+                Ok(url) => url.to_string(),
+                Err(error) => {
+                    self.diagnostics
+                        .record(CssDiagnosticKind::InvalidImportForm, location);
+                    return Err(error.into());
+                }
+            };
+            if contains_unsupported_import_option(input) {
+                consume_all(input)?;
+                self.diagnostics
+                    .record(CssDiagnosticKind::InvalidImportForm, location);
+                return Ok(SheetAtRulePrelude::InvalidImport);
+            }
+            let queries = parse_media_query_list(input, self.diagnostics)?;
+            Ok(SheetAtRulePrelude::Import(ImportRule { url, queries }))
+        } else if name.eq_ignore_ascii_case("charset") {
+            consume_all(input)?;
+            Ok(SheetAtRulePrelude::Charset)
         } else {
+            self.imports_allowed = false;
+            consume_all(input)?;
             Ok(SheetAtRulePrelude::Unsupported)
         }
     }
@@ -376,10 +585,10 @@ impl<'i> AtRuleParser<'i> for SheetParser<'_> {
                 CssDiagnosticKind::InvalidMediaRuleForm,
                 start.source_location(),
             ),
-            SheetAtRulePrelude::Import => self
-                .diagnostics
-                .record(CssDiagnosticKind::IgnoredImport, start.source_location()),
-            SheetAtRulePrelude::Unsupported => {}
+            SheetAtRulePrelude::Import(rule) => return Ok(CssRule::Import(rule)),
+            SheetAtRulePrelude::InvalidImport
+            | SheetAtRulePrelude::Charset
+            | SheetAtRulePrelude::Unsupported => {}
         }
         Err(())
     }
@@ -406,7 +615,7 @@ impl<'i> AtRuleParser<'i> for SheetParser<'_> {
                 let rules = parse_nested_rule_list(input, self.media_depth + 1, self.diagnostics);
                 Ok(CssRule::Media(MediaRule { queries, rules }))
             }
-            SheetAtRulePrelude::Import => {
+            SheetAtRulePrelude::Import(_) => {
                 self.diagnostics.record(
                     CssDiagnosticKind::InvalidImportForm,
                     start.source_location(),
@@ -414,12 +623,47 @@ impl<'i> AtRuleParser<'i> for SheetParser<'_> {
                 consume_all(input)?;
                 Err(input.new_custom_error(()))
             }
-            SheetAtRulePrelude::Unsupported => {
+            SheetAtRulePrelude::InvalidImport => {
+                consume_all(input)?;
+                Err(input.new_custom_error(()))
+            }
+            SheetAtRulePrelude::Charset | SheetAtRulePrelude::Unsupported => {
                 consume_all(input)?;
                 Err(input.new_custom_error(()))
             }
         }
     }
+}
+
+fn contains_unsupported_import_option<'i, 't>(input: &mut Parser<'i, 't>) -> bool {
+    let start = input.state();
+    let mut found = false;
+    while let Ok(token) = input.next_including_whitespace_and_comments() {
+        let nested = matches!(
+            token,
+            Token::Function(_)
+                | Token::ParenthesisBlock
+                | Token::SquareBracketBlock
+                | Token::CurlyBracketBlock
+        );
+        if matches!(
+            token,
+            Token::Ident(name) | Token::Function(name)
+                if name.eq_ignore_ascii_case("layer") || name.eq_ignore_ascii_case("supports")
+        ) {
+            found = true;
+            break;
+        }
+        if nested
+            && input
+                .parse_nested_block(|nested| consume_all(nested))
+                .is_err()
+        {
+            break;
+        }
+    }
+    input.reset(&start);
+    found
 }
 
 #[cfg(test)]
@@ -481,7 +725,15 @@ mod tests {
         assert_eq!(
             partial.queries,
             MediaQueryList::Any(vec![
-                MediaQuery::Never,
+                MediaQuery::Condition {
+                    negated: false,
+                    media_type: None,
+                    features: vec![MediaFeature::Dimension {
+                        axis: MediaAxis::Width,
+                        comparison: MediaComparison::Equal,
+                        value: Some(1),
+                    }],
+                },
                 MediaQuery::Never,
                 MediaQuery::Type {
                     negated: false,
@@ -490,7 +742,7 @@ mod tests {
             ])
         );
         assert!(matches!(sheet.rules[3], CssRule::Style(_)));
-        assert_eq!(sheet.diagnostics.total(), 3);
+        assert_eq!(sheet.diagnostics.total(), 2);
         assert_eq!(
             sheet
                 .diagnostics
@@ -500,8 +752,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 CssDiagnosticKind::UnsupportedMediaQuery,
-                CssDiagnosticKind::UnsupportedMediaQuery,
-                CssDiagnosticKind::IgnoredImport,
+                CssDiagnosticKind::InvalidImportForm,
             ]
         );
     }
@@ -561,12 +812,20 @@ mod tests {
                 media_type: "screen".to_string(),
             }])
         );
-        let CssRule::Media(unsupported_not) = &sheet.rules[2] else {
-            panic!("expected unsupported media rule");
+        let CssRule::Media(supported_not) = &sheet.rules[2] else {
+            panic!("expected supported media rule");
         };
         assert_eq!(
-            unsupported_not.queries,
-            MediaQueryList::Any(vec![MediaQuery::Never])
+            supported_not.queries,
+            MediaQueryList::Any(vec![MediaQuery::Condition {
+                negated: true,
+                media_type: Some("print".to_string()),
+                features: vec![MediaFeature::Dimension {
+                    axis: MediaAxis::Width,
+                    comparison: MediaComparison::Equal,
+                    value: None,
+                }],
+            }])
         );
     }
 
@@ -593,7 +852,10 @@ mod tests {
                 .any(|diagnostic| diagnostic.kind == CssDiagnosticKind::NestingLimitExceeded)
         );
 
-        let imports = "@import url(theme.css);".repeat(MAX_RETAINED_DIAGNOSTICS + 3);
+        let imports = format!(
+            "p {{ display: block }}{}",
+            "@import url(theme.css);".repeat(MAX_RETAINED_DIAGNOSTICS + 3)
+        );
         let diagnostics = CssparserParser.parse(&imports).diagnostics;
         assert_eq!(diagnostics.total(), MAX_RETAINED_DIAGNOSTICS + 3);
         assert_eq!(diagnostics.entries().len(), MAX_RETAINED_DIAGNOSTICS);
@@ -617,6 +879,61 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn leading_imports_are_retained_and_late_nested_and_qualified_forms_are_rejected() {
+        let sheet = CssparserParser.parse(
+            "@charset \"utf-8\";
+             @import \"a.css\" screen and (min-width: 20px);
+             @import url(b.css) layer(theme);
+             p { display: block }
+             @import 'late.css';
+             @media screen { @import 'nested.css'; span { display: block } }",
+        );
+        let CssRule::Import(rule) = &sheet.rules[0] else {
+            panic!("expected retained import");
+        };
+        assert_eq!(rule.url, "a.css");
+        assert!(matches!(
+            rule.queries,
+            MediaQueryList::Any(ref queries) if matches!(queries[0], MediaQuery::Condition { .. })
+        ));
+        for invalid in [
+            "@import url(b.css) layer(theme);",
+            "p { display:block } @import 'late.css';",
+            "@media screen { @import 'nested.css'; span { display:block } }",
+        ] {
+            assert!(
+                CssparserParser
+                    .parse(invalid)
+                    .diagnostics
+                    .entries()
+                    .iter()
+                    .any(|diagnostic| diagnostic.kind == CssDiagnosticKind::InvalidImportForm),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn media_features_parse_with_ranges_and_fail_closed_for_unsupported_syntax() {
+        let queries = parse_media_queries(
+            "not (scripting: enabled), only screen and (prefers-color-scheme: dark) and \
+             (min-width: 79.6px) and (max-height: 30ch), (width > 10px)",
+        );
+        let MediaQueryList::Any(queries) = queries else {
+            panic!("expected media members");
+        };
+        assert!(matches!(
+            queries[0],
+            MediaQuery::Condition { negated: true, .. }
+        ));
+        assert!(matches!(
+            queries[1],
+            MediaQuery::Condition { negated: false, .. }
+        ));
+        assert_eq!(queries[2], MediaQuery::Never);
     }
 
     #[test]

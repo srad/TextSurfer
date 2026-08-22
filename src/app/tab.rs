@@ -2,6 +2,8 @@ use crate::core::dom::SharedDocument;
 use crate::core::style::StyleTree;
 use crate::paint::DisplayList;
 
+use super::page_load::PageLoad;
+
 pub struct Tab {
     pub id: u64,
     pub url: String,
@@ -15,6 +17,8 @@ pub struct Tab {
     pub message: String,
     pub document: Option<SharedDocument>,
     pub styles: Option<StyleTree>,
+    pub load: Option<PageLoad>,
+    pub render_dirty: bool,
 }
 
 impl Tab {
@@ -48,6 +52,8 @@ impl Tab {
             message,
             document: None,
             styles: None,
+            load: None,
+            render_dirty: false,
         }
     }
 

@@ -17,7 +17,7 @@ use selectors::context::{
 };
 use selectors::matching::matches_selector;
 use selectors::parser::{
-    NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl, SelectorList,
+    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl, SelectorList,
     SelectorParseErrorKind,
 };
 use selectors::{Element, OpaqueElement};
@@ -209,6 +209,60 @@ impl<'i> Parser<'i> for SelectorParser {
 }
 
 pub type ParsedSelectors = SelectorList<TextSurferSelectorImpl>;
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) enum BucketKey {
+    Id(String),
+    Class(String),
+    LocalName(String),
+    Universal,
+}
+
+pub(crate) fn bucket_keys(selectors: &ParsedSelectors, quirks: bool) -> Vec<BucketKey> {
+    let mut keys = Vec::new();
+    for selector in selectors.slice() {
+        let mut id = None;
+        let mut class = None;
+        let mut local_names = Vec::new();
+        for component in selector.iter() {
+            match component {
+                Component::ID(value) if id.is_none() => {
+                    id = Some(normalize_bucket(value.as_str(), quirks));
+                }
+                Component::Class(value) if class.is_none() => {
+                    class = Some(normalize_bucket(value.as_str(), quirks));
+                }
+                Component::LocalName(value) if local_names.is_empty() => {
+                    local_names.push(value.name.as_str().to_string());
+                    if value.lower_name != value.name {
+                        local_names.push(value.lower_name.as_str().to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(id) = id {
+            keys.push(BucketKey::Id(id));
+        } else if let Some(class) = class {
+            keys.push(BucketKey::Class(class));
+        } else if !local_names.is_empty() {
+            keys.extend(local_names.into_iter().map(BucketKey::LocalName));
+        } else {
+            keys.push(BucketKey::Universal);
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn normalize_bucket(value: &str, quirks: bool) -> String {
+    if quirks {
+        value.to_ascii_lowercase()
+    } else {
+        value.to_string()
+    }
+}
 
 pub fn parse(input: &str) -> Option<ParsedSelectors> {
     let mut input = ParserInput::new(input);

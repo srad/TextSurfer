@@ -6,7 +6,8 @@ use crate::core::event::{Key, KeyEvent};
 use crate::core::focus::Focus;
 use crate::core::geom::Size;
 use crate::core::url::url_fix;
-use crate::net::{FetchPayload, charset_from_content_type, decode, decode_text};
+use crate::css::ColorScheme;
+use crate::net::{FetchPayload, ResourceId, charset_from_content_type, decode, decode_text};
 use crate::paint::DisplayList;
 use crate::ui::chrome::ChromeView;
 use crate::ui::editing::EditBuffer;
@@ -17,7 +18,8 @@ use crate::ui::widgets::status::StatusView;
 use crate::ui::widgets::tabs::TabChip;
 
 use super::net::{Navigate, NoopNet, Route, route};
-use super::render::{ResponseKind, paint_document, render_html, response_kind};
+use super::page_load::{PageLoad, PageLoadOptions};
+use super::render::{RenderedPage, ResponseKind, paint_document, response_kind};
 use super::startpage::{content_for, start_page};
 use super::tabs::TabManager;
 use crate::ui::theme::NORTON;
@@ -39,6 +41,7 @@ pub struct App {
     menu_active: usize,
     menu_item: usize,
     focus_before_menu: Focus,
+    now: Duration,
 }
 
 impl Default for App {
@@ -66,6 +69,7 @@ impl App {
             menu_active: 0,
             menu_item: 0,
             focus_before_menu: Focus::Address,
+            now: Duration::ZERO,
         }
     }
 
@@ -87,103 +91,188 @@ impl App {
         self.geometry = ChromeGeometry::for_size(size);
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
-        for tab in self.tabs.tabs_mut() {
-            if tab.layout_width != width {
-                if let (Some(document), Some(styles)) = (&tab.document, &tab.styles) {
-                    tab.painted =
-                        paint_document(&document.borrow(), styles, width, NORTON.palette());
+        let viewport = Size {
+            cols: width.min(usize::from(u16::MAX)) as u16,
+            rows: rows.min(usize::from(u16::MAX)) as u16,
+        };
+        let active = self.tabs.active_index();
+        for (index, tab) in self.tabs.tabs_mut().iter_mut().enumerate() {
+            if let Some(load) = tab.load.as_mut() {
+                if index == active {
+                    if let Some(page) = load.resize(viewport) {
+                        apply_rendered_page(tab, page, width);
+                    }
+                } else {
+                    load.set_viewport(viewport);
+                    tab.render_dirty = true;
                 }
-                tab.layout_width = width;
+            } else if tab.layout_width != width
+                && let (Some(document), Some(styles)) = (&tab.document, &tab.styles)
+            {
+                tab.painted =
+                    paint_document(&document.borrow(), styles, viewport, NORTON.palette());
             }
+            tab.layout_width = width;
             tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
         }
         self.touch();
     }
 
-    pub fn step(&mut self, _now: Duration) {
+    pub fn step(&mut self, now: Duration) {
+        self.now = now;
         while let Some(payload) = self.net.poll_result() {
             let _ = self.deliver_fetch(payload);
+        }
+        let width = self.geometry.content_cols();
+        let active = self.tabs.active_mut();
+        let page = active
+            .load
+            .as_mut()
+            .and_then(|load| load.render_if_ready(now));
+        if let Some(page) = page {
+            let css_warnings = page.css_warnings;
+            let parse_errors = page.parse_errors;
+            apply_rendered_page(active, page, width);
+            update_load_message(active, parse_errors, css_warnings);
+            self.touch();
         }
     }
 
     pub fn deliver_fetch(&mut self, payload: FetchPayload) -> bool {
-        let Some((_, tab)) = self.tabs.find_load_mut(payload.tab_id, payload.generation) else {
-            return false;
+        let tab_id = payload.tab_id;
+        let generation = payload.generation;
+        let resource_id = payload.resource_id;
+        let active_index = self.tabs.active_index();
+        let viewport = Size {
+            cols: self.geometry.content_cols().min(usize::from(u16::MAX)) as u16,
+            rows: self.geometry.content_rows().min(usize::from(u16::MAX)) as u16,
         };
-        match payload.result {
-            Ok(response) => {
-                let kind = response_kind(response.content_type.as_deref());
-                let charset = response
-                    .content_type
-                    .as_deref()
-                    .and_then(charset_from_content_type);
-                tab.title = response.final_url.clone().into();
-                tab.url = response.final_url.clone().into();
-                match kind {
-                    ResponseKind::Html => {
-                        let decoded = decode(&response.body, charset.as_deref());
-                        let page = render_html(
-                            &decoded.text,
-                            self.geometry.content_cols(),
-                            NORTON.palette(),
-                            false,
-                        );
-                        tab.painted = page.painted;
-                        tab.layout_width = self.geometry.content_cols();
-                        tab.document = Some(page.document);
-                        tab.styles = Some(page.styles);
-                        tab.message = if page.css_warnings == 0 {
-                            format!(
-                                "accepted gen {} - {} ({} parse errors)",
-                                payload.generation, response.final_url, page.parse_errors
-                            )
-                        } else {
-                            format!(
-                                "accepted gen {} - {} ({} parse errors, {} CSS warnings)",
-                                payload.generation,
-                                response.final_url,
-                                page.parse_errors,
-                                page.css_warnings
-                            )
-                        };
+        let width = self.geometry.content_cols();
+        let mut commands = Vec::new();
+        let mut cancel = false;
+        let mut visible_change = resource_id == ResourceId::DOCUMENT;
+        let accepted = {
+            let Some((index, tab)) = self.tabs.find_load_mut(tab_id, generation) else {
+                return false;
+            };
+            if resource_id != ResourceId::DOCUMENT {
+                let Some(load) = tab.load.as_mut() else {
+                    return false;
+                };
+                if !load.deliver(resource_id, payload.result) {
+                    return false;
+                }
+                commands = load.take_commands();
+                cancel = load.take_cancel_requested();
+                let page = (index == active_index)
+                    .then(|| load.render_if_ready(self.now))
+                    .flatten();
+                if let Some(page) = page {
+                    let css_warnings = page.css_warnings;
+                    let parse_errors = page.parse_errors;
+                    apply_rendered_page(tab, page, width);
+                    update_load_message(tab, parse_errors, css_warnings);
+                    visible_change = true;
+                } else if index != active_index {
+                    tab.render_dirty = true;
+                }
+                true
+            } else {
+                match payload.result {
+                    Ok(response) => {
+                        let kind = response_kind(response.content_type.as_deref());
+                        let charset = response
+                            .content_type
+                            .as_deref()
+                            .and_then(charset_from_content_type);
+                        tab.title = response.final_url.clone().into();
+                        tab.url = response.final_url.clone().into();
+                        match kind {
+                            ResponseKind::Html => {
+                                let decoded = decode(&response.body, charset.as_deref());
+                                let mut load = PageLoad::new(
+                                    &decoded.text,
+                                    response.final_url,
+                                    decoded.encoding,
+                                    PageLoadOptions {
+                                        viewport,
+                                        palette: NORTON.palette(),
+                                        scripting: false,
+                                        color_scheme: ColorScheme::Dark,
+                                        started: self.now,
+                                    },
+                                );
+                                commands = load.take_commands();
+                                cancel = load.take_cancel_requested();
+                                let parse_errors = load.parse_errors();
+                                let page = (index == active_index)
+                                    .then(|| load.render_if_ready(self.now))
+                                    .flatten();
+                                tab.load = Some(load);
+                                if let Some(page) = page {
+                                    let css_warnings = page.css_warnings;
+                                    apply_rendered_page(tab, page, width);
+                                    update_load_message(tab, parse_errors, css_warnings);
+                                } else {
+                                    tab.render_dirty = index != active_index;
+                                    let count =
+                                        tab.load.as_ref().map_or(0, PageLoad::external_occurrences);
+                                    tab.message =
+                                        format!("loading {} ({count} stylesheets)", tab.url);
+                                }
+                            }
+                            ResponseKind::PlainText => {
+                                let decoded = decode_text(&response.body, charset.as_deref());
+                                tab.load = None;
+                                tab.document = None;
+                                tab.styles = None;
+                                tab.painted = DisplayList::from_lines(
+                                    &decoded.text.lines().map(str::to_string).collect::<Vec<_>>(),
+                                );
+                                tab.message = format!(
+                                    "accepted gen {} - {} (plain text)",
+                                    generation, tab.url
+                                );
+                            }
+                            ResponseKind::Unsupported(content_type) => {
+                                tab.load = None;
+                                tab.document = None;
+                                tab.styles = None;
+                                tab.painted = DisplayList::from_lines(&[
+                                    format!("cannot display {}", tab.url),
+                                    String::new(),
+                                    format!("  unsupported content type: {content_type}"),
+                                ]);
+                                tab.message = format!("unsupported content type: {content_type}");
+                            }
+                        }
                     }
-                    ResponseKind::PlainText => {
-                        let decoded = decode_text(&response.body, charset.as_deref());
-                        tab.document = None;
-                        tab.styles = None;
-                        tab.painted = DisplayList::from_lines(
-                            &decoded.text.lines().map(str::to_string).collect::<Vec<_>>(),
-                        );
-                        tab.message = format!(
-                            "accepted gen {} - {} (plain text)",
-                            payload.generation, response.final_url
-                        );
-                    }
-                    ResponseKind::Unsupported(content_type) => {
+                    Err(error) => {
+                        tab.load = None;
                         tab.document = None;
                         tab.styles = None;
                         tab.painted = DisplayList::from_lines(&[
-                            format!("cannot display {}", response.final_url),
+                            format!("failed to load {}", tab.url),
                             String::new(),
-                            format!("  unsupported content type: {content_type}"),
+                            format!("  {error}"),
                         ]);
-                        tab.message = format!("unsupported content type: {content_type}");
+                        tab.message = format!("accepted gen {generation} - load failed: {error}");
                     }
                 }
+                true
             }
-            Err(error) => {
-                tab.document = None;
-                tab.styles = None;
-                tab.painted = DisplayList::from_lines(&[
-                    format!("failed to load {}", tab.url),
-                    String::new(),
-                    format!("  {error}"),
-                ]);
-                tab.message = format!("accepted gen {} - load failed: {error}", payload.generation);
-            }
+        };
+        for command in commands {
+            self.net
+                .submit(tab_id, generation, command.resource_id, command.url);
         }
-        self.touch();
-        true
+        if cancel {
+            self.net.cancel(tab_id, generation);
+        }
+        if visible_change {
+            self.touch();
+        }
+        accepted
     }
 
     pub fn should_quit(&self) -> bool {
@@ -256,10 +345,12 @@ impl App {
             Action::CloseTab => self.close_tab(),
             Action::NextTab => {
                 self.tabs.next();
+                self.activate_current();
                 self.touch();
             }
             Action::PrevTab => {
                 self.tabs.prev();
+                self.activate_current();
                 self.touch();
             }
             Action::FocusAddress => {
@@ -429,7 +520,12 @@ impl App {
                     self.tabs.active_mut().push_history(&fixed);
                 }
                 self.tabs.active_mut().message = format!("loading {fixed}");
-                self.net.submit(self.tabs.active().id, generation, parsed);
+                self.net.submit(
+                    self.tabs.active().id,
+                    generation,
+                    ResourceId::DOCUMENT,
+                    parsed,
+                );
             }
             Route::Reject => {
                 self.tabs.active_mut().message = format!("unsupported scheme: {}", parsed.scheme());
@@ -451,6 +547,8 @@ impl App {
         tab.generation = generation;
         tab.document = None;
         tab.styles = None;
+        tab.load = None;
+        tab.render_dirty = false;
     }
 
     fn go_back(&mut self) {
@@ -524,6 +622,24 @@ impl App {
         self.touch();
     }
 
+    fn activate_current(&mut self) {
+        let width = self.geometry.content_cols();
+        let now = self.now;
+        let tab = self.tabs.active_mut();
+        let page = match tab.load.as_mut() {
+            Some(load) if tab.render_dirty && load.has_painted() => Some(load.force_render()),
+            Some(load) => load.render_if_ready(now),
+            None => None,
+        };
+        if let Some(page) = page {
+            let css_warnings = page.css_warnings;
+            let parse_errors = page.parse_errors;
+            apply_rendered_page(tab, page, width);
+            update_load_message(tab, parse_errors, css_warnings);
+        }
+        tab.render_dirty = false;
+    }
+
     fn pending(&mut self, notice: &str) {
         self.tabs.active_mut().message = notice.to_string();
         self.touch();
@@ -559,6 +675,45 @@ impl App {
     fn touch(&mut self) {
         self.dirty = true;
     }
+}
+
+fn apply_rendered_page(tab: &mut super::tab::Tab, page: RenderedPage, width: usize) {
+    tab.painted = page.painted;
+    tab.layout_width = width;
+    tab.document = Some(page.document);
+    tab.styles = Some(page.styles);
+    tab.render_dirty = false;
+}
+
+fn update_load_message(tab: &mut super::tab::Tab, parse_errors: usize, css_warnings: usize) {
+    let Some(load) = tab.load.as_ref() else {
+        return;
+    };
+    let occurrences = load.external_occurrences();
+    let failures = load.failed_resources();
+    if occurrences == 0 && failures == 0 && !load.external_disabled() {
+        tab.message = if css_warnings == 0 {
+            format!(
+                "accepted gen {} - {} ({} parse errors)",
+                tab.generation, tab.url, parse_errors
+            )
+        } else {
+            format!(
+                "accepted gen {} - {} ({} parse errors, {} CSS warnings)",
+                tab.generation, tab.url, parse_errors, css_warnings
+            )
+        };
+        return;
+    }
+    let disabled = if load.external_disabled() {
+        ", external CSS disabled"
+    } else {
+        ""
+    };
+    tab.message = format!(
+        "accepted gen {} - {} ({} parse errors, {} CSS warnings, {} stylesheets, {} failed{})",
+        tab.generation, tab.url, parse_errors, css_warnings, occurrences, failures, disabled
+    );
 }
 
 fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
@@ -641,7 +796,7 @@ mod tests {
     }
 
     impl Navigate for FakeNet {
-        fn submit(&self, tab_id: u64, generation: u64, url: Url) {
+        fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) {
             self.submitted
                 .lock()
                 .unwrap()
@@ -649,6 +804,7 @@ mod tests {
             self.pending.lock().unwrap().push(FetchPayload {
                 tab_id,
                 generation,
+                resource_id,
                 result: Ok(FetchResponse {
                     final_url: url,
                     body: b"<p>hi there</p>".to_vec(),
@@ -788,6 +944,7 @@ mod tests {
         assert!(!app.deliver_fetch(FetchPayload {
             tab_id,
             generation: generation - 1,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: url::Url::parse("https://example.com/").unwrap(),
                 body: vec![],
@@ -798,6 +955,7 @@ mod tests {
         assert!(app.deliver_fetch(FetchPayload {
             tab_id,
             generation,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: url::Url::parse("https://example.com/").unwrap(),
                 body: vec![],
@@ -817,6 +975,7 @@ mod tests {
         assert!(app.deliver_fetch(FetchPayload {
             tab_id: background_tab_id,
             generation: background_generation,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: url::Url::parse("https://a.example/final").unwrap(),
                 body: b"<p>background complete</p>".to_vec(),
@@ -826,13 +985,23 @@ mod tests {
         assert_eq!(app.tabs.active_index(), 1);
         assert_eq!(app.tabs.tabs()[0].url, "https://a.example/final");
         assert!(
-            app.tabs.tabs()[0]
+            !app.tabs.tabs()[0]
                 .painted
                 .text_lines()
                 .iter()
                 .any(|line| line.contains("background complete"))
         );
         assert_eq!(app.message(), STARTUP_HINT);
+        app.apply(Action::PrevTab);
+        assert!(
+            app.tabs
+                .active()
+                .painted
+                .text_lines()
+                .iter()
+                .any(|line| line.contains("background complete"))
+        );
+        assert!(app.message().contains("accepted gen"));
     }
 
     #[test]
@@ -869,10 +1038,11 @@ mod tests {
             pending: Mutex<Vec<FetchPayload>>,
         }
         impl Navigate for ErrorNet {
-            fn submit(&self, tab_id: u64, generation: u64, _url: Url) {
+            fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, _url: Url) {
                 self.pending.lock().unwrap().push(FetchPayload {
                     tab_id,
                     generation,
+                    resource_id,
                     result: Err(FetchError::HttpStatus(404)),
                 });
             }
@@ -906,6 +1076,7 @@ mod tests {
         assert!(app.deliver_fetch(FetchPayload {
             tab_id,
             generation,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: Url::parse("https://example.com/plain").unwrap(),
                 body: b"one\ntwo".to_vec(),
@@ -925,6 +1096,7 @@ mod tests {
         assert!(app.deliver_fetch(FetchPayload {
             tab_id,
             generation,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: Url::parse("https://example.com/image").unwrap(),
                 body: b"not really a png".to_vec(),
@@ -944,6 +1116,7 @@ mod tests {
         assert!(app.deliver_fetch(FetchPayload {
             tab_id,
             generation,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: Url::parse("https://example.com/styled").unwrap(),
                 body: b"<style>p.secret { display: none }</style><p class=secret>hidden</p><div>shown</div>".to_vec(),
@@ -956,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn css_warnings_are_aggregated_without_scheduling_import_fetches() {
+    fn valid_imports_are_scheduled_and_late_imports_warn() {
         let fake = Arc::new(FakeNet::default());
         let mut app = App::with_net(fake.clone());
         app.submit_url("https://example.com");
@@ -965,6 +1138,7 @@ mod tests {
             app.deliver_fetch(FetchPayload {
                 tab_id: pending.tab_id,
                 generation: pending.generation,
+                resource_id: ResourceId::DOCUMENT,
                 result: Ok(FetchResponse {
                     final_url: Url::parse("https://example.com/").unwrap(),
                     body: br#"<!doctype html><html><head>
@@ -976,10 +1150,11 @@ mod tests {
                 }),
             })
         );
-        assert_eq!(fake.submitted.lock().unwrap().len(), 1);
+        assert_eq!(fake.submitted.lock().unwrap().len(), 2);
+        app.step(Duration::ZERO);
         assert_eq!(
             app.message(),
-            "accepted gen 1 - https://example.com/ (0 parse errors, 3 CSS warnings)"
+            "accepted gen 1 - https://example.com/ (0 parse errors, 1 CSS warnings, 1 stylesheets, 0 failed)"
         );
         assert!(
             app.tabs
@@ -1000,6 +1175,7 @@ mod tests {
         assert!(app.deliver_fetch(FetchPayload {
             tab_id,
             generation,
+            resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: Url::parse("https://example.com/").unwrap(),
                 body: b"<!doctype html><html><body><p>shown</p></body></html>".to_vec(),

@@ -20,7 +20,16 @@ fn render(name: &str) -> DisplayList {
         .join(name);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("fixture {}: {error}", path.display()));
-    render_html(&source, WIDTH, palette(), false).painted
+    render_html(
+        &source,
+        textsurfer::core::geom::Size {
+            cols: WIDTH as u16,
+            rows: 24,
+        },
+        palette(),
+        false,
+    )
+    .painted
 }
 
 fn golden(name: &str) -> String {

@@ -1,14 +1,20 @@
+use std::collections::HashMap;
+
 use cssparser::color::clamp_unit_f32;
 use cssparser::{Parser, ParserInput, Token};
 use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
 
 use crate::core::dom::Document;
 use crate::core::dom::{AttrNs, ElementNs, Node, NodeId};
+use crate::core::geom::Size;
 use crate::core::style::{
     BoxSizing, ComputedStyle, CssWidth, Display, EdgeSizes, Palette, Rgb, StyleTree, WhiteSpace,
 };
-use crate::css::parser::{CssRule, MediaQuery, MediaQueryList, StyleRule, parse_declarations};
-use crate::css::selectors::{DynamicState, matching_specificity};
+use crate::css::parser::{
+    ColorScheme, CssRule, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
+    ScriptingValue, StyleRule, parse_declarations,
+};
+use crate::css::selectors::{BucketKey, DynamicState, bucket_keys, matching_specificity};
 use crate::css::{Declaration, StyleSheet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +28,9 @@ pub struct MediaContext {
     target: MediaTarget,
     pub palette: Palette,
     pub state: DynamicState,
+    pub scripting: bool,
+    pub color_scheme: ColorScheme,
+    pub viewport: Size,
 }
 
 impl MediaContext {
@@ -30,6 +39,9 @@ impl MediaContext {
             target: MediaTarget::Screen,
             palette: Palette::DEFAULT,
             state: DynamicState::INERT,
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            viewport: Size { cols: 80, rows: 24 },
         }
     }
 
@@ -38,6 +50,9 @@ impl MediaContext {
             target: MediaTarget::Print,
             palette: Palette::DEFAULT,
             state: DynamicState::INERT,
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            viewport: Size { cols: 80, rows: 24 },
         }
     }
 
@@ -47,6 +62,21 @@ impl MediaContext {
 
     pub fn with_state(self, state: DynamicState) -> Self {
         Self { state, ..self }
+    }
+
+    pub fn with_scripting(self, scripting: bool) -> Self {
+        Self { scripting, ..self }
+    }
+
+    pub fn with_color_scheme(self, color_scheme: ColorScheme) -> Self {
+        Self {
+            color_scheme,
+            ..self
+        }
+    }
+
+    pub fn with_viewport(self, viewport: Size) -> Self {
+        Self { viewport, ..self }
     }
 }
 
@@ -59,46 +89,140 @@ pub struct BasicCascade;
 
 impl Cascade for BasicCascade {
     fn apply(&self, sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree {
-        let mut tree = StyleTree::default();
-        let rules = active_style_rules(sheets, media);
-        for id in elements_in_document_order(document) {
-            let parent_style = document.parent(id).map(|parent| tree.get(parent));
-            let mut style = ua_style(document, id, parent_style, media.palette);
-            let mut declarations = Vec::new();
-            let mut order = 0usize;
-            for rule in &rules {
-                if let Some(specificity) =
-                    matching_specificity(&rule.selectors, document, id, media.state)
-                {
-                    for declaration in &rule.declarations {
-                        declarations.push((
-                            declaration.important,
-                            specificity,
-                            order,
-                            declaration.clone(),
-                        ));
-                        order += 1;
-                    }
-                }
-            }
-            if let Some(inline) = inline_style(document, id) {
-                for declaration in parse_declarations(inline) {
-                    declarations.push((declaration.important, u32::MAX, order, declaration));
+        cascade_document(sheets, document, media, true)
+    }
+}
+
+fn cascade_document(
+    sheets: &[StyleSheet],
+    document: &Document,
+    media: MediaContext,
+    bucketed: bool,
+) -> StyleTree {
+    let mut tree = StyleTree::default();
+    let rules = active_style_rules(sheets, media);
+    let index = bucketed.then(|| RuleIndex::new(&rules, document));
+    for id in elements_in_document_order(document) {
+        let parent_style = document.parent(id).map(|parent| tree.get(parent));
+        let mut style = ua_style(document, id, parent_style, media.palette);
+        let mut declarations = Vec::new();
+        let mut order = 0usize;
+        let candidates = index.as_ref().map_or_else(
+            || (0..rules.len()).collect(),
+            |index| index.candidates(document, id),
+        );
+        for rule_index in candidates {
+            let rule = rules[rule_index];
+            if let Some(specificity) =
+                matching_specificity(&rule.selectors, document, id, media.state)
+            {
+                for declaration in &rule.declarations {
+                    declarations.push((
+                        declaration.important,
+                        specificity,
+                        order,
+                        declaration.clone(),
+                    ));
                     order += 1;
                 }
             }
-            declarations.sort_by_key(|(important, specificity, order, _)| {
-                (*important, *specificity, *order)
-            });
-            for (_, _, _, declaration) in declarations {
-                apply_declaration(&mut style, parent_style, &declaration);
-            }
-            if style.display != Display::Block {
-                style.width = CssWidth::Auto;
-            }
-            tree.insert(id, style);
         }
-        tree
+        if let Some(inline) = inline_style(document, id) {
+            for declaration in parse_declarations(inline) {
+                declarations.push((declaration.important, u32::MAX, order, declaration));
+                order += 1;
+            }
+        }
+        declarations
+            .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
+        for (_, _, _, declaration) in declarations {
+            apply_declaration(&mut style, parent_style, &declaration);
+        }
+        if style.display != Display::Block {
+            style.width = CssWidth::Auto;
+        }
+        tree.insert(id, style);
+    }
+    tree
+}
+
+#[cfg(test)]
+fn apply_naive(sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree {
+    cascade_document(sheets, document, media, false)
+}
+
+#[derive(Default)]
+struct RuleIndex {
+    ids: HashMap<String, Vec<usize>>,
+    classes: HashMap<String, Vec<usize>>,
+    local_names: HashMap<String, Vec<usize>>,
+    universal: Vec<usize>,
+    quirks: bool,
+}
+
+impl RuleIndex {
+    fn new(rules: &[&StyleRule], document: &Document) -> Self {
+        let quirks = document.quirks_mode() == crate::core::dom::DomQuirksMode::Quirks;
+        let mut index = Self {
+            quirks,
+            ..Self::default()
+        };
+        for (rule_index, rule) in rules.iter().enumerate() {
+            for key in bucket_keys(&rule.selectors, quirks) {
+                let bucket = match key {
+                    BucketKey::Id(value) => index.ids.entry(value).or_default(),
+                    BucketKey::Class(value) => index.classes.entry(value).or_default(),
+                    BucketKey::LocalName(value) => index.local_names.entry(value).or_default(),
+                    BucketKey::Universal => &mut index.universal,
+                };
+                bucket.push(rule_index);
+            }
+        }
+        index
+    }
+
+    fn candidates(&self, document: &Document, id: NodeId) -> Vec<usize> {
+        let mut candidates = self.universal.clone();
+        let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
+            return candidates;
+        };
+        let local_name = if *ns == ElementNs::Html {
+            name.to_ascii_lowercase()
+        } else {
+            name.clone()
+        };
+        if let Some(rules) = self.local_names.get(&local_name) {
+            candidates.extend(rules);
+        }
+        for attr in attrs {
+            if attr.ns != AttrNs::None {
+                continue;
+            }
+            if attr.name == "id" {
+                let id = self.normalize(&attr.value);
+                if let Some(rules) = self.ids.get(&id) {
+                    candidates.extend(rules);
+                }
+            } else if attr.name == "class" {
+                for class in attr.value.split_ascii_whitespace() {
+                    let class = self.normalize(class);
+                    if let Some(rules) = self.classes.get(&class) {
+                        candidates.extend(rules);
+                    }
+                }
+            }
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates
+    }
+
+    fn normalize(&self, value: &str) -> String {
+        if self.quirks {
+            value.to_ascii_lowercase()
+        } else {
+            value.to_string()
+        }
     }
 }
 
@@ -115,12 +239,13 @@ fn active_style_rules(sheets: &[StyleSheet], media: MediaContext) -> Vec<&StyleR
                 stack.extend(rule.rules.iter().rev());
             }
             CssRule::Media(_) => {}
+            CssRule::Import(_) => {}
         }
     }
     active
 }
 
-fn media_query_list_matches(queries: &MediaQueryList, media: MediaContext) -> bool {
+pub fn media_query_list_matches(queries: &MediaQueryList, media: MediaContext) -> bool {
     match queries {
         MediaQueryList::Always => true,
         MediaQueryList::Any(queries) => queries.iter().any(|query| match query {
@@ -136,8 +261,60 @@ fn media_query_list_matches(queries: &MediaQueryList, media: MediaContext) -> bo
                 };
                 matched != *negated
             }
+            MediaQuery::Condition {
+                negated,
+                media_type,
+                features,
+            } => {
+                let type_matches = media_type
+                    .as_deref()
+                    .is_none_or(|media_type| media_type_matches(media_type, media));
+                let matched = type_matches
+                    && features
+                        .iter()
+                        .all(|feature| media_feature_matches(*feature, media));
+                matched != *negated
+            }
             MediaQuery::Never => false,
         }),
+    }
+}
+
+fn media_type_matches(media_type: &str, media: MediaContext) -> bool {
+    match media_type {
+        "all" => true,
+        "screen" => media.target == MediaTarget::Screen,
+        "print" => media.target == MediaTarget::Print,
+        _ => false,
+    }
+}
+
+fn media_feature_matches(feature: MediaFeature, media: MediaContext) -> bool {
+    match feature {
+        MediaFeature::Scripting(None) => media.scripting,
+        MediaFeature::Scripting(Some(ScriptingValue::None)) => !media.scripting,
+        MediaFeature::Scripting(Some(ScriptingValue::InitialOnly)) => false,
+        MediaFeature::Scripting(Some(ScriptingValue::Enabled)) => media.scripting,
+        MediaFeature::PrefersColorScheme(None) => true,
+        MediaFeature::PrefersColorScheme(Some(scheme)) => media.color_scheme == scheme,
+        MediaFeature::Dimension {
+            axis,
+            comparison,
+            value,
+        } => {
+            let actual = match axis {
+                MediaAxis::Width => media.viewport.cols,
+                MediaAxis::Height => media.viewport.rows,
+            };
+            match value {
+                None => actual != 0,
+                Some(expected) => match comparison {
+                    MediaComparison::Equal => actual == expected,
+                    MediaComparison::Minimum => actual >= expected,
+                    MediaComparison::Maximum => actual <= expected,
+                },
+            }
+        }
     }
 }
 
@@ -638,8 +815,10 @@ fn parse_length_token(parser: &mut Parser<'_, '_>) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::render::embedded_style_sheets;
     use crate::core::dom::{Attr, ElementNs};
     use crate::css::{CssParser, CssparserParser};
+    use crate::html::{Html5everParser, HtmlParser};
 
     #[test]
     fn ua_and_author_rules_form_a_computed_style_tree() {
@@ -923,5 +1102,111 @@ mod tests {
         assert_eq!(styles.get(p).padding.top, 0);
         assert_eq!(styles.get(p).padding.left, 65_535);
         assert_eq!(styles.get(p).width, CssWidth::Cells(12));
+    }
+
+    #[test]
+    fn bucketed_and_naive_cascades_agree_for_complex_selector_lists() {
+        let mut document = Document::new();
+        let article = document.insert_element(
+            None,
+            "article",
+            ElementNs::Html,
+            vec![Attr::plain("id", "hero")],
+        );
+        document.insert_element(
+            Some(article),
+            "p",
+            ElementNs::Html,
+            vec![Attr::plain("class", "note a"), Attr::plain("data-x", "yes")],
+        );
+        document.insert_element(
+            Some(article),
+            "span",
+            ElementNs::Html,
+            vec![Attr::plain("class", "b")],
+        );
+        let sheet = CssparserParser.parse(
+            "#hero, .missing { color: red }
+             .note { font-weight: 700 }
+             article > p { display: block }
+             [data-x] { text-decoration: underline }
+             :is(.a, .b) { background-color: blue }
+             p:not(.skip) { width: 12px }",
+        );
+        let media = MediaContext::screen();
+        assert_eq!(
+            BasicCascade.apply(std::slice::from_ref(&sheet), &document, media),
+            apply_naive(std::slice::from_ref(&sheet), &document, media)
+        );
+    }
+
+    #[test]
+    fn bucket_normalization_matches_naive_cascade_in_quirks_mode() {
+        let mut document = Document::new();
+        document.set_quirks_mode(crate::core::dom::DomQuirksMode::Quirks);
+        document.insert_element(
+            None,
+            "p",
+            ElementNs::Html,
+            vec![Attr::plain("class", "loud")],
+        );
+        let sheet = CssparserParser.parse(".LOUD { font-weight: bold }");
+        let media = MediaContext::screen();
+        assert_eq!(
+            BasicCascade.apply(std::slice::from_ref(&sheet), &document, media),
+            apply_naive(std::slice::from_ref(&sheet), &document, media)
+        );
+    }
+
+    #[test]
+    fn bucketed_and_naive_cascades_agree_on_the_render_fixture_corpus() {
+        for source in [
+            include_str!("../../tests/fixtures/borders.html"),
+            include_str!("../../tests/fixtures/headings.html"),
+            include_str!("../../tests/fixtures/links.html"),
+            include_str!("../../tests/fixtures/margins.html"),
+            include_str!("../../tests/fixtures/pre.html"),
+            include_str!("../../tests/fixtures/wide.html"),
+        ] {
+            let outcome = Html5everParser::new(false).parse_document(source);
+            let document = outcome.document.borrow();
+            let sheets = embedded_style_sheets(&document);
+            let media = MediaContext::screen();
+            assert_eq!(
+                BasicCascade.apply(&sheets, &document, media),
+                apply_naive(&sheets, &document, media)
+            );
+        }
+    }
+
+    #[test]
+    fn media_features_use_the_injected_terminal_context() {
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(
+            "@media screen and (scripting: none) and (prefers-color-scheme: dark)
+                    and (min-width: 80px) and (max-height: 24px) {
+                p { display: none }
+             }",
+        );
+        let matching = MediaContext::screen()
+            .with_viewport(Size { cols: 80, rows: 24 })
+            .with_color_scheme(ColorScheme::Dark)
+            .with_scripting(false);
+        assert_eq!(
+            BasicCascade
+                .apply(std::slice::from_ref(&sheet), &document, matching)
+                .get(p)
+                .display,
+            Display::None
+        );
+        let narrow = matching.with_viewport(Size { cols: 79, rows: 24 });
+        assert_ne!(
+            BasicCascade
+                .apply(&[sheet], &document, narrow)
+                .get(p)
+                .display,
+            Display::None
+        );
     }
 }

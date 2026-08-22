@@ -3,7 +3,9 @@ use mediatype::{MediaType, names};
 use crate::core::dom::{Document, Node, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{Palette, StyleTree};
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext, StyleSheet};
+use crate::css::{
+    BasicCascade, Cascade, ColorScheme, CssParser, CssparserParser, MediaContext, StyleSheet,
+};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
@@ -42,24 +44,46 @@ pub fn response_kind(content_type: Option<&str>) -> ResponseKind {
     }
 }
 
-pub fn render_html(source: &str, width: usize, palette: Palette, scripting: bool) -> RenderedPage {
+pub fn render_html(
+    source: &str,
+    viewport: Size,
+    palette: Palette,
+    scripting: bool,
+) -> RenderedPage {
     let outcome = Html5everParser::new(scripting).parse_document(source);
     let sheets = embedded_style_sheets(&outcome.document.borrow());
+    let media = MediaContext::screen()
+        .with_palette(palette)
+        .with_scripting(scripting)
+        .with_color_scheme(ColorScheme::Dark)
+        .with_viewport(viewport);
+    render_document(
+        outcome.document,
+        &sheets,
+        media,
+        palette,
+        outcome.parse_errors,
+    )
+}
+
+pub fn render_document(
+    document: SharedDocument,
+    sheets: &[StyleSheet],
+    media: MediaContext,
+    palette: Palette,
+    parse_errors: usize,
+) -> RenderedPage {
     let css_warnings = sheets
         .iter()
         .map(|sheet| sheet.diagnostics.total())
         .sum::<usize>();
-    let styles = BasicCascade.apply(
-        &sheets,
-        &outcome.document.borrow(),
-        MediaContext::screen().with_palette(palette),
-    );
-    let painted = paint_document(&outcome.document.borrow(), &styles, width, palette);
+    let styles = BasicCascade.apply(sheets, &document.borrow(), media);
+    let painted = paint_document(&document.borrow(), &styles, media.viewport, palette);
     RenderedPage {
-        document: outcome.document,
+        document,
         styles,
         painted,
-        parse_errors: outcome.parse_errors,
+        parse_errors,
         css_warnings,
     }
 }
@@ -67,17 +91,10 @@ pub fn render_html(source: &str, width: usize, palette: Palette, scripting: bool
 pub fn paint_document(
     document: &Document,
     styles: &StyleTree,
-    width: usize,
+    viewport: Size,
     palette: Palette,
 ) -> DisplayList {
-    let boxes = TaffyLayoutEngine.layout(
-        document,
-        styles,
-        Size {
-            cols: width.min(usize::from(u16::MAX)) as u16,
-            rows: u16::MAX,
-        },
-    );
+    let boxes = TaffyLayoutEngine.layout(document, styles, viewport);
     BasicPainter.paint(&boxes, palette)
 }
 
@@ -114,7 +131,7 @@ mod tests {
     fn rendering_html_reports_parse_and_style_diagnostics_with_the_painted_page() {
         let page = render_html(
             "<style>p { display: block; color: bogus }</style><p>hello</p>",
-            20,
+            Size { cols: 20, rows: 24 },
             Palette::default(),
             false,
         );

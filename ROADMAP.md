@@ -23,7 +23,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `net/encoding.rs` — WHATWG sniffing: BOM, header, meta prescan, XML fallback, x-user-defined postprocess | custom | **Keep** — html5ever ships only the meta-`charset` substring extractor and it is `pub(crate)`; encoding_rs is decode/encode-only; no sniffer exists in the ecosystem |
 | `core/url.rs` — `url_fix` | not a parser | **No change** — delegates all real parsing to the `url` crate; scheme/host/search heuristics are address-bar UX behavior |
 | `css/parser.rs` | library adapter | **Keep** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
-| `css/parser.rs` — type-only media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
+| `css/parser.rs` — terminal media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
 | Table layout (M1-D) | custom, planned | **Custom is correct** — Taffy 0.13 implements block/flex/grid but has no table algorithm; no Rust crate implements CSS table layout with colspan/rowspan against a foreign box tree |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
@@ -61,7 +61,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1-R — Stabilization | DOM invariants, fetch routing, resource limits, resize/scroll, terminal lifecycle, trustworthy gates | (complete) |
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
-| M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (open) |
+| M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
 | M1-D — Layout completeness | Table layout, generated content + list markers, presentational attributes, `text-align` | (open) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
@@ -286,20 +286,34 @@ Remaining:
   the human eyeball smoke in a real terminal — `--dump` already renders example.com, Wikipedia and
   DuckDuckGo Lite over the real network without panicking.
 
-### M1-C — External stylesheets (open)
+### M1-C — External stylesheets (done — user smoke pending)
 
-- [ ] Discover `<link rel=stylesheet>` and recursive `@import` URLs against the effective document
+Locked implementation details: the render-blocking window starts after parsing and lasts five
+seconds; only currently applicable occurrences block, with one coalesced late repaint after the
+applicable graph settles. Dump mode shares the I/O-free page-load driver and takes exact content
+`--cols`/`--rows` dimensions (rows default to 24). Resource keys are `(tab, generation, resource)`
+without changing the URL-only `FetchRequest` API. Iterative discovery uses the first non-template
+HTML base, strips URL fragments, and resolves external imports against final response URLs.
+Logical occurrences preserve order while normalized URLs fetch once. Import depth is eight and the
+64 limit counts occurrences. Separate 32 MiB retained-raw and unique-decoded ceilings atomically
+disable external CSS when crossed; the per-response 10 MiB failure remains local. Missing or invalid
+MIME defaults to CSS; other valid MIME is rejected except for same-origin quirks documents.
+Nonmatching conditional sheets fetch eagerly, background tabs render lazily, and resize reevaluates
+both viewport dimensions without restoring the blank loading state.
+
+- [x] Discover `<link rel=stylesheet>` and recursive `@import` URLs against the effective document
       base; use the same tab/generation scheduler as navigation.
-- [ ] Preserve cascade document order independently of completion order; recascade when a resource
-      slot changes and lazily re-layout background tabs on activation.
-- [ ] Per-load ceilings: 64 subresource requests, 32 MiB aggregate decoded bytes, 10 MiB per
-      resource, import depth 8; cycles deduplicate and failures remain tab-local/non-fatal.
-- [ ] **Selector bucketing.** The cascade currently matches every element against every active rule
+- [x] Preserve cascade document order independently of completion order; coalesce applicable graph
+      completion into one late repaint and lazily render background tabs on activation.
+- [x] Per-load ceilings: 64 external occurrences, separate 32 MiB retained-raw and unique-decoded
+      budgets, 10 MiB per resource, import depth 8; cycles terminate and failures remain
+      tab-local/non-fatal. Crossing either aggregate budget discards all external CSS.
+- [x] **Selector bucketing.** The cascade indexes every active rule
       (O(elements × rules)) — acceptable for embedded `<style>`, not for real sites' sheets. Bucket by
       the rightmost simple selector (id/class/local name) using the `selectors` crate's own
       machinery. *Proof:* a synthetic 5,000-rule × 2,000-element benchmark stays inside the M6 perf
       budget, and cascade results are identical to the naive path on the fixture corpus.
-- [ ] **`@media` beyond type-only**: `scripting` (maps to the session JS flag),
+- [x] **`@media` beyond type-only**: `scripting` (maps to the session JS flag),
       `prefers-color-scheme` (maps to the theme), `width`/`height` (map to the content viewport).
 - **Acceptance:** out-of-order, stale-generation, redirect/base, import-cycle, budget and
   cascade-order fixtures green; bucketed and naive cascades agree; manual Wikipedia smoke renders
@@ -543,3 +557,12 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   4 binary · 3 pipeline · 14 corpus · 10 golden. `--dump` renders example.com, Wikipedia and
   DuckDuckGo Lite over the real network without a panic; DuckDuckGo Lite comes out nearly empty,
   which is exactly the M1-D table gap and evidence for the tables-before-interaction ordering.
+- 2026-08-22 — M1-C closed (user smoke pending). Existing pins were verified current and unchanged:
+  **cssparser 0.37.0**, **selectors 0.40.0**, **encoding_rs 0.8.35**, **url 2.5.8**; no dependency was
+  added. `ResourceId` extends the fetch scheduler to concurrent subresources, and the I/O-free
+  `PageLoad` driver is shared by the TUI and `--dump`. Linked and imported sheets decode, resolve,
+  deduplicate and cascade in logical document order under bounded render-blocking and memory rules;
+  resize-aware media features and rightmost-compound selector buckets are active. Local proof is
+  green at 303 library · 5 binary · 4 pipeline · 14 corpus · 10 golden tests; the development-profile
+  5,000-rule × 2,000-element selector benchmark median is 26.0575 ms. The three live-site terminal
+  smokes remain human-run by standing rule.

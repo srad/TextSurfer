@@ -6,7 +6,8 @@ pub mod pool;
 
 pub use encoding::{Decoded, charset_from_content_type, decode, decode_text};
 pub use fetch::{
-    Fetch, FetchError, FetchPayload, FetchRequest, FetchResponse, MAX_BODY_BYTES, SchemeFetch,
+    Fetch, FetchError, FetchPayload, FetchRequest, FetchResponse, MAX_BODY_BYTES, ResourceId,
+    SchemeFetch,
 };
 pub use file::FileFetch;
 pub use http::UreqFetch;
