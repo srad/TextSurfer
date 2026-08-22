@@ -6,12 +6,12 @@ use clap::{Parser, ValueEnum};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use textsurf::app::App;
-use textsurf::app::net::{Navigate, PoolNet};
-use textsurf::core::event::{Key, KeyEvent, KeyModifiers as AppKeyModifiers};
-use textsurf::core::geom::Size;
-use textsurf::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
-use textsurf::ui::chrome;
+use textsurfer::app::App;
+use textsurfer::app::net::{Navigate, PoolNet};
+use textsurfer::core::event::{Key, KeyEvent, KeyModifiers as AppKeyModifiers};
+use textsurfer::core::geom::Size;
+use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
+use textsurfer::ui::chrome;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -41,7 +41,7 @@ fn main() -> io::Result<()> {
         ));
     }
     ratatui::run(|terminal| {
-        let fetch: Arc<dyn textsurf::net::Fetch> = Arc::new(SchemeFetch {
+        let fetch: Arc<dyn textsurfer::net::Fetch> = Arc::new(SchemeFetch {
             http: Arc::new(match cli.user_agent {
                 Some(user_agent) => UreqFetch::with_user_agent(user_agent),
                 None => UreqFetch::new(),
@@ -159,13 +159,13 @@ mod tests {
 
     #[test]
     fn cli_parses_the_start_url_and_rejects_unknown_flags() {
-        let cli = Cli::try_parse_from(["textsurf", "--url", "https://example.com"]).unwrap();
+        let cli = Cli::try_parse_from(["textsurfer", "--url", "https://example.com"]).unwrap();
         assert_eq!(cli.url.as_deref(), Some("https://example.com"));
         assert_eq!(cli.js, JsMode::Auto);
-        let cli =
-            Cli::try_parse_from(["textsurf", "--user-agent", "test-agent", "--js", "off"]).unwrap();
+        let cli = Cli::try_parse_from(["textsurfer", "--user-agent", "test-agent", "--js", "off"])
+            .unwrap();
         assert_eq!(cli.user_agent.as_deref(), Some("test-agent"));
         assert_eq!(cli.js, JsMode::Off);
-        assert!(Cli::try_parse_from(["textsurf", "--unknown"]).is_err());
+        assert!(Cli::try_parse_from(["textsurfer", "--unknown"]).is_err());
     }
 }

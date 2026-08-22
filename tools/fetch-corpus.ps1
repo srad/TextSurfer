@@ -9,7 +9,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $out = Join-Path $root "testdata"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-$headers = @{ "User-Agent" = "textsurf-fetch-corpus" }
+$headers = @{ "User-Agent" = "textsurfer-fetch-corpus" }
 $base = "https://raw.githubusercontent.com/web-platform-tests/wpt/$Commit/html/syntax/parsing/resources"
 $api = "https://api.github.com/repos/web-platform-tests/wpt/contents/html/syntax/parsing/resources?ref=$Commit"
 

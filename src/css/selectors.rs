@@ -78,7 +78,7 @@ impl ToCss for UnsupportedPseudoClass {
 }
 
 impl NonTSPseudoClass for UnsupportedPseudoClass {
-    type Impl = TextSurfSelectorImpl;
+    type Impl = TextSurferSelectorImpl;
 
     fn is_active_or_hover(&self) -> bool {
         match *self {}
@@ -102,13 +102,13 @@ impl ToCss for UnsupportedPseudoElement {
 }
 
 impl PseudoElement for UnsupportedPseudoElement {
-    type Impl = TextSurfSelectorImpl;
+    type Impl = TextSurferSelectorImpl;
 }
 
 #[derive(Clone, Debug)]
-pub struct TextSurfSelectorImpl;
+pub struct TextSurferSelectorImpl;
 
-impl SelectorImpl for TextSurfSelectorImpl {
+impl SelectorImpl for TextSurferSelectorImpl {
     type ExtraMatchingData<'a> = PhantomData<&'a ()>;
     type AttrValue = Atom;
     type Identifier = Atom;
@@ -125,7 +125,7 @@ impl SelectorImpl for TextSurfSelectorImpl {
 pub struct SelectorParser;
 
 impl<'i> Parser<'i> for SelectorParser {
-    type Impl = TextSurfSelectorImpl;
+    type Impl = TextSurferSelectorImpl;
     type Error = SelectorParseErrorKind<'i>;
 
     fn parse_is_and_where(&self) -> bool {
@@ -137,7 +137,7 @@ impl<'i> Parser<'i> for SelectorParser {
     }
 }
 
-pub type ParsedSelectors = SelectorList<TextSurfSelectorImpl>;
+pub type ParsedSelectors = SelectorList<TextSurferSelectorImpl>;
 
 pub fn parse(input: &str) -> Option<ParsedSelectors> {
     let mut input = ParserInput::new(input);
@@ -210,7 +210,7 @@ impl DomElement<'_> {
 }
 
 impl Element for DomElement<'_> {
-    type Impl = TextSurfSelectorImpl;
+    type Impl = TextSurferSelectorImpl;
 
     fn opaque(&self) -> OpaqueElement {
         OpaqueElement::new(self.document.node(self.id).expect("element node"))
@@ -309,7 +309,7 @@ impl Element for DomElement<'_> {
     fn match_non_ts_pseudo_class(
         &self,
         pseudo: &UnsupportedPseudoClass,
-        _context: &mut MatchingContext<TextSurfSelectorImpl>,
+        _context: &mut MatchingContext<TextSurferSelectorImpl>,
     ) -> bool {
         match *pseudo {}
     }
@@ -317,7 +317,7 @@ impl Element for DomElement<'_> {
     fn match_pseudo_element(
         &self,
         pseudo: &UnsupportedPseudoElement,
-        _context: &mut MatchingContext<TextSurfSelectorImpl>,
+        _context: &mut MatchingContext<TextSurferSelectorImpl>,
     ) -> bool {
         match *pseudo {}
     }

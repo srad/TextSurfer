@@ -1,6 +1,6 @@
 pub fn start_page() -> Vec<String> {
     vec![
-        "TextSurf - a text-mode browser".to_string(),
+        "TextSurfer - a text-mode browser".to_string(),
         String::new(),
         "  press / to type a URL or search terms, Enter to go".to_string(),
         "  Ctrl+T new tab  Ctrl+W close  Ctrl+N/P switch".to_string(),

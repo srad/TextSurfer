@@ -1,4 +1,4 @@
-use textsurf::core::dom::ElementNs;
+use textsurfer::core::dom::ElementNs;
 
 pub struct DatCase {
     pub input: String,

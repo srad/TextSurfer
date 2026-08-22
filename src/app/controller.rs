@@ -702,7 +702,7 @@ mod tests {
         assert!(view.address_focused);
         assert_eq!(
             view.content.lines.first().unwrap(),
-            "TextSurf - a text-mode browser"
+            "TextSurfer - a text-mode browser"
         );
     }
 

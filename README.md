@@ -1,6 +1,6 @@
 <div align="center">
 
-# TextSurf
+# TextSurfer
 
 ### A text-mode web browser, built in Rust on ratatui
 
@@ -15,14 +15,14 @@
 
 </div>
 
-TextSurf is a terminal browser in the tradition of lynx and w3m: it fetches real pages, parses them
+TextSurfer is a terminal browser in the tradition of lynx and w3m: it fetches real pages, parses them
 with the same standards-grade engines the web is built on, and renders them as styled text in your
 terminal. The UI is **I/O-free by construction** — events arrive as domain types, fetch results are
 delivered through a single generation-tagged channel, and time is injected. Every module boundary is
 a trait, so implementations are replaceable and testable in isolation.
 
 ```
- File  Navigate  View  Help                 TextSurf
+ File  Navigate  View  Help                TextSurfer
 │┌ example.com ┐                                      │
 ├───────────────┘─────────────────────────────────────┤
 │[‹] [›] [↻] [⌂]  URL: │https://example.com           │
@@ -95,10 +95,10 @@ uses OS-native certificate roots.
 $ cargo build --release
 $ cargo run --release            # start page
 $ cargo run -- --url https://example.com
-$ cargo run -- --user-agent TextSurfDev/1 --js off
+$ cargo run -- --user-agent TextSurferDev/1 --js off
 ```
 
-Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurf falls back
+Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurfer falls back
 to DuckDuckGo's lite search for anything that isn't a URL.
 
 ## Key bindings

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use textsurf::app::App;
-use textsurf::app::net::Navigate;
-use textsurf::net::{Fetch, FetchError, FetchPayload, FetchRequest, FetchResponse, SchemeFetch};
+use textsurfer::app::App;
+use textsurfer::app::net::Navigate;
+use textsurfer::net::{Fetch, FetchError, FetchPayload, FetchRequest, FetchResponse, SchemeFetch};
 
 const BODY: &str = "<!doctype html><title>smoke</title><p>acceptance</p>";
 

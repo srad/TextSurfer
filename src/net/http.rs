@@ -5,7 +5,7 @@ use url::Url;
 
 use super::fetch::{Fetch, FetchError, FetchRequest, FetchResponse, MAX_BODY_BYTES};
 
-const USER_AGENT: &str = concat!("textsurf/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("textsurfer/", env!("CARGO_PKG_VERSION"));
 
 pub struct UreqFetch {
     agent: Agent,

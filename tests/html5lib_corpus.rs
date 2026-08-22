@@ -8,8 +8,8 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 use support::dat::{DatCase, parse_file};
 use support::xfail::Xfail;
-use textsurf::core::dom::ElementNs;
-use textsurf::html::{ElementContext, Html5everParser, HtmlParser, tree_dump};
+use textsurfer::core::dom::ElementNs;
+use textsurfer::html::{ElementContext, Html5everParser, HtmlParser, tree_dump};
 
 const TESTDATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata");
 const PASS_FLOOR: f64 = 0.90;

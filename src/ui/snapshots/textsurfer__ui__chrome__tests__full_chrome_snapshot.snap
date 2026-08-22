@@ -2,7 +2,7 @@
 source: src/ui/chrome.rs
 expression: "snapshot(Size { cols: 60, rows: 10 })"
 ---
- File  Navigate  View  Help             TextSurf            
+ File  Navigate  View  Help            TextSurfer           
 │┌ + ┐                                                     │
 ├──────────────────────────────────────────────────────────┤
 │[‹] [›] [↻] [⌂]  URL: │https://example.com                │

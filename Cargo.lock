@@ -2895,7 +2895,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "textsurf"
+name = "textsurfer"
 version = "0.0.1"
 dependencies = [
  "boa_engine",

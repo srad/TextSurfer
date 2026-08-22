@@ -67,7 +67,7 @@ impl Widget for MenuBar<'_> {
             }
             x += fragment_width;
         }
-        let ornament = "TextSurf";
+        let ornament = "TextSurfer";
         let ornament_width = width(ornament);
         let room = area.width.saturating_sub(x);
         if room >= ornament_width {

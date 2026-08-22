@@ -69,9 +69,10 @@ mod tests {
 
     #[test]
     fn missing_file_is_a_network_error() {
-        let url =
-            Url::from_file_path(std::env::temp_dir().join("textsurf-file-test-definitely-absent"))
-                .expect("file url");
+        let url = Url::from_file_path(
+            std::env::temp_dir().join("textsurfer-file-test-definitely-absent"),
+        )
+        .expect("file url");
         let result = FileFetch.fetch(&FetchRequest { url });
         assert!(matches!(result, Err(FetchError::Network(_))));
     }

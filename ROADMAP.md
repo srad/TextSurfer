@@ -1,4 +1,4 @@
-# TextSurf — Roadmap
+# TextSurfer — Roadmap
 
 A terminal text browser in Rust (ratatui). This file is the single source of truth for all work:
 architecture decisions, task status, acceptance criteria, test gates, and cross-session handoff.
@@ -7,7 +7,7 @@ that depends on it.
 
 ## Mission (north star)
 
-TextSurf is a terminal-based web browser: the product is the **browser frontend** — the TUI chrome,
+TextSurfer is a terminal-based web browser: the product is the **browser frontend** — the TUI chrome,
 keyboard/mouse interaction, and website **rendering** (DOM → style → layout → terminal paint).
 Parsing is a means to an end, never in-house craft: every parseable format goes through a mature,
 latest-published crate (html5ever, cssparser + selectors, url, encoding_rs, ratatui, boa_engine at
@@ -603,3 +603,5 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   the active divider now translates tab-inner spans through the outer rail, both lower corners
   align with the raised tab walls, the first active tab uses a straight left rail, and raised boxes
   keep one-cell gaps without vertical separator glyphs.
+- 2026-08-22 — Product renamed from TextSurf to TextSurfer; the Rust package/binary/crate identity,
+  UI labels, default user agents, documentation, tests, and snapshot names follow the new name.

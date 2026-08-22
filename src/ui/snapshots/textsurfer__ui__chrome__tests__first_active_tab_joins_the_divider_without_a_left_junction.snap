@@ -2,7 +2,7 @@
 source: src/ui/chrome.rs
 expression: rendered
 ---
- File  Navigate  View  Help   TextSurf  
+ File  Navigate  View  Help  TextSurfer 
 │┌ first ┐ ┌ + ┐                       │
 │┘       └─────────────────────────────┤
 │[‹] [›] [↻] [⌂]  URL: │https://example│
