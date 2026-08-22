@@ -1,0 +1,13 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"links.html\")"
+---
+Visit the example site for details.
+
+a locally styled link and an anchor
+without href.
+
+nearly black text on the field
+background
+
+[a cat] and [img]

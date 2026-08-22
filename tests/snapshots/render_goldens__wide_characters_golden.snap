@@ -1,0 +1,12 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"wide.html\")"
+---
+日本語のテキストが折り返される様子を確認
+する
+
+Grüße aus München —
+Straßenbahnhaltestelle
+
+mixed 漢字 and latin words in one
+paragraph

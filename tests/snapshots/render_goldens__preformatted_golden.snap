@@ -1,0 +1,12 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"pre.html\")"
+---
+before the block
+
+fn main() {
+        println!("tab indented");
+    let long = "a line that is wider tha
+}
+
+after the block

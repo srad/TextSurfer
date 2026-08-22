@@ -1,0 +1,5 @@
+---
+source: src/ui/widgets/content.rs
+expression: "crate::ui::test_util::styled_buffer_string(buffer)"
+---
+│[LightBlue/Reset]l[Rgb(255, 255, 0)/Rgb(0, 0, 128)/u]i[Rgb(255, 255, 0)/Rgb(0, 0, 128)/u]n[Rgb(255, 255, 0)/Rgb(0, 0, 128)/u]k[Rgb(255, 255, 0)/Rgb(0, 0, 128)/u] [Reset/Reset]l[White/Rgb(0, 128, 0)/b]o[White/Rgb(0, 128, 0)/b]u[White/Rgb(0, 128, 0)/b]d[White/Rgb(0, 128, 0)/b] [Reset/Reset]│[LightBlue/Reset]

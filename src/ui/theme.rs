@@ -1,5 +1,7 @@
 use ratatui::style::{Color, Style};
 
+use crate::core::style::{Palette, Rgb};
+
 pub struct Theme {
     pub frame: Color,
     pub text: Color,
@@ -14,6 +16,72 @@ pub struct Theme {
 impl Theme {
     pub fn selected(&self) -> Style {
         Style::default().fg(Color::Black).bg(Color::White)
+    }
+
+    pub fn palette(&self) -> Palette {
+        Palette {
+            text: rgb_of(self.text),
+            background: rgb_of(self.bg),
+            link: rgb_of(self.accent),
+        }
+    }
+}
+
+pub fn rgb_of(color: Color) -> Rgb {
+    match color {
+        Color::Rgb(r, g, b) => Rgb::new(r, g, b),
+        Color::Black | Color::Reset => Rgb::new(0, 0, 0),
+        Color::Red => Rgb::new(128, 0, 0),
+        Color::Green => Rgb::new(0, 128, 0),
+        Color::Yellow => Rgb::new(128, 128, 0),
+        Color::Blue => Rgb::new(0, 0, 128),
+        Color::Magenta => Rgb::new(128, 0, 128),
+        Color::Cyan => Rgb::new(0, 128, 128),
+        Color::Gray => Rgb::new(192, 192, 192),
+        Color::DarkGray => Rgb::new(128, 128, 128),
+        Color::LightRed => Rgb::new(255, 0, 0),
+        Color::LightGreen => Rgb::new(0, 255, 0),
+        Color::LightYellow => Rgb::new(255, 255, 0),
+        Color::LightBlue => Rgb::new(0, 0, 255),
+        Color::LightMagenta => Rgb::new(255, 0, 255),
+        Color::LightCyan => Rgb::new(0, 255, 255),
+        Color::White => Rgb::new(255, 255, 255),
+        Color::Indexed(index) => indexed_rgb(index),
+    }
+}
+
+fn indexed_rgb(index: u8) -> Rgb {
+    match index {
+        0..=15 => rgb_of(match index {
+            0 => Color::Black,
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Yellow,
+            4 => Color::Blue,
+            5 => Color::Magenta,
+            6 => Color::Cyan,
+            7 => Color::Gray,
+            8 => Color::DarkGray,
+            9 => Color::LightRed,
+            10 => Color::LightGreen,
+            11 => Color::LightYellow,
+            12 => Color::LightBlue,
+            13 => Color::LightMagenta,
+            14 => Color::LightCyan,
+            _ => Color::White,
+        }),
+        16..=231 => {
+            let value = index - 16;
+            let level = |component: u8| match component {
+                0 => 0,
+                other => 55 + other * 40,
+            };
+            Rgb::new(level(value / 36), level((value % 36) / 6), level(value % 6))
+        }
+        _ => {
+            let grey = 8 + (index - 232) * 10;
+            Rgb::new(grey, grey, grey)
+        }
     }
 }
 

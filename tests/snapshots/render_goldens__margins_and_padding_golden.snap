@@ -1,0 +1,10 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"margins.html\")"
+---
+flush paragraph
+      indented by margin and padding
+
+  quoted text keeps its left margin
+
+plain block

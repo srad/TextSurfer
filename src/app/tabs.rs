@@ -1,4 +1,5 @@
 use super::tab::Tab;
+use crate::paint::DisplayList;
 
 pub struct TabManager {
     tabs: Vec<Tab>,
@@ -7,9 +8,9 @@ pub struct TabManager {
 }
 
 impl TabManager {
-    pub fn new(content: Vec<String>, message: String) -> Self {
+    pub fn new(painted: DisplayList, message: String) -> Self {
         Self {
-            tabs: vec![Tab::new(0, String::new(), 0, content, message)],
+            tabs: vec![Tab::new(0, String::new(), 0, painted, message)],
             active: 0,
             next_id: 1,
         }
@@ -19,20 +20,20 @@ impl TabManager {
         &mut self,
         url: String,
         generation: u64,
-        content: Vec<String>,
+        painted: DisplayList,
         message: String,
     ) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         self.tabs
-            .push(Tab::new(id, url, generation, content, message));
+            .push(Tab::new(id, url, generation, painted, message));
         self.active = self.tabs.len() - 1;
     }
 
-    pub fn close_active(&mut self, generation: u64, fresh_content: Vec<String>, message: String) {
+    pub fn close_active(&mut self, generation: u64, fresh: DisplayList, message: String) {
         if self.tabs.len() == 1 {
             let id = self.tabs[0].id;
-            self.tabs[0] = Tab::new(id, String::new(), generation, fresh_content, message);
+            self.tabs[0] = Tab::new(id, String::new(), generation, fresh, message);
             self.active = 0;
             return;
         }
@@ -88,8 +89,12 @@ impl TabManager {
 mod tests {
     use super::*;
 
-    fn lines(n: usize) -> Vec<String> {
-        (1..=n).map(|i| format!("line {i}")).collect()
+    fn lines(n: usize) -> DisplayList {
+        DisplayList::from_lines(
+            &(1..=n)
+                .map(|index| format!("line {index}"))
+                .collect::<Vec<_>>(),
+        )
     }
 
     #[test]
@@ -129,7 +134,7 @@ mod tests {
         assert_eq!(manager.len(), 1);
         assert!(manager.active().url.is_empty());
         assert_eq!(manager.active().generation, 3);
-        assert_eq!(manager.active().content.len(), 2);
+        assert_eq!(manager.active().painted.len(), 2);
     }
 
     #[test]

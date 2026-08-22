@@ -1,17 +1,24 @@
-use std::io;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use url::Url;
 
 use textsurfer::app::App;
 use textsurfer::app::net::{Navigate, PoolNet};
+use textsurfer::app::render::{ResponseKind, render_html, response_kind};
 use textsurfer::core::event::{Key, KeyEvent, KeyModifiers as AppKeyModifiers};
 use textsurfer::core::geom::Size;
-use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
+use textsurfer::core::url::url_fix;
+use textsurfer::net::{
+    FetchPool, FetchRequest, FileFetch, SchemeFetch, UreqFetch, charset_from_content_type, decode,
+    decode_text,
+};
 use textsurfer::ui::chrome;
+use textsurfer::ui::theme::NORTON;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -22,6 +29,12 @@ struct Cli {
     user_agent: Option<String>,
     #[arg(long, value_enum, default_value_t = JsMode::Auto)]
     js: JsMode,
+    /// Render the page to stdout and exit instead of opening the terminal UI.
+    #[arg(long)]
+    dump: bool,
+    /// Column budget used by --dump.
+    #[arg(long, default_value_t = 80)]
+    cols: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -40,14 +53,23 @@ fn main() -> io::Result<()> {
             "JavaScript execution is not available before milestone M5",
         ));
     }
+    let fetch: Arc<dyn textsurfer::net::Fetch> = Arc::new(SchemeFetch {
+        http: Arc::new(match cli.user_agent.clone() {
+            Some(user_agent) => UreqFetch::with_user_agent(user_agent),
+            None => UreqFetch::new(),
+        }),
+        file: Arc::new(FileFetch),
+    });
+    if cli.dump {
+        let Some(url) = cli.url.as_deref() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "--dump needs a --url",
+            ));
+        };
+        return dump(fetch.as_ref(), url, cli.cols);
+    }
     ratatui::run(|terminal| {
-        let fetch: Arc<dyn textsurfer::net::Fetch> = Arc::new(SchemeFetch {
-            http: Arc::new(match cli.user_agent {
-                Some(user_agent) => UreqFetch::with_user_agent(user_agent),
-                None => UreqFetch::new(),
-            }),
-            file: Arc::new(FileFetch),
-        });
         let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
         let mut app = App::with_net(net);
         let area = terminal.size()?;
@@ -60,6 +82,44 @@ fn main() -> io::Result<()> {
         }
         run(terminal, &mut app)
     })
+}
+
+fn dump(fetch: &dyn textsurfer::net::Fetch, url: &str, cols: u16) -> io::Result<()> {
+    let fixed = url_fix(url);
+    let parsed = Url::parse(&fixed)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+    let response = fetch
+        .fetch(&FetchRequest { url: parsed })
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    let charset = response
+        .content_type
+        .as_deref()
+        .and_then(charset_from_content_type);
+    let width = usize::from(cols.max(1));
+    let lines = match response_kind(response.content_type.as_deref()) {
+        ResponseKind::Html => {
+            let decoded = decode(&response.body, charset.as_deref());
+            render_html(&decoded.text, width, NORTON.palette(), false)
+                .painted
+                .text_lines()
+        }
+        ResponseKind::PlainText => decode_text(&response.body, charset.as_deref())
+            .text
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        ResponseKind::Unsupported(kind) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("unsupported content type: {kind}"),
+            ));
+        }
+    };
+    let mut out = io::stdout().lock();
+    for line in lines {
+        writeln!(out, "{}", line.trim_end())?;
+    }
+    Ok(())
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {

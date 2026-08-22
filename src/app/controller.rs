@@ -5,13 +5,9 @@ use std::time::Duration;
 use crate::core::event::{Key, KeyEvent};
 use crate::core::focus::Focus;
 use crate::core::geom::Size;
-use crate::core::style::StyleTree;
 use crate::core::url::url_fix;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext, StyleSheet};
-use crate::html::{Html5everParser, HtmlParser};
-use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::net::{FetchPayload, charset_from_content_type, decode, decode_text};
-use crate::paint::{BasicPainter, Painter};
+use crate::paint::DisplayList;
 use crate::ui::chrome::ChromeView;
 use crate::ui::editing::EditBuffer;
 use crate::ui::keymap::{Action, DefaultKeymap, Keymap};
@@ -19,9 +15,9 @@ use crate::ui::mouse::ChromeGeometry;
 use crate::ui::widgets::content::ContentLines;
 use crate::ui::widgets::status::StatusView;
 use crate::ui::widgets::tabs::TabChip;
-use mediatype::{MediaType, names};
 
 use super::net::{Navigate, NoopNet, Route, route};
+use super::render::{ResponseKind, paint_document, render_html, response_kind};
 use super::startpage::{content_for, start_page};
 use super::tabs::TabManager;
 use crate::ui::theme::NORTON;
@@ -29,12 +25,6 @@ use crate::ui::widgets::menu::MENUS;
 
 const DEFAULT_SIZE: Size = Size { cols: 80, rows: 24 };
 const STARTUP_HINT: &str = "type a URL and press Enter";
-
-enum ResponseKind {
-    Html,
-    PlainText,
-    Unsupported(String),
-}
 
 pub struct App {
     focus: Focus,
@@ -100,11 +90,12 @@ impl App {
         for tab in self.tabs.tabs_mut() {
             if tab.layout_width != width {
                 if let (Some(document), Some(styles)) = (&tab.document, &tab.styles) {
-                    tab.content = render_document(&document.borrow(), styles, width);
+                    tab.painted =
+                        paint_document(&document.borrow(), styles, width, NORTON.palette());
                 }
                 tab.layout_width = width;
             }
-            tab.scroll = tab.scroll.min(tab.content.len().saturating_sub(rows));
+            tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
         }
         self.touch();
     }
@@ -131,37 +122,28 @@ impl App {
                 match kind {
                     ResponseKind::Html => {
                         let decoded = decode(&response.body, charset.as_deref());
-                        let outcome = Html5everParser::new(false).parse_document(&decoded.text);
-                        let sheets = embedded_style_sheets(&outcome.document.borrow());
-                        let css_warnings = sheets
-                            .iter()
-                            .map(|sheet| sheet.diagnostics.total())
-                            .sum::<usize>();
-                        let styles = BasicCascade.apply(
-                            &sheets,
-                            &outcome.document.borrow(),
-                            MediaContext::screen(),
-                        );
-                        tab.content = render_document(
-                            &outcome.document.borrow(),
-                            &styles,
+                        let page = render_html(
+                            &decoded.text,
                             self.geometry.content_cols(),
+                            NORTON.palette(),
+                            false,
                         );
+                        tab.painted = page.painted;
                         tab.layout_width = self.geometry.content_cols();
-                        tab.document = Some(outcome.document);
-                        tab.styles = Some(styles);
-                        tab.message = if css_warnings == 0 {
+                        tab.document = Some(page.document);
+                        tab.styles = Some(page.styles);
+                        tab.message = if page.css_warnings == 0 {
                             format!(
                                 "accepted gen {} - {} ({} parse errors)",
-                                payload.generation, response.final_url, outcome.parse_errors
+                                payload.generation, response.final_url, page.parse_errors
                             )
                         } else {
                             format!(
                                 "accepted gen {} - {} ({} parse errors, {} CSS warnings)",
                                 payload.generation,
                                 response.final_url,
-                                outcome.parse_errors,
-                                css_warnings
+                                page.parse_errors,
+                                page.css_warnings
                             )
                         };
                     }
@@ -169,7 +151,9 @@ impl App {
                         let decoded = decode_text(&response.body, charset.as_deref());
                         tab.document = None;
                         tab.styles = None;
-                        tab.content = decoded.text.lines().map(str::to_string).collect();
+                        tab.painted = DisplayList::from_lines(
+                            &decoded.text.lines().map(str::to_string).collect::<Vec<_>>(),
+                        );
                         tab.message = format!(
                             "accepted gen {} - {} (plain text)",
                             payload.generation, response.final_url
@@ -178,11 +162,11 @@ impl App {
                     ResponseKind::Unsupported(content_type) => {
                         tab.document = None;
                         tab.styles = None;
-                        tab.content = vec![
+                        tab.painted = DisplayList::from_lines(&[
                             format!("cannot display {}", response.final_url),
                             String::new(),
                             format!("  unsupported content type: {content_type}"),
-                        ];
+                        ]);
                         tab.message = format!("unsupported content type: {content_type}");
                     }
                 }
@@ -190,11 +174,11 @@ impl App {
             Err(error) => {
                 tab.document = None;
                 tab.styles = None;
-                tab.content = vec![
+                tab.painted = DisplayList::from_lines(&[
                     format!("failed to load {}", tab.url),
                     String::new(),
                     format!("  {error}"),
-                ];
+                ]);
                 tab.message = format!("accepted gen {} - load failed: {error}", payload.generation);
             }
         }
@@ -255,7 +239,7 @@ impl App {
                 .collect(),
             active_tab: self.tabs.active_index(),
             content: ContentLines {
-                lines: Cow::Borrowed(active.content.as_slice()),
+                painted: &active.painted,
                 scroll: active.scroll,
             },
             status: StatusView {
@@ -290,6 +274,8 @@ impl App {
             Action::SubmitAddress => self.submit_address(),
             Action::ScrollDown => self.scroll(1),
             Action::ScrollUp => self.scroll(-1),
+            Action::ScrollPageDown => self.scroll(self.page_step()),
+            Action::ScrollPageUp => self.scroll(-self.page_step()),
             Action::ScrollTop => self.set_scroll(0),
             Action::ScrollBottom => self.set_scroll(usize::MAX),
             Action::ActivateLink => self.pending("link activation arrives in M2"),
@@ -455,11 +441,11 @@ impl App {
         self.touch();
     }
 
-    fn repoint_active(&mut self, url: &str, generation: u64, content: Vec<String>) {
+    fn repoint_active(&mut self, url: &str, generation: u64, painted: DisplayList) {
         let tab = self.tabs.active_mut();
         tab.url = url.to_string();
         tab.title = url.to_string();
-        tab.content = content;
+        tab.painted = painted;
         tab.scroll = 0;
         tab.layout_width = self.geometry.content_cols();
         tab.generation = generation;
@@ -545,7 +531,12 @@ impl App {
 
     fn max_scroll(&self) -> usize {
         let rows = self.geometry.content_rows();
-        self.tabs.active().content.len().saturating_sub(rows)
+        self.tabs.active().painted.len().saturating_sub(rows)
+    }
+
+    fn page_step(&self) -> i32 {
+        let rows = self.geometry.content_rows().saturating_sub(1).max(1);
+        i32::try_from(rows).unwrap_or(i32::MAX)
     }
 
     fn scroll(&mut self, delta: i32) {
@@ -570,67 +561,6 @@ impl App {
     }
 }
 
-fn response_kind(content_type: Option<&str>) -> ResponseKind {
-    let Some(content_type) = content_type else {
-        return ResponseKind::Html;
-    };
-    let Ok(media_type) = MediaType::parse(content_type) else {
-        return ResponseKind::Html;
-    };
-    if media_type.ty == names::TEXT && media_type.subty == names::HTML
-        || media_type.ty == names::APPLICATION
-            && media_type.subty == names::XHTML
-            && media_type.suffix == Some(names::XML)
-    {
-        ResponseKind::Html
-    } else if media_type.ty == names::TEXT && media_type.subty == names::PLAIN {
-        ResponseKind::PlainText
-    } else {
-        ResponseKind::Unsupported(media_type.essence().to_string())
-    }
-}
-
-fn embedded_style_sheets(document: &crate::core::dom::Document) -> Vec<StyleSheet> {
-    let parser = CssparserParser;
-    let mut sheets = Vec::new();
-    let mut stack: Vec<_> = document.roots().iter().rev().copied().collect();
-    while let Some(id) = stack.pop() {
-        if let Some(crate::core::dom::Node::Element { name, ns, .. }) = document.node(id)
-            && *ns == crate::core::dom::ElementNs::Html
-            && name == "style"
-        {
-            let source = document
-                .children(id)
-                .iter()
-                .filter_map(|child| match document.node(*child) {
-                    Some(crate::core::dom::Node::Text { data }) => Some(data.as_str()),
-                    _ => None,
-                })
-                .collect::<String>();
-            sheets.push(parser.parse(&source));
-        }
-        let children = document.children(id);
-        stack.extend(children.into_iter().rev());
-    }
-    sheets
-}
-
-fn render_document(
-    document: &crate::core::dom::Document,
-    styles: &StyleTree,
-    width: usize,
-) -> Vec<String> {
-    let boxes = TaffyLayoutEngine.layout(
-        document,
-        styles,
-        Size {
-            cols: width.min(usize::from(u16::MAX)) as u16,
-            rows: u16::MAX,
-        },
-    );
-    BasicPainter.paint(&boxes).lines
-}
-
 fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
     match (menu, item) {
         (0, 0) => Some(Action::NewTab),
@@ -651,8 +581,51 @@ mod tests {
     use super::*;
     use crate::core::event::KeyModifiers;
     use crate::net::{FetchError, FetchResponse};
+    use proptest::prelude::*;
     use std::sync::Mutex;
     use url::Url;
+
+    proptest! {
+        #[test]
+        fn scroll_clamping_is_a_fixed_point_under_any_key_sequence(
+            document_rows in 0usize..400,
+            terminal_rows in 7u16..40,
+            steps in prop::collection::vec(
+                prop::sample::select(vec![
+                    Key::Char('j'),
+                    Key::Char('k'),
+                    Key::Char(' '),
+                    Key::Char('b'),
+                    Key::Home,
+                    Key::End,
+                ]),
+                0..24,
+            ),
+        ) {
+            let mut app = App::new();
+            app.handle_key(press(Key::Esc));
+            app.on_resize(Size { cols: 80, rows: terminal_rows });
+            app.tabs.active_mut().painted =
+                DisplayList::from_lines(&vec![String::new(); document_rows]);
+            for step in steps {
+                app.handle_key(press(step));
+                let max = app
+                    .tabs
+                    .active()
+                    .painted
+                    .len()
+                    .saturating_sub(app.geometry.content_rows());
+                prop_assert!(app.tabs.active().scroll <= max);
+            }
+            let settled = app.tabs.active().scroll;
+            app.on_resize(Size { cols: 80, rows: terminal_rows });
+            prop_assert_eq!(
+                app.tabs.active().scroll,
+                settled,
+                "re-clamping an already clamped scroll must not move it"
+            );
+        }
+    }
 
     fn press(code: Key) -> KeyEvent {
         KeyEvent {
@@ -701,7 +674,7 @@ mod tests {
         let view = app.chrome_view();
         assert!(view.address_focused);
         assert_eq!(
-            view.content.lines.first().unwrap(),
+            view.content.painted.text_lines().first().unwrap(),
             "TextSurfer - a text-mode browser"
         );
     }
@@ -755,7 +728,7 @@ mod tests {
         app.handle_key(press(Key::Esc));
         app.on_resize(Size { cols: 80, rows: 9 });
         assert_eq!(app.geometry.content_rows(), 3);
-        let max = app.tabs.active().content.len().saturating_sub(3);
+        let max = app.tabs.active().painted.len().saturating_sub(3);
         for _ in 0..10 {
             app.handle_key(press(Key::Char('j')));
         }
@@ -769,12 +742,29 @@ mod tests {
     }
 
     #[test]
+    fn paging_keys_move_a_screen_at_a_time_not_a_line() {
+        let mut app = App::new();
+        app.handle_key(press(Key::Esc));
+        app.on_resize(Size { cols: 80, rows: 26 });
+        app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 200]);
+        let page = app.geometry.content_rows() - 1;
+        app.handle_key(press(Key::PageDown));
+        assert_eq!(app.tabs.active().scroll, page);
+        app.handle_key(press(Key::Char(' ')));
+        assert_eq!(app.tabs.active().scroll, page * 2);
+        app.handle_key(press(Key::PageUp));
+        assert_eq!(app.tabs.active().scroll, page);
+        app.handle_key(press(Key::Char('b')));
+        assert_eq!(app.tabs.active().scroll, 0);
+    }
+
+    #[test]
     fn resize_remaps_the_geometry_and_clamps_scroll() {
         let mut app = App::new();
         app.handle_key(press(Key::Esc));
         app.handle_key(press(Key::End));
         app.on_resize(Size { cols: 40, rows: 15 });
-        let max = app.tabs.active().content.len().saturating_sub(7);
+        let max = app.tabs.active().painted.len().saturating_sub(7);
         assert!(app.tabs.active().scroll <= max);
         assert_eq!(app.tabs.active().layout_width, 38);
     }
@@ -782,7 +772,7 @@ mod tests {
     #[test]
     fn long_documents_scroll_past_u16_max_without_wrapping() {
         let mut app = App::new();
-        app.tabs.active_mut().content = vec![String::new(); 70_000];
+        app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 70_000]);
         app.handle_key(press(Key::Esc));
         app.handle_key(press(Key::End));
         assert_eq!(app.tabs.active().scroll, 69_982);
@@ -837,7 +827,8 @@ mod tests {
         assert_eq!(app.tabs.tabs()[0].url, "https://a.example/final");
         assert!(
             app.tabs.tabs()[0]
-                .content
+                .painted
+                .text_lines()
                 .iter()
                 .any(|line| line.contains("background complete"))
         );
@@ -854,13 +845,17 @@ mod tests {
         assert!(
             app.tabs
                 .active()
-                .content
+                .painted
+                .text_lines()
                 .iter()
                 .any(|l| l.starts_with("  fetching"))
         );
         app.step(Duration::ZERO);
         let tab = app.tabs.active();
-        assert_eq!(tab.content.first().map(String::as_str), Some("hi there"));
+        assert_eq!(
+            tab.painted.text_lines().first().map(String::as_str),
+            Some("hi there")
+        );
         assert_eq!(tab.title, "https://example.com/");
         assert!(
             app.message()
@@ -894,7 +889,8 @@ mod tests {
         assert!(
             app.tabs
                 .active()
-                .content
+                .painted
+                .text_lines()
                 .iter()
                 .any(|l| l.contains("failed to load"))
         );
@@ -916,7 +912,7 @@ mod tests {
                 content_type: Some("text/plain; charset=\"utf-8\"".to_string()),
             }),
         }));
-        assert_eq!(app.tabs.active().content, vec!["one", "two"]);
+        assert_eq!(app.tabs.active().painted.text_lines(), vec!["one", "two"]);
         assert!(app.message().contains("plain text"));
     }
 
@@ -935,7 +931,7 @@ mod tests {
                 content_type: Some("image/png".to_string()),
             }),
         }));
-        assert!(app.tabs.active().content[0].starts_with("cannot display"));
+        assert!(app.tabs.active().painted.text_lines()[0].starts_with("cannot display"));
         assert_eq!(app.message(), "unsupported content type: image/png");
     }
 
@@ -954,14 +950,9 @@ mod tests {
                 content_type: Some("text/html".to_string()),
             }),
         }));
-        assert!(app.tabs.active().content.iter().any(|line| line == "shown"));
-        assert!(
-            !app.tabs
-                .active()
-                .content
-                .iter()
-                .any(|line| line.contains("hidden"))
-        );
+        let lines = app.tabs.active().painted.text_lines();
+        assert!(lines.iter().any(|line| line == "shown"));
+        assert!(!lines.iter().any(|line| line.contains("hidden")));
     }
 
     #[test]
@@ -990,7 +981,14 @@ mod tests {
             app.message(),
             "accepted gen 1 - https://example.com/ (0 parse errors, 3 CSS warnings)"
         );
-        assert!(app.tabs.active().content.iter().any(|line| line == "shown"));
+        assert!(
+            app.tabs
+                .active()
+                .painted
+                .text_lines()
+                .iter()
+                .any(|line| line == "shown")
+        );
     }
 
     #[test]
@@ -1028,7 +1026,7 @@ mod tests {
         app.submit_url("about:blank");
         assert_eq!(app.tab_count(), 1);
         assert_eq!(app.active_url(), "about:blank");
-        assert_eq!(app.tabs.active().content, start_page());
+        assert_eq!(app.tabs.active().painted, start_page());
     }
 
     #[test]
@@ -1112,7 +1110,7 @@ mod tests {
         app.handle_key(alt(press(Key::Home)));
         assert_eq!(app.tab_count(), 1, "home must not open a new tab");
         assert_eq!(app.active_url(), "about:blank");
-        assert_eq!(app.tabs.active().content, start_page());
+        assert_eq!(app.tabs.active().painted, start_page());
         assert_eq!(app.tabs.active().scroll, 0);
     }
 
@@ -1138,7 +1136,7 @@ mod tests {
         app.handle_key(press(Key::Esc));
         app.on_resize(Size { cols: 80, rows: 14 });
         app.submit_url("https://a.example");
-        let max = app.tabs.active().content.len().saturating_sub(6);
+        let max = app.tabs.active().painted.len().saturating_sub(6);
         app.handle_key(press(Key::End));
         assert_eq!(app.tabs.active().scroll, max);
         app.handle_key(alt(press(Key::Home)));

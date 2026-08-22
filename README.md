@@ -36,7 +36,7 @@ Ready                              https://example.com
 
 ## Features
 
-**Current (M0, M1-A, M1-R and M1.5 complete; M1-B in progress)**
+**Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit
@@ -56,10 +56,19 @@ Ready                              https://example.com
   inherited whitespace and type-only conditional `@media` rules; Taffy sizes nested and anonymous
   block flow with fixed content-box/border-box widths, textwrap and Unicode-aware fragments reflow
   six whitespace modes, and sparse paint emits clipped terminal-cell lines and borders
+- Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
+  the terminal as coloured, bold, underlined and struck spans — with a contrast pass that keeps
+  unreadable author colours legible over the theme's field — plus link and hit geometry carried
+  through the display list for keyboard and mouse targeting
+- Dynamic selectors: `:link`, `:any-link`, `:hover`, `:focus`, `:active`, `:checked`, `:enabled`
+  and `:disabled` parse and match against injected state; `:visited` never matches, so page styling
+  cannot observe history
+- `--dump` renders a page to stdout and exits — the same painter the TUI uses, handy for scripting
+  and for diffing goldens
 - WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): complete paint, rendering
-goldens and the remaining layout laws (M1-B), external stylesheets (M1-C), links/forms/search (M2),
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): external stylesheets with
+selector bucketing (M1-C), table layout and generated content (M1-D), links/forms/search (M2),
 mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
@@ -96,6 +105,7 @@ $ cargo build --release
 $ cargo run --release            # start page
 $ cargo run -- --url https://example.com
 $ cargo run -- --user-agent TextSurferDev/1 --js off
+$ cargo run -- --dump --cols 60 --url https://example.com   # render to stdout, no TUI
 ```
 
 Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurfer falls back
@@ -114,6 +124,7 @@ to DuckDuckGo's lite search for anything that isn't a URL.
 | `r` / `Alt+Home` | Reload / start page |
 | `F10` or `Alt+F/N/V/H` | Open the menu bar |
 | `j` / `k` · arrows | Scroll down / up |
+| `Space` / `b` · `PageDown` / `PageUp` | Page down / up |
 | `Home` / `End` | Top / bottom of page |
 | `q` | Quit |
 
@@ -126,9 +137,13 @@ to DuckDuckGo's lite search for anything that isn't a URL.
   touch the network.
 - **Contract suites** — trait implementations pass capability-parameterized suites; fetch and app
   integration tests use fakes and synthetic middleware, with no real network or clock.
-- **Property tests** — `url_fix` and the grapheme-aware address buffer obey laws under proptest;
-  viewport-width monotonicity and painted-row bounds have landed, while the remaining layout laws
-  stay explicit M1-B completion gates.
+- **Property tests** — `url_fix` and the grapheme-aware address buffer obey laws under proptest,
+  joined by the six layout laws: viewport-width monotonicity, painted-row bounds, disjoint leaf
+  glyph cells, laminar per-row box families, engine-backed deepest-hit round trips, and scroll
+  clamping as a fixed point under arbitrary key sequences.
+- **Render goldens** — six fixture pages (margins, headings, borders, links, wide characters,
+  `pre`) render end-to-end into insta snapshots, with assertions for link geometry, colour contrast
+  and `--dump` agreeing with the in-process painter.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -148,15 +163,17 @@ the real clock.
 Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
-style/layout/paint in progress · M1-C external CSS · M2 tabs/keyboard/forms · M3 mouse · M4 JS
-seam · M5 Boa · M6 stretch.
+style/layout/paint ✅ · M1-C external CSS · M1-D tables & generated content · M2
+tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
 
 [html5ever](https://github.com/servo/html5ever) · [ratatui](https://github.com/ratatui/ratatui) ·
 [ureq](https://github.com/algesten/ureq) · [encoding_rs](https://github.com/hsivonen/encoding_rs) ·
 [url](https://github.com/servo/rust-url) · [indextree](https://github.com/saschagrunert/indextree) ·
-[cssparser](https://github.com/servo/rust-cssparser) · [selectors](https://github.com/servo/stylo) ·
+[cssparser](https://github.com/servo/rust-cssparser) ·
+[cssparser-color](https://github.com/servo/rust-cssparser) ·
+[selectors](https://github.com/servo/stylo) ·
 [Taffy](https://github.com/DioxusLabs/taffy) · [textwrap](https://github.com/mgeisler/textwrap) ·
 [thiserror](https://github.com/dtolnay/thiserror) · [boa_engine](https://github.com/boa-dev/boa)
 (behind the `js` feature) — plus the [Web Platform Tests](https://github.com/web-platform-tests/wpt)

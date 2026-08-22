@@ -1,0 +1,15 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"borders.html\")"
+---
+┌──────────────────────────────────────┐
+│                                      │
+│ bordered card content                │
+│                                      │
+└──────────────────────────────────────┘
+
+┌──────────────────┐
+│fixed width border│
+│box               │
+└──────────────────┘
+no border here

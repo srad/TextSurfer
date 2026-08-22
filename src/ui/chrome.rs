@@ -184,6 +184,9 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
+    static DRAFT_CONTENT: std::sync::LazyLock<crate::paint::DisplayList> =
+        std::sync::LazyLock::new(|| crate::paint::DisplayList::from_lines(&["hello".to_string()]));
+
     fn draft() -> ChromeView<'static> {
         ChromeView {
             geometry: ChromeGeometry::for_size(Size { cols: 60, rows: 10 }),
@@ -199,7 +202,7 @@ mod tests {
             tabs: Vec::new(),
             active_tab: 0,
             content: ContentLines {
-                lines: vec!["hello".to_string()].into(),
+                painted: &DRAFT_CONTENT,
                 scroll: 0,
             },
             status: StatusView {

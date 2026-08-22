@@ -1,5 +1,6 @@
 use crate::core::dom::SharedDocument;
 use crate::core::style::StyleTree;
+use crate::paint::DisplayList;
 
 pub struct Tab {
     pub id: u64,
@@ -10,7 +11,7 @@ pub struct Tab {
     pub scroll: usize,
     pub layout_width: usize,
     pub generation: u64,
-    pub content: Vec<String>,
+    pub painted: DisplayList,
     pub message: String,
     pub document: Option<SharedDocument>,
     pub styles: Option<StyleTree>,
@@ -21,7 +22,7 @@ impl Tab {
         id: u64,
         url: String,
         generation: u64,
-        content: Vec<String>,
+        painted: DisplayList,
         message: String,
     ) -> Self {
         let title = if url.is_empty() {
@@ -43,7 +44,7 @@ impl Tab {
             scroll: 0,
             layout_width: 0,
             generation,
-            content,
+            painted,
             message,
             document: None,
             styles: None,
@@ -90,7 +91,7 @@ mod tests {
             0,
             "https://start".to_string(),
             0,
-            vec![],
+            DisplayList::default(),
             "Ready".to_string(),
         )
     }
@@ -137,7 +138,13 @@ mod tests {
 
     #[test]
     fn a_blank_tab_has_no_fake_history_entry() {
-        let mut tab = Tab::new(0, String::new(), 0, vec![], "Ready".to_string());
+        let mut tab = Tab::new(
+            0,
+            String::new(),
+            0,
+            DisplayList::default(),
+            "Ready".to_string(),
+        );
         assert!(tab.history.is_empty());
         assert_eq!(tab.current(), None);
         tab.push_history("https://example.com");

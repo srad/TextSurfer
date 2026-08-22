@@ -1,12 +1,14 @@
+use cssparser::color::clamp_unit_f32;
 use cssparser::{Parser, ParserInput, Token};
+use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
 
 use crate::core::dom::Document;
 use crate::core::dom::{AttrNs, ElementNs, Node, NodeId};
 use crate::core::style::{
-    BoxSizing, ComputedStyle, CssWidth, Display, EdgeSizes, StyleTree, WhiteSpace,
+    BoxSizing, ComputedStyle, CssWidth, Display, EdgeSizes, Palette, Rgb, StyleTree, WhiteSpace,
 };
 use crate::css::parser::{CssRule, MediaQuery, MediaQueryList, StyleRule, parse_declarations};
-use crate::css::selectors::matching_specificity;
+use crate::css::selectors::{DynamicState, matching_specificity};
 use crate::css::{Declaration, StyleSheet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,19 +20,33 @@ enum MediaTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MediaContext {
     target: MediaTarget,
+    pub palette: Palette,
+    pub state: DynamicState,
 }
 
 impl MediaContext {
     pub const fn screen() -> Self {
         Self {
             target: MediaTarget::Screen,
+            palette: Palette::DEFAULT,
+            state: DynamicState::INERT,
         }
     }
 
     pub const fn print() -> Self {
         Self {
             target: MediaTarget::Print,
+            palette: Palette::DEFAULT,
+            state: DynamicState::INERT,
         }
+    }
+
+    pub fn with_palette(self, palette: Palette) -> Self {
+        Self { palette, ..self }
+    }
+
+    pub fn with_state(self, state: DynamicState) -> Self {
+        Self { state, ..self }
     }
 }
 
@@ -47,11 +63,13 @@ impl Cascade for BasicCascade {
         let rules = active_style_rules(sheets, media);
         for id in elements_in_document_order(document) {
             let parent_style = document.parent(id).map(|parent| tree.get(parent));
-            let mut style = ua_style(document, id, parent_style);
+            let mut style = ua_style(document, id, parent_style, media.palette);
             let mut declarations = Vec::new();
             let mut order = 0usize;
             for rule in &rules {
-                if let Some(specificity) = matching_specificity(&rule.selectors, document, id) {
+                if let Some(specificity) =
+                    matching_specificity(&rule.selectors, document, id, media.state)
+                {
                     for declaration in &rule.declarations {
                         declarations.push((
                             declaration.important,
@@ -136,12 +154,30 @@ fn elements_in_document_order(document: &Document) -> Vec<NodeId> {
     elements
 }
 
-fn ua_style(document: &Document, id: NodeId, parent_style: Option<ComputedStyle>) -> ComputedStyle {
-    let Some(Node::Element { name, ns, .. }) = document.node(id) else {
-        return ComputedStyle::default();
+fn ua_style(
+    document: &Document,
+    id: NodeId,
+    parent_style: Option<ComputedStyle>,
+    palette: Palette,
+) -> ComputedStyle {
+    let inherited = parent_style.unwrap_or_default();
+    let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
+        return ComputedStyle {
+            color: inherited.color,
+            bold: inherited.bold,
+            underline: inherited.underline,
+            strike: inherited.strike,
+            ..Default::default()
+        };
     };
     if *ns != ElementNs::Html {
-        return ComputedStyle::default();
+        return ComputedStyle {
+            color: inherited.color,
+            bold: inherited.bold,
+            underline: inherited.underline,
+            strike: inherited.strike,
+            ..Default::default()
+        };
     }
     let display = if matches!(
         name.as_str(),
@@ -193,11 +229,32 @@ fn ua_style(document: &Document, id: NodeId, parent_style: Option<ComputedStyle>
     };
     let mut style = ComputedStyle {
         display,
-        white_space: parent_style.unwrap_or_default().white_space,
+        white_space: inherited.white_space,
+        color: inherited.color,
+        bold: inherited.bold,
+        underline: inherited.underline,
+        strike: inherited.strike,
         ..Default::default()
     };
     if name == "pre" {
         style.white_space = WhiteSpace::Pre;
+    }
+    if name == "a"
+        && attrs
+            .iter()
+            .any(|attr| attr.ns == AttrNs::None && attr.name == "href")
+    {
+        style.color = Some(palette.link);
+        style.underline = true;
+    }
+    if matches!(name.as_str(), "b" | "strong" | "th") {
+        style.bold = true;
+    }
+    if matches!(name.as_str(), "u" | "ins") {
+        style.underline = true;
+    }
+    if matches!(name.as_str(), "s" | "del" | "strike") {
+        style.strike = true;
     }
     if matches!(
         name.as_str(),
@@ -304,6 +361,27 @@ fn apply_declaration(
                 style.border = border;
             }
         }
+        "color" => {
+            if let Some(color) = parse_color(&declaration.value) {
+                style.color = color;
+            }
+        }
+        "background-color" | "background" => {
+            if let Some(color) = parse_color(&declaration.value) {
+                style.background = color;
+            }
+        }
+        "font-weight" => {
+            if let Some(bold) = parse_font_weight(&declaration.value) {
+                style.bold = bold;
+            }
+        }
+        "text-decoration" | "text-decoration-line" => {
+            if let Some((underline, strike)) = parse_text_decoration(&declaration.value) {
+                style.underline = underline;
+                style.strike = strike;
+            }
+        }
         "border-style" => {
             if let Some(border) =
                 parse_ident(&declaration.value).and_then(|value| match value.as_str() {
@@ -328,7 +406,7 @@ fn apply_css_wide(
 ) {
     let initial = ComputedStyle::default();
     let inherited = parent_style.unwrap_or_default();
-    let source = if keyword == "inherit" || keyword == "unset" && property == "white-space" {
+    let source = if keyword == "inherit" || (keyword == "unset" && is_inherited(property)) {
         inherited
     } else {
         initial
@@ -336,6 +414,13 @@ fn apply_css_wide(
     match property {
         "display" => style.display = source.display,
         "white-space" => style.white_space = source.white_space,
+        "color" => style.color = source.color,
+        "background-color" | "background" => style.background = source.background,
+        "font-weight" => style.bold = source.bold,
+        "text-decoration" | "text-decoration-line" => {
+            style.underline = source.underline;
+            style.strike = source.strike;
+        }
         "width" => style.width = source.width,
         "box-sizing" => style.box_sizing = source.box_sizing,
         "margin" => style.margin = source.margin,
@@ -351,6 +436,80 @@ fn apply_css_wide(
         "border" | "border-style" => style.border = source.border,
         _ => {}
     }
+}
+
+fn is_inherited(property: &str) -> bool {
+    matches!(property, "white-space" | "color" | "font-weight")
+}
+
+fn parse_color(source: &str) -> Option<Option<Rgb>> {
+    if parse_ident(source).as_deref() == Some("transparent") {
+        return Some(None);
+    }
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let color = CssColor::parse(&mut parser).ok()?;
+    parser.expect_exhausted().ok()?;
+    let (r, g, b) = match color {
+        CssColor::Rgba(rgba) => (rgba.red, rgba.green, rgba.blue),
+        CssColor::Hsl(hsl) => float_rgb(hsl_to_rgb(
+            hsl.hue.unwrap_or_default() / 360.0,
+            hsl.saturation.unwrap_or_default(),
+            hsl.lightness.unwrap_or_default(),
+        )),
+        CssColor::Hwb(hwb) => float_rgb(hwb_to_rgb(
+            hwb.hue.unwrap_or_default() / 360.0,
+            hwb.whiteness.unwrap_or_default(),
+            hwb.blackness.unwrap_or_default(),
+        )),
+        _ => return None,
+    };
+    Some(Some(Rgb::new(r, g, b)))
+}
+
+fn float_rgb(components: (f32, f32, f32)) -> (u8, u8, u8) {
+    let (red, green, blue) = components;
+    (
+        clamp_unit_f32(red),
+        clamp_unit_f32(green),
+        clamp_unit_f32(blue),
+    )
+}
+
+fn parse_font_weight(source: &str) -> Option<bool> {
+    if let Some(keyword) = parse_ident(source) {
+        return match keyword.as_str() {
+            "bold" | "bolder" => Some(true),
+            "normal" | "lighter" => Some(false),
+            _ => None,
+        };
+    }
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let weight = parser.expect_number().ok()?;
+    parser.expect_exhausted().ok()?;
+    Some(weight > 500.0)
+}
+
+fn parse_text_decoration(source: &str) -> Option<(bool, bool)> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut underline = false;
+    let mut strike = false;
+    let mut seen = false;
+    while let Ok(token) = parser.next() {
+        let Token::Ident(value) = token else {
+            continue;
+        };
+        seen = true;
+        match value.to_ascii_lowercase().as_str() {
+            "none" | "initial" => return Some((false, false)),
+            "underline" | "overline" => underline = true,
+            "line-through" => strike = true,
+            _ => {}
+        }
+    }
+    seen.then_some((underline, strike))
 }
 
 fn parse_ident(source: &str) -> Option<String> {
@@ -531,6 +690,107 @@ mod tests {
         assert_eq!(styles.get(p).display, Display::Block);
         assert!(!styles.get(p).border);
         assert_eq!(styles.get(pre).white_space, WhiteSpace::Pre);
+    }
+
+    #[test]
+    fn author_colors_weight_and_decoration_reach_the_computed_style() {
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let em = document.insert_element(Some(p), "em", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(
+            "p { color: #ff0000; background-color: rgb(0, 128, 0); font-weight: 700;
+                 text-decoration: underline line-through }
+             em { color: hsl(240, 100%, 50%) }",
+        );
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        let paragraph = styles.get(p);
+        assert_eq!(paragraph.color, Some(Rgb::new(255, 0, 0)));
+        assert_eq!(paragraph.background, Some(Rgb::new(0, 128, 0)));
+        assert!(paragraph.bold && paragraph.underline && paragraph.strike);
+        assert_eq!(styles.get(em).color, Some(Rgb::new(0, 0, 255)));
+    }
+
+    #[test]
+    fn font_weight_is_bold_above_five_hundred_only() {
+        assert_eq!(parse_font_weight("500"), Some(false));
+        assert_eq!(parse_font_weight("501"), Some(true));
+        assert_eq!(parse_font_weight("bold"), Some(true));
+        assert_eq!(parse_font_weight("normal"), Some(false));
+        assert_eq!(parse_font_weight("chunky"), None);
+    }
+
+    #[test]
+    fn unsupported_color_spaces_and_junk_never_override_the_inherited_value() {
+        let mut document = Document::new();
+        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let span = document.insert_element(Some(p), "span", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(
+            "p { color: #00ff00 } span { color: oklch(0.5 0.1 200); background: not-a-color }",
+        );
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(styles.get(span).color, Some(Rgb::new(0, 255, 0)));
+        assert_eq!(styles.get(span).background, None);
+    }
+
+    #[test]
+    fn color_inherits_while_background_does_not() {
+        let mut document = Document::new();
+        let div = document.insert_element(None, "div", ElementNs::Html, vec![]);
+        let p = document.insert_element(Some(div), "p", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse("div { color: #123456; background-color: #654321 }");
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(styles.get(p).color, Some(Rgb::new(0x12, 0x34, 0x56)));
+        assert_eq!(styles.get(p).background, None);
+    }
+
+    #[test]
+    fn the_ua_sheet_styles_links_bold_and_struck_text_from_the_palette() {
+        let mut document = Document::new();
+        let link = document.insert_element(
+            None,
+            "a",
+            ElementNs::Html,
+            vec![Attr::plain("href", "https://example.com/")],
+        );
+        let anchor = document.insert_element(None, "a", ElementNs::Html, vec![]);
+        let strong = document.insert_element(None, "strong", ElementNs::Html, vec![]);
+        let struck = document.insert_element(None, "del", ElementNs::Html, vec![]);
+        let palette = Palette {
+            text: Rgb::WHITE,
+            background: Rgb::new(0, 0, 128),
+            link: Rgb::new(255, 255, 0),
+        };
+        let styles =
+            BasicCascade.apply(&[], &document, MediaContext::screen().with_palette(palette));
+        assert_eq!(styles.get(link).color, Some(Rgb::new(255, 255, 0)));
+        assert!(styles.get(link).underline);
+        assert_eq!(
+            styles.get(anchor).color,
+            None,
+            "an anchor without href is not a link"
+        );
+        assert!(styles.get(strong).bold);
+        assert!(styles.get(struck).strike);
+    }
+
+    #[test]
+    fn dynamic_pseudo_class_rules_apply_instead_of_being_discarded() {
+        let mut document = Document::new();
+        let link = document.insert_element(
+            None,
+            "a",
+            ElementNs::Html,
+            vec![Attr::plain("href", "https://example.com/")],
+        );
+        let sheet = CssparserParser.parse(
+            "a:link { color: #00ff00 } a:visited { color: #ff0000 } p, a:hover { border: solid }",
+        );
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(
+            styles.get(link).color,
+            Some(Rgb::new(0, 255, 0)),
+            "a:link must beat the UA link colour by source order"
+        );
     }
 
     fn cascade_contract(cascade: &dyn Cascade) {

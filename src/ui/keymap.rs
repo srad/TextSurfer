@@ -13,6 +13,8 @@ pub enum Action {
     PrevTab,
     ScrollUp,
     ScrollDown,
+    ScrollPageUp,
+    ScrollPageDown,
     ScrollTop,
     ScrollBottom,
     ActivateLink,
@@ -81,6 +83,8 @@ impl Keymap for DefaultKeymap {
                     ('/', false, false) | ('a', false, false) => Some(Action::FocusAddress),
                     ('j', false, false) => Some(Action::ScrollDown),
                     ('k', false, false) => Some(Action::ScrollUp),
+                    (' ', false, false) => Some(Action::ScrollPageDown),
+                    ('b', false, false) => Some(Action::ScrollPageUp),
                     ('r', false, false) => Some(Action::Reload),
                     ('t', true, false) => Some(Action::NewTab),
                     ('w', true, false) => Some(Action::CloseTab),
@@ -111,8 +115,10 @@ impl Keymap for DefaultKeymap {
                 Focus::Tabs => Some(Action::PrevTab),
                 _ => Some(Action::PrevLink),
             },
-            Key::Down | Key::PageDown if plain => Some(Action::ScrollDown),
-            Key::Up | Key::PageUp if plain => Some(Action::ScrollUp),
+            Key::Down if plain => Some(Action::ScrollDown),
+            Key::Up if plain => Some(Action::ScrollUp),
+            Key::PageDown if plain => Some(Action::ScrollPageDown),
+            Key::PageUp if plain => Some(Action::ScrollPageUp),
             Key::F(10) => Some(Action::FocusMenu),
             Key::Home => match (alt, plain, focus) {
                 (true, false, Focus::Content)
@@ -294,7 +300,25 @@ mod tests {
         );
         assert_eq!(
             DefaultKeymap.resolve(&press(Key::PageUp), Focus::Content),
-            Some(Action::ScrollUp)
+            Some(Action::ScrollPageUp)
+        );
+        assert_eq!(
+            DefaultKeymap.resolve(&press(Key::PageDown), Focus::Content),
+            Some(Action::ScrollPageDown)
+        );
+        assert_eq!(
+            DefaultKeymap.resolve(&press(Key::Char(' ')), Focus::Content),
+            Some(Action::ScrollPageDown),
+            "space pages down like every pager"
+        );
+        assert_eq!(
+            DefaultKeymap.resolve(&press(Key::Char('b')), Focus::Content),
+            Some(Action::ScrollPageUp)
+        );
+        assert_eq!(
+            DefaultKeymap.resolve(&press(Key::Char(' ')), Focus::Address),
+            None,
+            "typing a space in the address bar must never page"
         );
         assert_eq!(
             DefaultKeymap.resolve(&press(Key::Home), Focus::Content),

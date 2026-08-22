@@ -75,7 +75,8 @@ fn composed_pipeline_loads_and_renders_http_html() {
     assert!(
         app.chrome_view()
             .content
-            .lines
+            .painted
+            .text_lines()
             .iter()
             .any(|line| line.contains("acceptance"))
     );
@@ -90,7 +91,8 @@ fn composed_pipeline_routes_file_urls_through_the_file_fetch_boundary() {
     assert!(
         app.chrome_view()
             .content
-            .lines
+            .painted
+            .text_lines()
             .iter()
             .any(|line| line.contains("acceptance"))
     );
@@ -105,7 +107,8 @@ fn composed_pipeline_renders_fetch_errors_as_a_page() {
     assert!(
         app.chrome_view()
             .content
-            .lines
+            .painted
+            .text_lines()
             .first()
             .is_some_and(|line| line.starts_with("failed to load"))
     );

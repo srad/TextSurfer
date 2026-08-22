@@ -4,7 +4,10 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
-use cssparser::{Parser as CssTokenParser, ParserInput, ToCss, serialize_identifier};
+use cssparser::{
+    CowRcStr, ParseError, Parser as CssTokenParser, ParserInput, SourceLocation, ToCss,
+    serialize_identifier,
+};
 use precomputed_hash::PrecomputedHash;
 use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use selectors::bloom::BloomFilter;
@@ -65,28 +68,84 @@ impl PrecomputedHash for Atom {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum UnsupportedPseudoClass {}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DynamicPseudoClass {
+    Link,
+    AnyLink,
+    Visited,
+    Hover,
+    Focus,
+    Active,
+    Checked,
+    Enabled,
+    Disabled,
+}
 
-impl ToCss for UnsupportedPseudoClass {
-    fn to_css<W>(&self, _dest: &mut W) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        match *self {}
+impl DynamicPseudoClass {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Link => "link",
+            Self::AnyLink => "any-link",
+            Self::Visited => "visited",
+            Self::Hover => "hover",
+            Self::Focus => "focus",
+            Self::Active => "active",
+            Self::Checked => "checked",
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "link" => Some(Self::Link),
+            "any-link" => Some(Self::AnyLink),
+            "visited" => Some(Self::Visited),
+            "hover" => Some(Self::Hover),
+            "focus" | "focus-visible" | "focus-within" => Some(Self::Focus),
+            "active" => Some(Self::Active),
+            "checked" => Some(Self::Checked),
+            "enabled" => Some(Self::Enabled),
+            "disabled" => Some(Self::Disabled),
+            _ => None,
+        }
     }
 }
 
-impl NonTSPseudoClass for UnsupportedPseudoClass {
+impl ToCss for DynamicPseudoClass {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+    where
+        W: fmt::Write,
+    {
+        write!(dest, ":{}", self.name())
+    }
+}
+
+impl NonTSPseudoClass for DynamicPseudoClass {
     type Impl = TextSurferSelectorImpl;
 
     fn is_active_or_hover(&self) -> bool {
-        match *self {}
+        matches!(self, Self::Active | Self::Hover)
     }
 
     fn is_user_action_state(&self) -> bool {
-        match *self {}
+        matches!(self, Self::Active | Self::Hover | Self::Focus)
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DynamicState {
+    pub hover: Option<NodeId>,
+    pub focus: Option<NodeId>,
+    pub active: Option<NodeId>,
+}
+
+impl DynamicState {
+    pub const INERT: Self = Self {
+        hover: None,
+        focus: None,
+        active: None,
+    };
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,7 +176,7 @@ impl SelectorImpl for TextSurferSelectorImpl {
     type NamespacePrefix = Atom;
     type BorrowedLocalName = str;
     type BorrowedNamespaceUrl = str;
-    type NonTSPseudoClass = UnsupportedPseudoClass;
+    type NonTSPseudoClass = DynamicPseudoClass;
     type PseudoElement = UnsupportedPseudoElement;
 }
 
@@ -134,6 +193,18 @@ impl<'i> Parser<'i> for SelectorParser {
 
     fn parse_nth_child_of(&self) -> bool {
         true
+    }
+
+    fn parse_non_ts_pseudo_class(
+        &self,
+        location: SourceLocation,
+        name: CowRcStr<'i>,
+    ) -> Result<DynamicPseudoClass, ParseError<'i, Self::Error>> {
+        DynamicPseudoClass::parse(&name).ok_or_else(|| {
+            location.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(
+                name,
+            ))
+        })
     }
 }
 
@@ -153,8 +224,13 @@ pub fn matching_specificity(
     selectors: &ParsedSelectors,
     document: &Document,
     id: NodeId,
+    state: DynamicState,
 ) -> Option<u32> {
-    let element = DomElement { document, id };
+    let element = DomElement {
+        document,
+        id,
+        state,
+    };
     let mut caches = SelectorCaches::default();
     let quirks = match document.quirks_mode() {
         DomQuirksMode::Quirks => QuirksMode::Quirks,
@@ -181,6 +257,7 @@ pub fn matching_specificity(
 struct DomElement<'a> {
     document: &'a Document,
     id: NodeId,
+    state: DynamicState,
 }
 
 impl DomElement<'_> {
@@ -191,12 +268,34 @@ impl DomElement<'_> {
         }
     }
 
+    fn has_attribute(&self, name: &str) -> bool {
+        let (_, _, attrs) = self.element();
+        attrs
+            .iter()
+            .any(|attr| attr.ns == AttrNs::None && attr.name == name)
+    }
+
+    fn is_form_control(&self) -> bool {
+        let (name, ns, _) = self.element();
+        ns == ElementNs::Html
+            && matches!(
+                name,
+                "input" | "button" | "select" | "textarea" | "option" | "optgroup" | "fieldset"
+            )
+    }
+
+    fn is_selected(&self) -> bool {
+        let (name, ns, _) = self.element();
+        ns == ElementNs::Html && name == "option" && self.has_attribute("selected")
+    }
+
     fn sibling_element(&self, mut id: Option<NodeId>, next: bool) -> Option<Self> {
         while let Some(candidate) = id {
             if matches!(self.document.node(candidate), Some(Node::Element { .. })) {
                 return Some(Self {
                     document: self.document,
                     id: candidate,
+                    state: self.state,
                 });
             }
             id = if next {
@@ -223,6 +322,7 @@ impl Element for DomElement<'_> {
                 return Some(Self {
                     document: self.document,
                     id: candidate,
+                    state: self.state,
                 });
             }
             parent = self.document.parent(candidate);
@@ -308,10 +408,23 @@ impl Element for DomElement<'_> {
 
     fn match_non_ts_pseudo_class(
         &self,
-        pseudo: &UnsupportedPseudoClass,
+        pseudo: &DynamicPseudoClass,
         _context: &mut MatchingContext<TextSurferSelectorImpl>,
     ) -> bool {
-        match *pseudo {}
+        match pseudo {
+            DynamicPseudoClass::Link | DynamicPseudoClass::AnyLink => self.is_link(),
+            DynamicPseudoClass::Visited => false,
+            DynamicPseudoClass::Hover => self.state.hover == Some(self.id),
+            DynamicPseudoClass::Focus => self.state.focus == Some(self.id),
+            DynamicPseudoClass::Active => self.state.active == Some(self.id),
+            DynamicPseudoClass::Checked => self.has_attribute("checked") || self.is_selected(),
+            DynamicPseudoClass::Disabled => {
+                self.is_form_control() && self.has_attribute("disabled")
+            }
+            DynamicPseudoClass::Enabled => {
+                self.is_form_control() && !self.has_attribute("disabled")
+            }
+        }
     }
 
     fn match_pseudo_element(
@@ -413,6 +526,16 @@ mod tests {
     use super::*;
     use crate::core::dom::Attr;
 
+    fn matches(selector: &str, document: &Document, id: NodeId, state: DynamicState) -> bool {
+        matching_specificity(
+            &parse(selector).expect("selector parses"),
+            document,
+            id,
+            state,
+        )
+        .is_some()
+    }
+
     #[test]
     fn html_names_are_ascii_insensitive_but_foreign_names_are_not() {
         let mut document = Document::new();
@@ -423,15 +546,104 @@ mod tests {
             ElementNs::Svg,
             vec![Attr::plain("viewBox", "0 0 1 1")],
         );
-        assert!(matching_specificity(&parse("DIV").unwrap(), &document, html).is_some());
-        assert!(
-            matching_specificity(&parse("linearGradient[viewBox]").unwrap(), &document, svg)
-                .is_some()
+        let state = DynamicState::default();
+        assert!(matches("DIV", &document, html, state));
+        assert!(matches("linearGradient[viewBox]", &document, svg, state));
+        assert!(!matches("lineargradient", &document, svg, state));
+        assert!(!matches("linearGradient[viewbox]", &document, svg, state));
+    }
+
+    #[test]
+    fn dynamic_pseudo_classes_parse_instead_of_invalidating_the_whole_selector_list() {
+        let mut document = Document::new();
+        let link = document.insert_element(
+            None,
+            "a",
+            ElementNs::Html,
+            vec![Attr::plain("href", "https://example.com/")],
         );
-        assert!(matching_specificity(&parse("lineargradient").unwrap(), &document, svg).is_none());
+        let anchor = document.insert_element(None, "a", ElementNs::Html, vec![]);
+        let state = DynamicState::default();
+        assert!(matches("a:link", &document, link, state));
+        assert!(matches("a:any-link", &document, link, state));
+        assert!(!matches("a:link", &document, anchor, state));
         assert!(
-            matching_specificity(&parse("linearGradient[viewbox]").unwrap(), &document, svg)
-                .is_none()
+            parse("p, a:hover").is_some(),
+            "one dynamic class must not invalidate the whole selector list"
         );
+    }
+
+    #[test]
+    fn visited_never_matches_so_page_styling_cannot_observe_history() {
+        let mut document = Document::new();
+        let link = document.insert_element(
+            None,
+            "a",
+            ElementNs::Html,
+            vec![Attr::plain("href", "https://example.com/")],
+        );
+        assert!(parse("a:visited").is_some());
+        assert!(!matches(
+            "a:visited",
+            &document,
+            link,
+            DynamicState::default()
+        ));
+    }
+
+    #[test]
+    fn user_action_pseudo_classes_follow_the_injected_state() {
+        let mut document = Document::new();
+        let div = document.insert_element(None, "div", ElementNs::Html, vec![]);
+        assert!(!matches(
+            "div:hover",
+            &document,
+            div,
+            DynamicState::default()
+        ));
+        assert!(matches(
+            "div:hover",
+            &document,
+            div,
+            DynamicState {
+                hover: Some(div),
+                ..Default::default()
+            }
+        ));
+        assert!(matches(
+            "div:focus",
+            &document,
+            div,
+            DynamicState {
+                focus: Some(div),
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn form_state_pseudo_classes_read_the_attributes() {
+        let mut document = Document::new();
+        let checked = document.insert_element(
+            None,
+            "input",
+            ElementNs::Html,
+            vec![Attr::plain("checked", "")],
+        );
+        let disabled = document.insert_element(
+            None,
+            "input",
+            ElementNs::Html,
+            vec![Attr::plain("disabled", "")],
+        );
+        let plain = document.insert_element(None, "input", ElementNs::Html, vec![]);
+        let paragraph = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let state = DynamicState::default();
+        assert!(matches("input:checked", &document, checked, state));
+        assert!(!matches("input:checked", &document, plain, state));
+        assert!(matches("input:disabled", &document, disabled, state));
+        assert!(matches("input:enabled", &document, plain, state));
+        assert!(!matches("input:enabled", &document, disabled, state));
+        assert!(!matches(":enabled", &document, paragraph, state));
     }
 }
