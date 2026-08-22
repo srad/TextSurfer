@@ -1,0 +1,13 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"table_fixed_overflow.html\")"
+---
+┌─────────────┬─────┐
+│             │     │
+│ ab界defgh   │ s   │
+│             │     │
+├─────────────┼─────┤
+│             │     │
+│ short       │ f   │
+│             │     │
+└─────────────┴─────┘

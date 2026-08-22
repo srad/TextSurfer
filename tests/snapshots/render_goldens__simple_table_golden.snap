@@ -1,0 +1,11 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"table_simple.html\")"
+---
+Before
+
+ Name  Value
+ Alpha One
+ Beta  Two
+
+After

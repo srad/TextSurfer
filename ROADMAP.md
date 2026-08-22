@@ -24,7 +24,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `core/url.rs` — `url_fix` | not a parser | **No change** — delegates all real parsing to the `url` crate; scheme/host/search heuristics are address-bar UX behavior |
 | `css/parser.rs` | library adapter | **Keep** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
 | `css/parser.rs` — terminal media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
-| Table layout (M1-D) | custom, planned | **Custom is correct** — Taffy 0.13 implements block/flex/grid but has no table algorithm; no Rust crate implements CSS table layout with colspan/rowspan against a foreign box tree |
+| Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.13 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ### Prior-art audit (2026-08-22)
@@ -62,15 +62,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, presentational attributes, `text-align` | (open) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, presentational attributes, `text-align` | (in progress — tables done) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-22): **281 lib · 4 binary · 3 pipeline · 14 corpus ·
-10 golden**.
+Test counts at the last green run (2026-08-23): **315 lib · 5 binary · 4 pipeline · 14 corpus ·
+14 golden**.
 Cross-cutting: test infrastructure (done: contract suites, snapshots, proptest, fakes) · gates (done:
 local only, no CI) · coverage floor (open: optional local, 80% overall / 90% css·layout·paint) ·
 external conformance corpus (M1-A done at 95.16% raw / 100% with xfail; test262 at M5).
@@ -136,7 +136,8 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   matching), boa_engine (ECMAScript), ureq (HTTP), encoding_rs (decode), ratatui (widgets/TUI),
   Taffy (block box geometry), textwrap + unicode-segmentation/width (inline formatting).
   In-house scope: Document arena + TreeSink glue, cascade → style tree, layout → terminal grid,
-  paint/DisplayList, chrome/App/event loop, and table layout (M1-D — no crate exists).
+  paint/DisplayList, chrome/App/event loop, and table layout (M1-D — audited crates do not integrate
+  with a styled CSS box tree).
 - Single crate with modules (not a workspace) — fastest iteration; workspace split trivial later.
 - Native text renderer (lynx/w3m/chawan family), not embedded-engine (carbonyl/browsh family) — our
   value is small footprint + terminal-native layout.
@@ -237,7 +238,8 @@ reviewed individually; all gates green.
 
 Landed: cssparser 0.37 + selectors 0.40 adapters with specificity and structural matching; first
 `Cascade` (UA + embedded author + inline `style`, `!important`, source order); type-only `@media`
-with injected screen context and bounded diagnostics; degradation contracts (table/flex/grid→block,
+with injected screen context and bounded diagnostics; temporary degradation contracts
+(table/flex/grid→block before their owning milestones,
 position→static, percentage heights→auto); Taffy 0.13 block geometry with anonymous boxes, margin
 collapse, padding, one-cell borders, fixed widths and content-box/border-box; six inheriting
 `white-space` modes over node-owned textwrap fragments; sparse paint with border glyphs.
@@ -319,21 +321,32 @@ both viewport dimensions without restoring the blank loading state.
   cascade-order fixtures green; bucketed and naive cascades agree; manual Wikipedia smoke renders
   with external author styles.
 
-### M1-D — Layout completeness (open)
+### M1-D — Layout completeness (in progress)
 
 Sequenced after M1-C and before M2: a terminal browser is judged on whether real pages are readable,
 and tables are what separate w3m from lynx. Flex/grid stay in M6.
 
-- [ ] **Table layout** — `display: table*` stops degrading to block: column width resolution,
-      `colspan`/`rowspan`, collapsed borders drawn with box-drawing glyphs, caption placement.
-      In-house per the custom-parser audit (Taffy has no table algorithm).
-      *Proof:* fixture goldens for simple, spanned, nested and overflowing tables.
+- [x] **Table layout** *(done)* — `display: table*` stops degrading to block. Normalize the
+      styled box tree with CSS anonymous-table fixup, then use an in-house formatter beside Taffy's
+      block geometry. Support auto and fixed column width resolution, `colspan`/`rowspan`, nested
+      block and inline tables, top/bottom captions, separate and collapsed borders, per-edge border
+      width/style/colour, and sparse paint primitives. HTML tables receive compact UA spacing of one
+      horizontal cell and zero vertical cells; authored `display: table` starts at zero spacing.
+      Fixed-layout cell overflow clips at the inner edge on grapheme boundaries without ellipses.
+      Percent constraints are evaluated once against the selected table width; a resulting minimum
+      may grow the table without recursive percentage reevaluation. Resource limits degrade an
+      oversized table to normal block flow while preserving its content. In-house per the audit
+      above; Taffy's `item_is_table` is used at its block-layout boundary.
+      *Proof:* unit/contract tests for cascade, fixup, spans, width and border conflicts; property laws
+      for occupancy, glyph disjointness, hit boxes and width monotonicity; fixture goldens for simple,
+      spanned/collapsed, nested/captioned and fixed-overflow tables.
 - [ ] **Generated content and markers** — `::before`/`::after` with `content`, counters
       (`counter-reset`/`counter-increment`) and `list-style-type`, replacing the hardcoded `"• "` /
       `"# "` prefixes. Fixes ordered lists, which currently render every `<ol>` item as a bullet.
       *Proof:* `<ol>` numbers, nested lists number independently, `list-style-type: none` suppresses.
-- [ ] **Presentational HTML** — map `align`, `bgcolor`, `width`, `<center>` and `<font color>` into
-      the cascade at UA-origin specificity, plus `text-align` (left/right/center/justify→left).
+- [ ] **Presentational HTML** — map `align`, `bgcolor`, `width`, `cellspacing`, `cellpadding`,
+      `border`, `rules`, `frame`, `valign`/`vertical-align`, `<center>` and `<font color>` into the
+      cascade at UA-origin specificity, plus `text-align` (left/right/center/justify→left).
       *Proof:* an old-school fixture page lays out as intended.
 - **Acceptance:** the fixture set above green; manual smoke on a table-heavy page (Wikipedia infobox)
   is readable without horizontal guessing.
@@ -566,3 +579,14 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   green at 303 library · 5 binary · 4 pipeline · 14 corpus · 10 golden tests; the development-profile
   5,000-rule × 2,000-element selector benchmark median is 26.0575 ms. The three live-site terminal
   smokes remain human-run by standing rule.
+- 2026-08-23 — M1-D table layout completed; M1-D remains in progress for generated content/list
+  markers, presentational HTML and `text-align`. No dependency was added: **Taffy 0.13.0** remains
+  the block-geometry engine and its `item_is_table` boundary hosts the isolated formatter. HTML and
+  authored CSS table roles now retain their computed displays; auto/fixed tracks, percentages,
+  column hints, `colspan`/`rowspan` (including group-bounded zero), captions, nested block and
+  bottom-aligned inline tables, compact UA spacing, separate/collapsed per-edge borders, conflict
+  resolution, layered table backgrounds, grapheme-safe fixed-cell clipping and bounded fallback are
+  active. Sparse background/stroke primitives replace the former one-bit layout-box border seam.
+  Four table goldens cover simple, collapsed/spanned, nested/captioned and fixed-overflow cases;
+  local proof is green at 315 library · 5 binary · 4 pipeline · 14 corpus · 14 golden tests. The
+  Wikipedia-infobox smoke remains human-run by standing rule.

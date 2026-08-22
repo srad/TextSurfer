@@ -54,9 +54,10 @@ Ready                              https://example.com
   resize/mouse geometry
 - Hierarchical rendering path: cssparser + selectors cascade inline, embedded, linked and recursively
   imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
-  scripting, color scheme and viewport dimensions; Taffy sizes nested and anonymous
-  block flow with fixed content-box/border-box widths, textwrap and Unicode-aware fragments reflow
-  six whitespace modes, and sparse paint emits clipped terminal-cell lines and borders
+  scripting, color scheme and viewport dimensions; Taffy sizes nested and anonymous block flow,
+  while an isolated table formatter resolves anonymous table boxes, auto/fixed tracks, spans,
+  captions and nested block/inline tables; textwrap and Unicode-aware fragments reflow six
+  whitespace modes, and sparse paint emits clipped terminal-cell lines and merged borders
 - Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
   the terminal as coloured, bold, underlined and struck spans — with a contrast pass that keeps
   unreadable author colours legible over the theme's field — plus link and hit geometry carried
@@ -68,8 +69,9 @@ Ready                              https://example.com
   uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
 - WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): table layout and generated
-content (M1-D), links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa integration
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): generated content, list
+markers, presentational HTML and text alignment (the remaining M1-D work), links/forms/search (M2),
+mouse (M3), and the JavaScript seam/Boa integration
 (M4–M5).
 
 ## Architecture
@@ -142,9 +144,9 @@ to DuckDuckGo's lite search for anything that isn't a URL.
   joined by the six layout laws: viewport-width monotonicity, painted-row bounds, disjoint leaf
   glyph cells, laminar per-row box families, engine-backed deepest-hit round trips, and scroll
   clamping as a fixed point under arbitrary key sequences.
-- **Render goldens** — six fixture pages (margins, headings, borders, links, wide characters,
-  `pre`) render end-to-end into insta snapshots, with assertions for link geometry, colour contrast
-  and `--dump` agreeing with the in-process painter.
+- **Render goldens** — ten fixture pages cover margins, headings, borders, links, wide characters,
+  `pre`, simple and collapsed/spanned tables, nested/captioned tables, and fixed-layout overflow,
+  with assertions for link geometry, colour contrast and `--dump` parity.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -164,8 +166,8 @@ the real clock.
 Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
-style/layout/paint ✅ · M1-C external CSS ✅ · M1-D tables & generated content · M2
-tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
+style/layout/paint ✅ · M1-C external CSS ✅ · M1-D tables ✅, generated content and legacy HTML
+styling in progress · M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
 

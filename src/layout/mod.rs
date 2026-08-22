@@ -1,5 +1,7 @@
 pub mod engine;
+mod table;
 
 pub use engine::{
-    BoxTree, LayoutBox, LayoutEngine, LayoutRect, LinkBox, TaffyLayoutEngine, TextFragment,
+    BackgroundFill, BorderStroke, BoxTree, LayoutBox, LayoutEngine, LayoutRect, LinkBox,
+    TaffyLayoutEngine, TextFragment,
 };

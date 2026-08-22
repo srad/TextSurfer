@@ -8,7 +8,9 @@ use crate::core::dom::Document;
 use crate::core::dom::{AttrNs, ElementNs, Node, NodeId};
 use crate::core::geom::Size;
 use crate::core::style::{
-    BoxSizing, ComputedStyle, CssWidth, Display, EdgeSizes, Palette, Rgb, StyleTree, WhiteSpace,
+    BorderCollapse, BorderColor, BorderEdges, BorderLineStyle, BorderSide, BorderSpacing,
+    BoxSizing, CaptionSide, ComputedStyle, CssPercentage, CssWidth, Display, EdgeSizes, Palette,
+    Rgb, StyleTree, TableLayoutMode, WhiteSpace,
 };
 use crate::css::parser::{
     ColorScheme, CssRule, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
@@ -138,7 +140,15 @@ fn cascade_document(
         for (_, _, _, declaration) in declarations {
             apply_declaration(&mut style, parent_style, &declaration);
         }
-        if style.display != Display::Block {
+        if matches!(
+            style.display,
+            Display::None
+                | Display::Inline
+                | Display::TableHeaderGroup
+                | Display::TableRowGroup
+                | Display::TableFooterGroup
+                | Display::TableRow
+        ) {
             style.width = CssWidth::Auto;
         }
         tree.insert(id, style);
@@ -387,11 +397,6 @@ fn ua_style(
             | "figcaption"
             | "form"
             | "fieldset"
-            | "table"
-            | "thead"
-            | "tbody"
-            | "tfoot"
-            | "tr"
             | "h1"
             | "h2"
             | "h3"
@@ -402,7 +407,18 @@ fn ua_style(
     ) {
         Display::Block
     } else {
-        Display::Inline
+        match name.as_str() {
+            "table" => Display::Table,
+            "thead" => Display::TableHeaderGroup,
+            "tbody" => Display::TableRowGroup,
+            "tfoot" => Display::TableFooterGroup,
+            "tr" => Display::TableRow,
+            "td" | "th" => Display::TableCell,
+            "col" => Display::TableColumn,
+            "colgroup" => Display::TableColumnGroup,
+            "caption" => Display::TableCaption,
+            _ => Display::Inline,
+        }
     };
     let mut style = ComputedStyle {
         display,
@@ -415,6 +431,9 @@ fn ua_style(
     };
     if name == "pre" {
         style.white_space = WhiteSpace::Pre;
+    }
+    if name == "table" {
+        style.border_spacing = BorderSpacing::new(1, 0);
     }
     if name == "a"
         && attrs
@@ -475,9 +494,19 @@ fn apply_declaration(
             if let Some(display) =
                 parse_ident(&declaration.value).and_then(|value| match value.as_str() {
                     "none" => Some(Display::None),
-                    "block" | "flow-root" | "list-item" | "table" | "flex" | "grid"
-                    | "inline-block" | "inline-flex" | "inline-grid" => Some(Display::Block),
+                    "block" | "flow-root" | "list-item" | "flex" | "grid" | "inline-block"
+                    | "inline-flex" | "inline-grid" => Some(Display::Block),
                     "inline" => Some(Display::Inline),
+                    "table" => Some(Display::Table),
+                    "inline-table" => Some(Display::InlineTable),
+                    "table-header-group" => Some(Display::TableHeaderGroup),
+                    "table-row-group" => Some(Display::TableRowGroup),
+                    "table-footer-group" => Some(Display::TableFooterGroup),
+                    "table-row" => Some(Display::TableRow),
+                    "table-cell" => Some(Display::TableCell),
+                    "table-column" => Some(Display::TableColumn),
+                    "table-column-group" => Some(Display::TableColumnGroup),
+                    "table-caption" => Some(Display::TableCaption),
                     _ => None,
                 })
             {
@@ -538,6 +567,10 @@ fn apply_declaration(
                 style.border = border;
             }
         }
+        "border-top" => assign_border_side(&mut style.border.top, &declaration.value),
+        "border-right" => assign_border_side(&mut style.border.right, &declaration.value),
+        "border-bottom" => assign_border_side(&mut style.border.bottom, &declaration.value),
+        "border-left" => assign_border_side(&mut style.border.left, &declaration.value),
         "color" => {
             if let Some(color) = parse_color(&declaration.value) {
                 style.color = color;
@@ -559,16 +592,60 @@ fn apply_declaration(
                 style.strike = strike;
             }
         }
-        "border-style" => {
-            if let Some(border) =
+        "border-style" => assign_border_styles(&mut style.border, &declaration.value),
+        "border-top-style" => assign_border_style(&mut style.border.top, &declaration.value),
+        "border-right-style" => assign_border_style(&mut style.border.right, &declaration.value),
+        "border-bottom-style" => assign_border_style(&mut style.border.bottom, &declaration.value),
+        "border-left-style" => assign_border_style(&mut style.border.left, &declaration.value),
+        "border-width" => assign_border_widths(&mut style.border, &declaration.value),
+        "border-top-width" => assign_border_width(&mut style.border.top, &declaration.value),
+        "border-right-width" => assign_border_width(&mut style.border.right, &declaration.value),
+        "border-bottom-width" => assign_border_width(&mut style.border.bottom, &declaration.value),
+        "border-left-width" => assign_border_width(&mut style.border.left, &declaration.value),
+        "border-color" => assign_border_colors(&mut style.border, &declaration.value),
+        "border-top-color" => assign_border_color(&mut style.border.top, &declaration.value),
+        "border-right-color" => assign_border_color(&mut style.border.right, &declaration.value),
+        "border-bottom-color" => assign_border_color(&mut style.border.bottom, &declaration.value),
+        "border-left-color" => assign_border_color(&mut style.border.left, &declaration.value),
+        "table-layout" => {
+            if let Some(value) =
                 parse_ident(&declaration.value).and_then(|value| match value.as_str() {
-                    "none" | "hidden" | "initial" => Some(false),
-                    "solid" | "dotted" | "dashed" | "double" | "groove" | "ridge" | "inset"
-                    | "outset" => Some(true),
+                    "auto" => Some(TableLayoutMode::Auto),
+                    "fixed" => Some(TableLayoutMode::Fixed),
                     _ => None,
                 })
             {
-                style.border = border;
+                style.table_layout = value;
+            }
+        }
+        "border-collapse" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "separate" => Some(BorderCollapse::Separate),
+                    "collapse" => Some(BorderCollapse::Collapse),
+                    _ => None,
+                })
+            {
+                style.border_collapse = value;
+            }
+        }
+        "border-spacing" => {
+            if let Some(values) = parse_lengths(&declaration.value)
+                && let [horizontal] | [horizontal, _] = values.as_slice()
+            {
+                style.border_spacing =
+                    BorderSpacing::new(*horizontal, values.get(1).copied().unwrap_or(*horizontal));
+            }
+        }
+        "caption-side" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "top" => Some(CaptionSide::Top),
+                    "bottom" => Some(CaptionSide::Bottom),
+                    _ => None,
+                })
+            {
+                style.caption_side = value;
             }
         }
         _ => {}
@@ -610,13 +687,37 @@ fn apply_css_wide(
         "padding-right" => style.padding.right = source.padding.right,
         "padding-bottom" => style.padding.bottom = source.padding.bottom,
         "padding-left" => style.padding.left = source.padding.left,
-        "border" | "border-style" => style.border = source.border,
+        "border" | "border-style" | "border-width" | "border-color" => style.border = source.border,
+        "border-top" | "border-top-style" | "border-top-width" | "border-top-color" => {
+            style.border.top = source.border.top
+        }
+        "border-right" | "border-right-style" | "border-right-width" | "border-right-color" => {
+            style.border.right = source.border.right
+        }
+        "border-bottom" | "border-bottom-style" | "border-bottom-width" | "border-bottom-color" => {
+            style.border.bottom = source.border.bottom
+        }
+        "border-left" | "border-left-style" | "border-left-width" | "border-left-color" => {
+            style.border.left = source.border.left
+        }
+        "table-layout" => style.table_layout = source.table_layout,
+        "border-collapse" => style.border_collapse = source.border_collapse,
+        "border-spacing" => style.border_spacing = source.border_spacing,
+        "caption-side" => style.caption_side = source.caption_side,
         _ => {}
     }
 }
 
 fn is_inherited(property: &str) -> bool {
-    matches!(property, "white-space" | "color" | "font-weight")
+    matches!(
+        property,
+        "white-space"
+            | "color"
+            | "font-weight"
+            | "border-collapse"
+            | "border-spacing"
+            | "caption-side"
+    )
 }
 
 fn parse_color(source: &str) -> Option<Option<Rgb>> {
@@ -627,6 +728,10 @@ fn parse_color(source: &str) -> Option<Option<Rgb>> {
     let mut parser = Parser::new(&mut input);
     let color = CssColor::parse(&mut parser).ok()?;
     parser.expect_exhausted().ok()?;
+    css_color_to_rgb(color).map(Some)
+}
+
+fn css_color_to_rgb(color: CssColor) -> Option<Rgb> {
     let (r, g, b) = match color {
         CssColor::Rgba(rgba) => (rgba.red, rgba.green, rgba.blue),
         CssColor::Hsl(hsl) => float_rgb(hsl_to_rgb(
@@ -641,7 +746,7 @@ fn parse_color(source: &str) -> Option<Option<Rgb>> {
         )),
         _ => return None,
     };
-    Some(Some(Rgb::new(r, g, b)))
+    Some(Rgb::new(r, g, b))
 }
 
 fn float_rgb(components: (f32, f32, f32)) -> (u8, u8, u8) {
@@ -697,37 +802,177 @@ fn parse_ident(source: &str) -> Option<String> {
     Some(value.to_ascii_lowercase())
 }
 
-fn parse_border(source: &str) -> Option<bool> {
+fn parse_border(source: &str) -> Option<BorderEdges> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
-    let mut visible_style = false;
-    let mut zero_width = false;
-    while let Ok(token) = parser.next() {
+    let mut side = BorderSide::default();
+    let mut saw_width = false;
+    let mut saw_style = false;
+    let mut saw_color = false;
+    while !parser.is_exhausted() {
+        if !saw_color && let Ok(color) = parser.try_parse(CssColor::parse) {
+            side.color = border_color(color)?;
+            saw_color = true;
+            continue;
+        }
+        let token = parser.next().ok()?;
         match token {
-            Token::Ident(value) if value.eq_ignore_ascii_case("none") => return Some(false),
-            Token::Ident(value) if value.eq_ignore_ascii_case("hidden") => return Some(false),
-            Token::Ident(value) if value.eq_ignore_ascii_case("initial") => return Some(false),
-            Token::Ident(value)
-                if [
-                    "solid", "dotted", "dashed", "double", "groove", "ridge", "inset", "outset",
-                ]
-                .iter()
-                .any(|style| value.eq_ignore_ascii_case(style)) =>
+            Token::Ident(value) => {
+                if !saw_style && let Some(border_style) = parse_border_style_ident(value) {
+                    side.style = border_style;
+                    saw_style = true;
+                } else if !saw_width && let Some(width) = parse_border_width_ident(value) {
+                    side.width = width;
+                    saw_width = true;
+                } else {
+                    return None;
+                }
+            }
+            Token::Number { value, .. } | Token::Dimension { value, .. }
+                if !saw_width && value.is_finite() && *value >= 0.0 =>
             {
-                visible_style = true;
+                side.width = usize::from(*value > 0.0);
+                saw_width = true;
             }
-            Token::Number { value, .. } | Token::Dimension { value, .. } if *value == 0.0 => {
-                zero_width = true;
-            }
-            _ => {}
+            _ => return None,
         }
     }
-    if zero_width {
-        Some(false)
-    } else if visible_style {
-        Some(true)
-    } else {
-        None
+    (saw_width || saw_style || saw_color).then_some(BorderEdges::uniform(side))
+}
+
+fn border_color(color: CssColor) -> Option<BorderColor> {
+    match color {
+        CssColor::CurrentColor => Some(BorderColor::CurrentColor),
+        CssColor::Rgba(rgba) if rgba.alpha <= 0.0 => Some(BorderColor::Transparent),
+        color => css_color_to_rgb(color).map(BorderColor::Rgb),
+    }
+}
+
+fn parse_border_style_ident(value: &str) -> Option<BorderLineStyle> {
+    match value.to_ascii_lowercase().as_str() {
+        "none" => Some(BorderLineStyle::None),
+        "hidden" => Some(BorderLineStyle::Hidden),
+        "inset" => Some(BorderLineStyle::Inset),
+        "groove" => Some(BorderLineStyle::Groove),
+        "outset" => Some(BorderLineStyle::Outset),
+        "ridge" => Some(BorderLineStyle::Ridge),
+        "dotted" => Some(BorderLineStyle::Dotted),
+        "dashed" => Some(BorderLineStyle::Dashed),
+        "solid" => Some(BorderLineStyle::Solid),
+        "double" => Some(BorderLineStyle::Double),
+        _ => None,
+    }
+}
+
+fn parse_border_width_ident(value: &str) -> Option<usize> {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "thin" | "medium" | "thick"
+    )
+    .then_some(1)
+}
+
+fn parse_border_styles(source: &str) -> Option<Vec<BorderLineStyle>> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut values = Vec::new();
+    while !parser.is_exhausted() && values.len() < 4 {
+        values.push(parse_border_style_ident(parser.expect_ident().ok()?)?);
+    }
+    (!values.is_empty() && parser.is_exhausted()).then_some(values)
+}
+
+fn parse_border_widths(source: &str) -> Option<Vec<usize>> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut values = Vec::new();
+    while !parser.is_exhausted() && values.len() < 4 {
+        let value = match parser.next().ok()? {
+            Token::Ident(value) => parse_border_width_ident(value)?,
+            Token::Number { value, .. } | Token::Dimension { value, .. }
+                if value.is_finite() && *value >= 0.0 =>
+            {
+                usize::from(*value > 0.0)
+            }
+            _ => return None,
+        };
+        values.push(value);
+    }
+    (!values.is_empty() && parser.is_exhausted()).then_some(values)
+}
+
+fn parse_border_colors(source: &str) -> Option<Vec<BorderColor>> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut values = Vec::new();
+    while !parser.is_exhausted() && values.len() < 4 {
+        values.push(border_color(CssColor::parse(&mut parser).ok()?)?);
+    }
+    (!values.is_empty() && parser.is_exhausted()).then_some(values)
+}
+
+fn expanded_edges<T: Copy>(values: &[T]) -> Option<[T; 4]> {
+    match values {
+        [all] => Some([*all; 4]),
+        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
+        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
+        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
+        _ => None,
+    }
+}
+
+fn assign_border_side(target: &mut BorderSide, value: &str) {
+    if let Some(border) = parse_border(value) {
+        *target = border.top;
+    }
+}
+
+fn assign_border_styles(target: &mut BorderEdges, value: &str) {
+    if let Some(values) = parse_border_styles(value).and_then(|values| expanded_edges(&values)) {
+        target.top.style = values[0];
+        target.right.style = values[1];
+        target.bottom.style = values[2];
+        target.left.style = values[3];
+    }
+}
+
+fn assign_border_style(target: &mut BorderSide, value: &str) {
+    if let Some(value) = parse_ident(value).and_then(|value| parse_border_style_ident(&value)) {
+        target.style = value;
+    }
+}
+
+fn assign_border_widths(target: &mut BorderEdges, value: &str) {
+    if let Some(values) = parse_border_widths(value).and_then(|values| expanded_edges(&values)) {
+        target.top.width = values[0];
+        target.right.width = values[1];
+        target.bottom.width = values[2];
+        target.left.width = values[3];
+    }
+}
+
+fn assign_border_width(target: &mut BorderSide, value: &str) {
+    if let Some(values) = parse_border_widths(value)
+        && let [width] = values.as_slice()
+    {
+        target.width = *width;
+    }
+}
+
+fn assign_border_colors(target: &mut BorderEdges, value: &str) {
+    if let Some(values) = parse_border_colors(value).and_then(|values| expanded_edges(&values)) {
+        target.top.color = values[0];
+        target.right.color = values[1];
+        target.bottom.color = values[2];
+        target.left.color = values[3];
+    }
+}
+
+fn assign_border_color(target: &mut BorderSide, value: &str) {
+    if let Some(values) = parse_border_colors(value)
+        && let [color] = values.as_slice()
+    {
+        target.color = *color;
     }
 }
 
@@ -778,6 +1023,21 @@ fn assign_edges(edges: &mut EdgeSizes, values: &[usize]) {
 fn parse_width(source: &str) -> Option<CssWidth> {
     if parse_ident(source).as_deref() == Some("auto") {
         return Some(CssWidth::Auto);
+    }
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let percentage = match parser.next() {
+        Ok(Token::Percentage { unit_value, .. }) => Some(*unit_value),
+        _ => None,
+    };
+    if let Some(unit_value) = percentage
+        && unit_value.is_finite()
+        && unit_value >= 0.0
+        && parser.is_exhausted()
+    {
+        return Some(CssWidth::Percent(CssPercentage::new(
+            (unit_value * 10_000.0).round().min(u32::MAX as f32) as u32,
+        )));
     }
     parse_length(source).map(CssWidth::Cells)
 }
@@ -859,6 +1119,67 @@ mod tests {
     }
 
     #[test]
+    fn table_roles_and_properties_reach_the_computed_style() {
+        let mut document = Document::new();
+        let table = document.insert_element(None, "table", ElementNs::Html, vec![]);
+        let body = document.insert_element(Some(table), "tbody", ElementNs::Html, vec![]);
+        let row = document.insert_element(Some(body), "tr", ElementNs::Html, vec![]);
+        let cell = document.insert_element(Some(row), "td", ElementNs::Html, vec![]);
+        let caption = document.insert_element(Some(table), "caption", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(
+            "table { table-layout: fixed; border-collapse: collapse; border-spacing: 3px 2px;
+                      width: 50%; border: 2px dashed red; caption-side: bottom }
+             td { border-left: 0 hidden blue; border-top-color: currentcolor }",
+        );
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+
+        let table_style = styles.get(table);
+        assert_eq!(table_style.display, Display::Table);
+        assert_eq!(table_style.table_layout, TableLayoutMode::Fixed);
+        assert_eq!(table_style.border_collapse, BorderCollapse::Collapse);
+        assert_eq!(table_style.border_spacing, BorderSpacing::new(3, 2));
+        assert_eq!(
+            table_style.width,
+            CssWidth::Percent(CssPercentage::new(5_000))
+        );
+        assert_eq!(table_style.caption_side, CaptionSide::Bottom);
+        assert_eq!(table_style.border.top.style, BorderLineStyle::Dashed);
+        assert_eq!(
+            table_style.border.top.color,
+            BorderColor::Rgb(Rgb::new(255, 0, 0))
+        );
+        assert_eq!(styles.get(body).display, Display::TableRowGroup);
+        assert_eq!(styles.get(row).display, Display::TableRow);
+        assert_eq!(styles.get(cell).display, Display::TableCell);
+        assert_eq!(styles.get(cell).border.left.width, 0);
+        assert_eq!(styles.get(cell).border.left.style, BorderLineStyle::Hidden);
+        assert_eq!(styles.get(cell).border.top.color, BorderColor::CurrentColor);
+        assert_eq!(styles.get(caption).display, Display::TableCaption);
+    }
+
+    #[test]
+    fn transparent_and_hidden_borders_keep_their_geometry_without_painting() {
+        let mut document = Document::new();
+        let transparent = document.insert_element(
+            None,
+            "div",
+            ElementNs::Html,
+            vec![Attr::plain("style", "border: thin solid transparent")],
+        );
+        let hidden = document.insert_element(
+            None,
+            "div",
+            ElementNs::Html,
+            vec![Attr::plain("style", "border: thick hidden currentcolor")],
+        );
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        assert_eq!(styles.get(transparent).border.left.layout_width(), 1);
+        assert!(!styles.get(transparent).border.left.is_visible());
+        assert_eq!(styles.get(hidden).border.left.layout_width(), 0);
+        assert!(!styles.get(hidden).border.left.is_visible());
+    }
+
+    #[test]
     fn comments_are_tokenized_and_invalid_values_do_not_override_ua_defaults() {
         let mut document = Document::new();
         let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
@@ -867,7 +1188,7 @@ mod tests {
             .parse("p { display: block /**/; border: none /**/ } pre { white-space: invalid }");
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         assert_eq!(styles.get(p).display, Display::Block);
-        assert!(!styles.get(p).border);
+        assert!(!styles.get(p).border.is_visible());
         assert_eq!(styles.get(pre).white_space, WhiteSpace::Pre);
     }
 
@@ -987,10 +1308,10 @@ mod tests {
             MediaContext::screen(),
         );
         assert_eq!(screen.get(p).display, Display::Block);
-        assert!(screen.get(p).border);
+        assert!(screen.get(p).border.is_visible());
         let print = cascade.apply(&[sheet], &document, MediaContext::print());
         assert_eq!(print.get(p).display, Display::None);
-        assert!(print.get(p).border);
+        assert!(print.get(p).border.is_visible());
     }
 
     #[test]
@@ -1012,13 +1333,12 @@ mod tests {
         );
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         assert_eq!(styles.get(p).display, Display::Block);
-        assert!(styles.get(p).border);
+        assert!(styles.get(p).border.is_visible());
     }
 
     #[test]
     fn unsupported_layout_modes_follow_the_degradation_contract() {
         for value in [
-            "table",
             "inline-block",
             "flex",
             "grid",

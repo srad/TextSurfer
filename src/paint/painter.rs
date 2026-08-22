@@ -4,7 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::NodeId;
-use crate::core::style::{CellStyle, Palette, Rgb};
+use crate::core::style::{BorderColor, BorderSide, CellStyle, Palette, Rgb};
 use crate::layout::{BoxTree, LayoutRect};
 
 const MIN_CONTRAST: f32 = 3.0;
@@ -127,30 +127,23 @@ pub struct BasicPainter;
 impl Painter for BasicPainter {
     fn paint(&self, box_tree: &BoxTree, palette: Palette) -> DisplayList {
         let mut rows = BTreeMap::new();
-        let mut boxes: Vec<_> = box_tree.boxes.iter().collect();
-        boxes.sort_by_key(|layout_box| layout_box.depth);
-        for layout_box in &boxes {
-            if let Some(background) = layout_box.style.bg {
-                fill_background(
-                    &mut rows,
-                    box_tree.width,
-                    box_tree.height,
-                    layout_box.border_rect,
-                    background,
-                );
-            }
+        let mut fills: Vec<_> = box_tree.fills.iter().collect();
+        fills.sort_by_key(|fill| fill.depth);
+        for fill in fills {
+            fill_background(
+                &mut rows,
+                box_tree.width,
+                box_tree.height,
+                fill.rect,
+                fill.color,
+            );
         }
-        for layout_box in &boxes {
-            if layout_box.border {
-                draw_border(
-                    &mut rows,
-                    box_tree.width,
-                    box_tree.height,
-                    layout_box.border_rect,
-                    layout_box.style,
-                );
-            }
-        }
+        draw_strokes(
+            &mut rows,
+            box_tree.width,
+            box_tree.height,
+            &box_tree.strokes,
+        );
         let mut fragments: Vec<_> = box_tree.fragments.iter().collect();
         fragments.sort_by_key(|fragment| (fragment.depth, fragment.row, fragment.col));
         for fragment in fragments {
@@ -312,84 +305,180 @@ fn fill_background(
     }
 }
 
-fn draw_border(
+#[derive(Clone, Copy)]
+struct StrokeCell {
+    mask: u8,
+    group: usize,
+    depth: usize,
+    rank: u8,
+    style: CellStyle,
+}
+
+fn draw_strokes(
     rows: &mut BTreeMap<usize, RowBuffer>,
     viewport_width: usize,
     document_height: usize,
-    rect: LayoutRect,
-    style: CellStyle,
+    strokes: &[crate::layout::BorderStroke],
 ) {
-    if rect.width == 0 || rect.height == 0 || rect.row >= document_height {
-        return;
+    let mut cells = BTreeMap::<(usize, usize), StrokeCell>::new();
+    let mut ordered: Vec<_> = strokes.iter().collect();
+    ordered.sort_by_key(|stroke| stroke.depth);
+    for stroke in ordered {
+        add_stroke(&mut cells, *stroke, viewport_width, document_height);
     }
-    let width = rect.width.min(viewport_width.saturating_sub(rect.col));
-    if width == 0 {
-        return;
-    }
-    if rect.height == 1 {
-        write_border_row(
-            rows,
-            viewport_width,
-            rect.row,
-            rect.col,
-            width,
-            ['─', '─', '─'],
-            style,
-        );
-        return;
-    }
-    write_border_row(
-        rows,
-        viewport_width,
-        rect.row,
-        rect.col,
-        width,
-        ['┌', '─', '┐'],
-        style,
-    );
-    let bottom = rect.row.saturating_add(rect.height - 1);
-    if bottom < document_height {
-        write_border_row(
-            rows,
-            viewport_width,
-            bottom,
-            rect.col,
-            width,
-            ['└', '─', '┘'],
-            style,
-        );
-    }
-    for row in rect.row.saturating_add(1)..bottom.min(document_height) {
+    for ((row, col), cell) in cells {
         let buffer = rows
             .entry(row)
             .or_insert_with(|| RowBuffer::new(viewport_width));
-        buffer.write(rect.col, "│", style);
-        if width > 1 {
-            buffer.write(rect.col + width - 1, "│", style);
+        buffer.write(col, border_glyph(cell.mask), cell.style);
+    }
+}
+
+fn add_stroke(
+    cells: &mut BTreeMap<(usize, usize), StrokeCell>,
+    stroke: crate::layout::BorderStroke,
+    viewport_width: usize,
+    document_height: usize,
+) {
+    let rect = stroke.rect;
+    if rect.width == 0
+        || rect.height == 0
+        || rect.col >= viewport_width
+        || rect.row >= document_height
+    {
+        return;
+    }
+    let right = rect
+        .col
+        .saturating_add(rect.width - 1)
+        .min(viewport_width - 1);
+    let bottom = rect
+        .row
+        .saturating_add(rect.height - 1)
+        .min(document_height - 1);
+    if stroke.edges.top.is_visible() {
+        add_horizontal(cells, rect.row, rect.col, right, stroke, stroke.edges.top);
+    }
+    if stroke.edges.bottom.is_visible() {
+        add_horizontal(cells, bottom, rect.col, right, stroke, stroke.edges.bottom);
+    }
+    if stroke.edges.left.is_visible() {
+        add_vertical(cells, rect.col, rect.row, bottom, stroke, stroke.edges.left);
+    }
+    if stroke.edges.right.is_visible() {
+        add_vertical(cells, right, rect.row, bottom, stroke, stroke.edges.right);
+    }
+}
+
+fn add_horizontal(
+    cells: &mut BTreeMap<(usize, usize), StrokeCell>,
+    row: usize,
+    left: usize,
+    right: usize,
+    stroke: crate::layout::BorderStroke,
+    side: BorderSide,
+) {
+    for col in left..=right {
+        let mut mask = 0;
+        if col > left {
+            mask |= 8;
+        }
+        if col < right {
+            mask |= 2;
+        }
+        if left == right {
+            mask = 10;
+        }
+        place_stroke(cells, row, col, mask, stroke, side);
+    }
+}
+
+fn add_vertical(
+    cells: &mut BTreeMap<(usize, usize), StrokeCell>,
+    col: usize,
+    top: usize,
+    bottom: usize,
+    stroke: crate::layout::BorderStroke,
+    side: BorderSide,
+) {
+    for row in top..=bottom {
+        let mut mask = 0;
+        if row > top {
+            mask |= 1;
+        }
+        if row < bottom {
+            mask |= 4;
+        }
+        if top == bottom {
+            mask = 5;
+        }
+        place_stroke(cells, row, col, mask, stroke, side);
+    }
+}
+
+fn place_stroke(
+    cells: &mut BTreeMap<(usize, usize), StrokeCell>,
+    row: usize,
+    col: usize,
+    mask: u8,
+    stroke: crate::layout::BorderStroke,
+    side: BorderSide,
+) {
+    let rank = side.style as u8;
+    let mut style = stroke.style;
+    style.fg = match side.color {
+        BorderColor::CurrentColor => stroke.style.fg,
+        BorderColor::Transparent => None,
+        BorderColor::Rgb(color) => Some(color),
+    };
+    match cells.get_mut(&(row, col)) {
+        Some(cell) if cell.group == stroke.merge_group => {
+            cell.mask |= mask;
+            if rank >= cell.rank {
+                cell.rank = rank;
+                cell.style = style;
+            }
+        }
+        Some(cell) if stroke.depth >= cell.depth => {
+            *cell = StrokeCell {
+                mask,
+                group: stroke.merge_group,
+                depth: stroke.depth,
+                rank,
+                style,
+            };
+        }
+        Some(_) => {}
+        None => {
+            cells.insert(
+                (row, col),
+                StrokeCell {
+                    mask,
+                    group: stroke.merge_group,
+                    depth: stroke.depth,
+                    rank,
+                    style,
+                },
+            );
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write_border_row(
-    rows: &mut BTreeMap<usize, RowBuffer>,
-    viewport_width: usize,
-    row: usize,
-    col: usize,
-    width: usize,
-    glyphs: [char; 3],
-    style: CellStyle,
-) {
-    let [left, middle, right] = glyphs;
-    let text = if width == 1 {
-        left.to_string()
-    } else {
-        format!("{left}{}{right}", middle.to_string().repeat(width - 2))
-    };
-    let buffer = rows
-        .entry(row)
-        .or_insert_with(|| RowBuffer::new(viewport_width));
-    buffer.write(col, &text, style);
+fn border_glyph(mask: u8) -> &'static str {
+    match mask {
+        1 | 4 | 5 => "│",
+        2 | 8 | 10 => "─",
+        3 => "└",
+        6 => "┌",
+        7 => "├",
+        9 => "┘",
+        11 => "┴",
+        12 => "┐",
+        13 => "┤",
+        14 => "┬",
+        15 => "┼",
+        _ => "─",
+    }
 }
 
 fn write_line(
@@ -459,7 +548,8 @@ fn clear_grapheme(cells: &mut [String], owners: &mut [Option<usize>], target: us
 mod tests {
     use super::*;
     use crate::core::dom::{Document, ElementNs};
-    use crate::layout::{LayoutBox, TextFragment};
+    use crate::core::style::{BorderEdges, BorderLineStyle};
+    use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, TextFragment};
 
     fn painted(tree: &BoxTree) -> DisplayList {
         BasicPainter.paint(tree, Palette::default())
@@ -471,7 +561,6 @@ mod tests {
             border_rect: rect,
             content_rect: rect,
             depth,
-            border: false,
             style: CellStyle::default(),
         }
     }
@@ -583,8 +672,17 @@ mod tests {
                     height: 1,
                 },
                 depth: 0,
-                border: true,
                 style: CellStyle::default(),
+            }],
+            strokes: vec![BorderStroke {
+                rect,
+                edges: BorderEdges::uniform(BorderSide {
+                    style: BorderLineStyle::Solid,
+                    ..Default::default()
+                }),
+                style: CellStyle::default(),
+                depth: 0,
+                merge_group: 1,
             }],
             ..Default::default()
         };
@@ -637,6 +735,18 @@ mod tests {
                         ..Default::default()
                     },
                     ..plain_box(inner, inner_rect, 1)
+                },
+            ],
+            fills: vec![
+                BackgroundFill {
+                    rect: outer_rect,
+                    color: Rgb::new(10, 10, 10),
+                    depth: 0,
+                },
+                BackgroundFill {
+                    rect: inner_rect,
+                    color: Rgb::new(20, 20, 20),
+                    depth: 1,
                 },
             ],
             fragments: vec![TextFragment {

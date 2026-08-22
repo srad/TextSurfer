@@ -1,0 +1,17 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"table_collapsed.html\")"
+---
+┌────────────────────┐
+│                    │
+│ Inventory          │
+│                    │
+├─────────┬──────────┤
+│         │          │
+│ Tools   │ Hammer   │
+│         │          │
+│         ├──────────┤
+│         │          │
+│         │ Saw      │
+│         │          │
+└─────────┴──────────┘

@@ -67,6 +67,26 @@ fn preformatted_golden() {
 }
 
 #[test]
+fn simple_table_golden() {
+    insta::assert_snapshot!(golden("table_simple.html"));
+}
+
+#[test]
+fn collapsed_spanned_table_golden() {
+    insta::assert_snapshot!(golden("table_collapsed.html"));
+}
+
+#[test]
+fn nested_captioned_tables_golden() {
+    insta::assert_snapshot!(golden("table_nested.html"));
+}
+
+#[test]
+fn fixed_table_overflow_golden() {
+    insta::assert_snapshot!(golden("table_fixed_overflow.html"));
+}
+
+#[test]
 fn painted_rows_never_exceed_the_render_width() {
     for fixture in [
         "margins.html",
@@ -75,6 +95,10 @@ fn painted_rows_never_exceed_the_render_width() {
         "links.html",
         "wide.html",
         "pre.html",
+        "table_simple.html",
+        "table_collapsed.html",
+        "table_nested.html",
+        "table_fixed_overflow.html",
     ] {
         for line in render(fixture).text_lines() {
             assert!(

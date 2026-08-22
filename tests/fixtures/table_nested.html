@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      table { border: solid; border-spacing: 1px 0 }
+      td { border: dotted; padding: 1px }
+      caption.bottom { caption-side: bottom }
+      .inline { display: inline-table; border-collapse: collapse }
+      .inline > span > span { border: solid }
+    </style>
+  </head>
+  <body>
+    <table>
+      <caption>Outer caption</caption>
+      <tr>
+        <td>Left</td>
+        <td><table><tr><td>Nested block</td></tr></table></td>
+      </tr>
+      <tr><td colspan="2">Before <span class="inline"><span style="display: table-row"><span style="display: table-cell">Inline table</span></span></span> after</td></tr>
+      <caption class="bottom">Bottom caption</caption>
+    </table>
+    <p>Standalone <span class="inline"><span style="display: table-row"><span style="display: table-cell">atom</span></span></span> aligned</p>
+  </body>
+</html>

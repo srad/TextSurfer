@@ -13,8 +13,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::geom::Size;
 use crate::core::style::{
-    BoxSizing, CellStyle, ComputedStyle, CssWidth, Display, StyleTree, WhiteSpace,
+    BorderEdges, BoxSizing, CellStyle, ComputedStyle, CssWidth, Display, Rgb, StyleTree, WhiteSpace,
 };
+use crate::layout::table::{TableFormatter, TableLimits, TableOutput};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BoxTree {
@@ -22,6 +23,8 @@ pub struct BoxTree {
     pub height: usize,
     pub boxes: Vec<LayoutBox>,
     pub fragments: Vec<TextFragment>,
+    pub fills: Vec<BackgroundFill>,
+    pub strokes: Vec<BorderStroke>,
     pub links: Vec<LinkBox>,
 }
 
@@ -39,8 +42,23 @@ pub struct LayoutBox {
     pub border_rect: LayoutRect,
     pub content_rect: LayoutRect,
     pub depth: usize,
-    pub border: bool,
     pub style: CellStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BackgroundFill {
+    pub rect: LayoutRect,
+    pub color: Rgb,
+    pub depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BorderStroke {
+    pub rect: LayoutRect,
+    pub edges: BorderEdges,
+    pub style: CellStyle,
+    pub depth: usize,
+    pub merge_group: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +88,7 @@ pub struct TaffyLayoutEngine;
 impl LayoutEngine for TaffyLayoutEngine {
     fn layout(&self, document: &Document, styles: &StyleTree, viewport: Size) -> BoxTree {
         let width = usize::from(viewport.cols);
-        let flow = build_flow_tree(document, styles);
+        let flow = build_flow_tree(document, styles, width);
         let mut links = Vec::new();
         for root in document.roots() {
             collect_links(document, styles, *root, &mut links);
@@ -79,7 +97,7 @@ impl LayoutEngine for TaffyLayoutEngine {
         let mut taffy_nodes = vec![None; flow.len()];
         for index in (0..flow.len()).rev() {
             let style = taffy_style(&flow[index], index == 0, width);
-            let node = if !flow[index].inline.is_empty() {
+            let node = if !flow[index].inline.is_empty() || flow[index].table.is_some() {
                 taffy
                     .new_leaf_with_context(style, index)
                     .expect("taffy measured leaf")
@@ -96,6 +114,7 @@ impl LayoutEngine for TaffyLayoutEngine {
             taffy_nodes[index] = Some(node);
         }
         let root = taffy_nodes[0].expect("taffy root");
+        let mut table_cache = HashMap::new();
         taffy
             .compute_layout_with_measure(
                 root,
@@ -107,6 +126,26 @@ impl LayoutEngine for TaffyLayoutEngine {
                     let Some(index) = context.map(|context| *context) else {
                         return TaffySize::ZERO;
                     };
+                    if let Some(table) = flow[index].table {
+                        let width = known.width.unwrap_or(match available.width {
+                            AvailableSpace::Definite(value) => value,
+                            AvailableSpace::MinContent => 1.0,
+                            AvailableSpace::MaxContent => width as f32,
+                        });
+                        let width = width.max(1.0) as usize;
+                        let output = table_cache.entry((table, width)).or_insert_with(|| {
+                            TableFormatter::new(document, styles).format(
+                                table,
+                                width,
+                                TableLimits::default(),
+                                0,
+                            )
+                        });
+                        return TaffySize {
+                            width: output.width as f32,
+                            height: output.height as f32,
+                        };
+                    }
                     let natural = intrinsic_width(&flow[index].inline);
                     let measured_width = known.width.unwrap_or_else(|| match available.width {
                         AvailableSpace::Definite(value) => value,
@@ -117,7 +156,9 @@ impl LayoutEngine for TaffyLayoutEngine {
                         format_inline(&flow[index].inline, measured_width.max(0.0) as usize);
                     TaffySize {
                         width: known.width.unwrap_or(measured_width),
-                        height: known.height.unwrap_or(lines.len() as f32),
+                        height: known
+                            .height
+                            .unwrap_or(formatted_height(&lines, &flow[index].inline) as f32),
                     }
                 },
             )
@@ -141,7 +182,28 @@ impl LayoutEngine for TaffyLayoutEngine {
             let layout = *taffy.layout(node).expect("node layout");
             let absolute_col = parent_col + layout.location.x;
             let absolute_row = parent_row + layout.location.y;
-            if let Some(owner) = flow[index].owner {
+            if let Some(table) = flow[index].table {
+                let width = layout.size.width.max(1.0) as usize;
+                let output = table_cache
+                    .entry((table, width))
+                    .or_insert_with(|| {
+                        TableFormatter::new(document, styles).format(
+                            table,
+                            width,
+                            TableLimits::default(),
+                            0,
+                        )
+                    })
+                    .clone();
+                append_table_output(
+                    &mut tree,
+                    output,
+                    absolute_col.max(0.0).round() as usize,
+                    absolute_row.max(0.0).round() as usize,
+                    flow[index].depth,
+                    index.saturating_add(1),
+                );
+            } else if let Some(owner) = flow[index].owner {
                 let border_rect = layout_rect(absolute_col, absolute_row, layout.size);
                 let left = layout.border.left + layout.padding.left;
                 let right = layout.border.right + layout.padding.right;
@@ -158,13 +220,29 @@ impl LayoutEngine for TaffyLayoutEngine {
                 tree.height = tree
                     .height
                     .max(border_rect.row.saturating_add(border_rect.height));
+                let style = flow[index].style.cell_style();
+                if let Some(color) = style.bg {
+                    tree.fills.push(BackgroundFill {
+                        rect: border_rect,
+                        color,
+                        depth: flow[index].depth,
+                    });
+                }
+                if flow[index].style.border.is_visible() {
+                    tree.strokes.push(BorderStroke {
+                        rect: border_rect,
+                        edges: flow[index].style.border,
+                        style,
+                        depth: flow[index].depth,
+                        merge_group: index.saturating_add(1),
+                    });
+                }
                 tree.boxes.push(LayoutBox {
                     node: owner,
                     border_rect,
                     content_rect,
                     depth: flow[index].depth,
-                    border: flow[index].style.border,
-                    style: flow[index].style.cell_style(),
+                    style,
                 });
                 if flow[index].rule && content_rect.width > 0 {
                     tree.fragments.push(TextFragment {
@@ -179,12 +257,13 @@ impl LayoutEngine for TaffyLayoutEngine {
             }
             if !flow[index].inline.is_empty() {
                 let rect = layout_rect(absolute_col, absolute_row, layout.size);
-                append_fragments(
-                    &mut tree.fragments,
+                append_inline(
+                    &mut tree,
                     &flow[index].inline,
                     rect.col,
                     rect.row,
                     rect.width,
+                    index.saturating_add(1),
                 );
                 tree.height = tree.height.max(rect.row.saturating_add(rect.height));
             }
@@ -198,6 +277,51 @@ impl LayoutEngine for TaffyLayoutEngine {
         assign_link_rects(document, &mut tree);
         tree
     }
+}
+
+fn append_table_output(
+    tree: &mut BoxTree,
+    output: TableOutput,
+    col: usize,
+    row: usize,
+    depth: usize,
+    merge_base: usize,
+) {
+    tree.height = tree.height.max(row.saturating_add(output.height));
+    for mut layout_box in output.boxes {
+        offset_rect(&mut layout_box.border_rect, col, row);
+        offset_rect(&mut layout_box.content_rect, col, row);
+        layout_box.depth += depth;
+        tree.boxes.push(layout_box);
+    }
+    for mut fill in output.fills {
+        offset_rect(&mut fill.rect, col, row);
+        fill.depth += depth;
+        tree.fills.push(fill);
+    }
+    for mut stroke in output.strokes {
+        offset_rect(&mut stroke.rect, col, row);
+        stroke.depth += depth;
+        stroke.merge_group = merge_base
+            .saturating_mul(1_000_000)
+            .saturating_add(stroke.merge_group);
+        tree.strokes.push(stroke);
+    }
+    for fragment in output.fragments {
+        tree.fragments.push(TextFragment {
+            node: fragment.node,
+            col: col.saturating_add(fragment.col),
+            row: row.saturating_add(fragment.row),
+            text: fragment.text,
+            depth: depth.saturating_add(fragment.depth),
+            style: fragment.style,
+        });
+    }
+}
+
+fn offset_rect(rect: &mut LayoutRect, col: usize, row: usize) {
+    rect.col = rect.col.saturating_add(col);
+    rect.row = rect.row.saturating_add(row);
 }
 
 fn assign_link_rects(document: &Document, tree: &mut BoxTree) {
@@ -263,6 +387,7 @@ struct FlowBox {
     inline: Vec<InlinePiece>,
     children: Vec<usize>,
     rule: bool,
+    table: Option<NodeId>,
 }
 
 #[derive(Clone)]
@@ -272,6 +397,7 @@ struct InlinePiece {
     white_space: WhiteSpace,
     depth: usize,
     style: CellStyle,
+    table: Option<TableOutput>,
 }
 
 #[derive(Clone, Copy)]
@@ -286,7 +412,7 @@ enum FlowEvent {
     RightEdge(NodeId, ComputedStyle, InlineContext),
 }
 
-fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
+fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usize) -> Vec<FlowBox> {
     let mut flow = vec![FlowBox {
         owner: None,
         style: ComputedStyle {
@@ -297,6 +423,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
         inline: Vec::new(),
         children: Vec::new(),
         rule: false,
+        table: None,
     }];
     let mut tasks = vec![(0usize, None)];
     while let Some((flow_index, container)) = tasks.pop() {
@@ -344,6 +471,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
                         white_space: context.white_space,
                         depth: context.depth,
                         style: context.style,
+                        table: None,
                     }),
                     Some(Node::Element { name, ns, attrs }) => {
                         let style = styles.get(node);
@@ -355,7 +483,34 @@ fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
                             style: style.cell_style(),
                             depth: context.depth + 1,
                         };
-                        if style.display == Display::Block {
+                        if style.display == Display::Table {
+                            flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
+                            let child = flow.len();
+                            flow.push(FlowBox {
+                                owner: Some(node),
+                                style,
+                                depth: context.depth,
+                                inline: Vec::new(),
+                                children: Vec::new(),
+                                rule: false,
+                                table: Some(node),
+                            });
+                            children.push(child);
+                        } else if style.display == Display::InlineTable {
+                            buffer.push(InlinePiece {
+                                node,
+                                text: String::new(),
+                                white_space: context.white_space,
+                                depth: context.depth,
+                                style: style.cell_style(),
+                                table: Some(TableFormatter::new(document, styles).format(
+                                    node,
+                                    viewport_width,
+                                    TableLimits::default(),
+                                    0,
+                                )),
+                            });
+                        } else if style.display == Display::Block {
                             flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
                             let child = flow.len();
                             flow.push(FlowBox {
@@ -365,6 +520,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
                                 inline: Vec::new(),
                                 children: Vec::new(),
                                 rule: *ns == ElementNs::Html && name == "hr",
+                                table: None,
                             });
                             children.push(child);
                             nested_tasks.push((child, Some(node)));
@@ -375,6 +531,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
                                 white_space: WhiteSpace::Pre,
                                 depth: context.depth,
                                 style: context.style,
+                                table: None,
                             });
                         } else if *ns == ElementNs::Html && name == "img" {
                             buffer.push(InlinePiece {
@@ -383,6 +540,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree) -> Vec<FlowBox> {
                                 white_space: context.white_space,
                                 depth: context.depth,
                                 style: style.cell_style(),
+                                table: None,
                             });
                         } else {
                             append_edge(node, style, true, context, &mut buffer);
@@ -435,10 +593,12 @@ fn flush_inline(
 ) {
     if buffer.is_empty()
         || buffer.iter().all(|piece| {
-            matches!(
-                piece.white_space,
-                WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
-            ) && piece.text.chars().all(char::is_whitespace)
+            piece.table.is_none()
+                && matches!(
+                    piece.white_space,
+                    WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
+                )
+                && piece.text.chars().all(char::is_whitespace)
         })
     {
         buffer.clear();
@@ -455,6 +615,7 @@ fn flush_inline(
         inline: std::mem::take(buffer),
         children: Vec::new(),
         rule: false,
+        table: None,
     });
     children.push(child);
 }
@@ -484,6 +645,7 @@ fn append_prefix(
         white_space: context.white_space,
         depth: context.depth,
         style: context.style,
+        table: None,
     });
 }
 
@@ -506,6 +668,7 @@ fn append_edge(
             white_space: WhiteSpace::BreakSpaces,
             depth: context.depth,
             style: context.style,
+            table: None,
         });
     }
 }
@@ -564,9 +727,9 @@ fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> TaffyStyle 
             ..Default::default()
         };
     }
-    let border = if flow.style.border { 1.0 } else { 0.0 };
     TaffyStyle {
         display: TaffyDisplay::Block,
+        item_is_table: flow.table.is_some(),
         box_sizing: match flow.style.box_sizing {
             BoxSizing::ContentBox => TaffyBoxSizing::ContentBox,
             BoxSizing::BorderBox => TaffyBoxSizing::BorderBox,
@@ -575,6 +738,9 @@ fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> TaffyStyle 
             width: match flow.style.width {
                 CssWidth::Auto => Dimension::auto(),
                 CssWidth::Cells(value) => Dimension::length(value as f32),
+                CssWidth::Percent(value) => {
+                    Dimension::percent(value.basis_points() as f32 / 10_000.0)
+                }
             },
             height: if flow.rule {
                 Dimension::length(1.0)
@@ -595,10 +761,10 @@ fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> TaffyStyle 
             bottom: LengthPercentage::length(flow.style.padding.bottom as f32),
         },
         border: TaffyRect {
-            left: LengthPercentage::length(border),
-            right: LengthPercentage::length(border),
-            top: LengthPercentage::length(border),
-            bottom: LengthPercentage::length(border),
+            left: LengthPercentage::length(flow.style.border.left.layout_width() as f32),
+            right: LengthPercentage::length(flow.style.border.right.layout_width() as f32),
+            top: LengthPercentage::length(flow.style.border.top.layout_width() as f32),
+            bottom: LengthPercentage::length(flow.style.border.bottom.layout_width() as f32),
         },
         ..Default::default()
     }
@@ -621,6 +787,7 @@ struct Glyph {
     depth: usize,
     white_space: WhiteSpace,
     style: CellStyle,
+    atom: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -644,9 +811,25 @@ impl WrapFragment for Word {
 }
 
 fn flatten_glyphs(pieces: &[InlinePiece]) -> Vec<Glyph> {
+    let mut glyphs = Vec::new();
     let mut source = String::new();
     let mut spans = Vec::new();
-    for piece in pieces {
+    for (index, piece) in pieces.iter().enumerate() {
+        if let Some(table) = &piece.table {
+            append_text_glyphs(&mut glyphs, &source, &spans);
+            source.clear();
+            spans.clear();
+            glyphs.push(Glyph {
+                node: piece.node,
+                text: String::new(),
+                width: table.width,
+                depth: piece.depth,
+                white_space: piece.white_space,
+                style: piece.style,
+                atom: Some(index),
+            });
+            continue;
+        }
         let start = source.len();
         source.push_str(&piece.text);
         spans.push((
@@ -658,24 +841,34 @@ fn flatten_glyphs(pieces: &[InlinePiece]) -> Vec<Glyph> {
             piece.style,
         ));
     }
+    append_text_glyphs(&mut glyphs, &source, &spans);
+    glyphs
+}
+
+fn append_text_glyphs(
+    glyphs: &mut Vec<Glyph>,
+    source: &str,
+    spans: &[(usize, usize, NodeId, WhiteSpace, usize, CellStyle)],
+) {
+    if source.is_empty() {
+        return;
+    }
     let mut span = 0;
-    source
-        .grapheme_indices(true)
-        .map(|(offset, text)| {
-            while span + 1 < spans.len() && offset >= spans[span].1 {
-                span += 1;
-            }
-            let (_, _, node, white_space, depth, style) = spans[span];
-            Glyph {
-                node,
-                text: text.to_string(),
-                width: UnicodeWidthStr::width(text),
-                depth,
-                white_space,
-                style,
-            }
-        })
-        .collect()
+    glyphs.extend(source.grapheme_indices(true).map(|(offset, text)| {
+        while span + 1 < spans.len() && offset >= spans[span].1 {
+            span += 1;
+        }
+        let (_, _, node, white_space, depth, style) = spans[span];
+        Glyph {
+            node,
+            text: text.to_string(),
+            width: UnicodeWidthStr::width(text),
+            depth,
+            white_space,
+            style,
+            atom: None,
+        }
+    }));
 }
 
 fn format_inline(pieces: &[InlinePiece], width: usize) -> Vec<Vec<Glyph>> {
@@ -699,7 +892,7 @@ fn format_collapsed(glyphs: &[Glyph], width: usize, wrap: bool) -> Vec<Vec<Glyph
     let mut current = Vec::new();
     let mut whitespace = None;
     for glyph in glyphs {
-        if glyph.text.chars().all(char::is_whitespace) {
+        if glyph.atom.is_none() && glyph.text.chars().all(char::is_whitespace) {
             if !current.is_empty() {
                 let mut space = glyph.clone();
                 space.text = " ".to_string();
@@ -776,7 +969,7 @@ fn format_pre_line(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
     let mut lines = Vec::new();
     let mut segment = Vec::new();
     for glyph in glyphs {
-        if glyph.text == "\n" {
+        if glyph.atom.is_none() && glyph.text == "\n" {
             let wrapped = format_collapsed(&segment, width, true);
             if wrapped.is_empty() {
                 lines.push(Vec::new());
@@ -803,9 +996,9 @@ fn format_pre_line(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
 fn format_preserved(glyphs: &[Glyph], width: usize, wrap: bool) -> Vec<Vec<Glyph>> {
     let mut items = Vec::new();
     for glyph in glyphs {
-        if glyph.text == "\n" {
+        if glyph.atom.is_none() && glyph.text == "\n" {
             items.push(LineItem::Break);
-        } else if glyph.text == "\t" {
+        } else if glyph.atom.is_none() && glyph.text == "\t" {
             items.push(LineItem::Tab(glyph.clone(), wrap));
         } else {
             items.push(LineItem::Glyph(glyph.clone(), wrap, false));
@@ -823,7 +1016,7 @@ fn format_mixed(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
             glyph.white_space,
             WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
         );
-        if collapses && glyph.text.chars().all(char::is_whitespace) {
+        if collapses && glyph.atom.is_none() && glyph.text.chars().all(char::is_whitespace) {
             if glyph.white_space == WhiteSpace::PreLine && glyph.text == "\n" {
                 pending = None;
                 items.push(LineItem::Break);
@@ -840,10 +1033,10 @@ fn format_mixed(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
             let wraps = space.white_space != WhiteSpace::NoWrap;
             items.push(LineItem::Glyph(space, wraps, true));
         }
-        if glyph.text == "\n" {
+        if glyph.atom.is_none() && glyph.text == "\n" {
             items.push(LineItem::Break);
             has_content = false;
-        } else if glyph.text == "\t" {
+        } else if glyph.atom.is_none() && glyph.text == "\t" {
             let wraps = matches!(
                 glyph.white_space,
                 WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
@@ -951,7 +1144,8 @@ fn push_glyph(glyph: Glyph, wrap: bool, trimmable: bool, width: usize, state: &m
 }
 
 fn is_break_opportunity(glyph: &Glyph) -> bool {
-    glyph.text.chars().all(char::is_whitespace) || breaks_between_letters(&glyph.text)
+    glyph.atom.is_none()
+        && (glyph.text.chars().all(char::is_whitespace) || breaks_between_letters(&glyph.text))
 }
 
 fn breaks_between_letters(text: &str) -> bool {
@@ -995,29 +1189,67 @@ fn min_content_width(pieces: &[InlinePiece]) -> usize {
         .unwrap_or(0)
 }
 
-fn append_fragments(
-    fragments: &mut Vec<TextFragment>,
+fn formatted_height(lines: &[Vec<Glyph>], pieces: &[InlinePiece]) -> usize {
+    lines
+        .iter()
+        .map(|line| {
+            line.iter()
+                .filter_map(|glyph| glyph.atom.and_then(|index| pieces[index].table.as_ref()))
+                .map(|table| table.height)
+                .max()
+                .unwrap_or(1)
+                .max(1)
+        })
+        .sum()
+}
+
+fn append_inline(
+    tree: &mut BoxTree,
     pieces: &[InlinePiece],
     col: usize,
     row: usize,
     width: usize,
+    merge_base: usize,
 ) {
-    for (row_offset, line) in format_inline(pieces, width).into_iter().enumerate() {
+    let mut current_row = row;
+    for line in format_inline(pieces, width) {
+        let line_height = line
+            .iter()
+            .filter_map(|glyph| glyph.atom.and_then(|index| pieces[index].table.as_ref()))
+            .map(|table| table.height)
+            .max()
+            .unwrap_or(1)
+            .max(1);
         let mut current_col = col;
         for glyph in line {
-            if let Some(last) = fragments.last_mut()
+            if let Some(index) = glyph.atom {
+                if let Some(table) = &pieces[index].table {
+                    append_table_output(
+                        tree,
+                        table.clone(),
+                        current_col,
+                        current_row + line_height.saturating_sub(table.height),
+                        pieces[index].depth,
+                        merge_base.saturating_mul(1_000).saturating_add(index),
+                    );
+                }
+                current_col = current_col.saturating_add(glyph.width);
+                continue;
+            }
+            let baseline = current_row + line_height - 1;
+            if let Some(last) = tree.fragments.last_mut()
                 && last.node == glyph.node
-                && last.row == row + row_offset
+                && last.row == baseline
                 && last.depth == glyph.depth
                 && last.style == glyph.style
                 && last.col + UnicodeWidthStr::width(last.text.as_str()) == current_col
             {
                 last.text.push_str(&glyph.text);
             } else {
-                fragments.push(TextFragment {
+                tree.fragments.push(TextFragment {
                     node: glyph.node,
                     col: current_col,
-                    row: row + row_offset,
+                    row: baseline,
                     text: glyph.text,
                     depth: glyph.depth,
                     style: glyph.style,
@@ -1025,6 +1257,7 @@ fn append_fragments(
             }
             current_col = current_col.saturating_add(glyph.width);
         }
+        current_row += line_height;
     }
 }
 
@@ -1038,7 +1271,7 @@ fn normalize_segment_breaks(source: &str) -> String {
 mod tests {
     use super::*;
     use crate::core::dom::ElementNs;
-    use crate::core::style::Palette;
+    use crate::core::style::{BorderEdges, BorderLineStyle, BorderSide, Palette};
     use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
     use crate::paint::{BasicPainter, Painter};
     use proptest::prelude::*;
@@ -1397,7 +1630,10 @@ mod tests {
             p,
             ComputedStyle {
                 display: Display::Block,
-                border: true,
+                border: BorderEdges::uniform(BorderSide {
+                    style: BorderLineStyle::Solid,
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         );
