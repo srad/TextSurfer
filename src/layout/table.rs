@@ -6,7 +6,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::style::{
     BorderCollapse, BorderEdges, BorderLineStyle, BorderSide, CellStyle, ComputedStyle, CssWidth,
-    Display, StyleTree, TableLayoutMode, WhiteSpace,
+    Display, PseudoElement, StyleTree, TableLayoutMode, WhiteSpace,
 };
 use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, LayoutRect};
 
@@ -959,11 +959,27 @@ impl<'a> TableFormatter<'a> {
         }
     }
 
+    /// Generated content inside a cell is inline — the table formatter has no padding-based
+    /// marker field, so outside markers render inline here too.
+    fn push_pseudo(&self, runs: &mut Vec<RawRun>, node: NodeId, which: PseudoElement) {
+        let Some(pseudo) = self.styles.pseudo(node, which) else {
+            return;
+        };
+        runs.push(RawRun {
+            node,
+            text: pseudo.text.clone(),
+            white_space: pseudo.style.white_space,
+            style: pseudo.style.cell_style(),
+            forced: false,
+        });
+    }
+
     fn collect_runs(&self, root: NodeId) -> Vec<RawRun> {
         let mut runs = Vec::new();
         let mut stack = vec![(root, false)];
         while let Some((node, exit)) = stack.pop() {
             if exit {
+                self.push_pseudo(&mut runs, node, PseudoElement::After);
                 if node != root && is_blockish(self.styles.get(node).display) {
                     push_break(&mut runs, node, self.styles.get(node).cell_style());
                 }
@@ -994,6 +1010,16 @@ impl<'a> TableFormatter<'a> {
                     if node != root && is_blockish(style.display) {
                         push_break(&mut runs, node, style.cell_style());
                     }
+                    if let Some(marker) = self.styles.marker(node) {
+                        runs.push(RawRun {
+                            node,
+                            text: marker.text.clone(),
+                            white_space: marker.style.white_space,
+                            style: marker.style.cell_style(),
+                            forced: false,
+                        });
+                    }
+                    self.push_pseudo(&mut runs, node, PseudoElement::Before);
                     if *ns == ElementNs::Html && name == "br" {
                         push_break(&mut runs, node, style.cell_style());
                         continue;
@@ -1269,6 +1295,7 @@ fn is_blockish(display: Display) -> bool {
     matches!(
         display,
         Display::Block
+            | Display::ListItem
             | Display::Table
             | Display::TableHeaderGroup
             | Display::TableRowGroup

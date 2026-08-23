@@ -36,10 +36,13 @@ Ready                              https://example.com
 
 ## Features
 
-**Current (M0, M1-R and M1.5 complete; M1-A through M1-C done, awaiting the human terminal smoke)**
+**Current (M0, M1-R and M1.5 complete; M1-A through M1-C done, awaiting the human terminal smoke;
+M1-D in progress — table layout and generated content/list markers done)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
-  certificate roots) with timeouts, cancellation and a 10 MiB response limit
+  certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
+  same-scheme: a remote page cannot name `file:///…` in a `<link>` and have the browser read local
+  files for it
 - Full HTML5 parsing through html5ever into an indextree-backed DOM boundary (`<base href>`, quirks
   mode, foreign content, adoption agency, foster parenting, detached template fragments)
 - Standards-grade encoding detection: BOM → HTTP header → `<meta charset>` prescan → UTF-8
@@ -59,6 +62,13 @@ Ready                              https://example.com
   while an isolated table formatter resolves anonymous table boxes, auto/fixed tracks, spans,
   captions and nested block/inline tables; textwrap and Unicode-aware fragments reflow six
   whitespace modes, and sparse paint emits clipped terminal-cell lines and merged borders
+- Generated content and real list markers: `::before`, `::after` and `::marker` match, `content`
+  supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped
+  stack. Ordered lists number, nested lists number independently, and `list-style-type` covers
+  decimal, roman, alphabetic and the disc/circle/square bullets that step with nesting depth.
+  Outside markers hang in a field shared and right-aligned across sibling items, so `9.` and `10.`
+  meet one text column and wrapped lines align under the item text; `<ol start>`, `<ol reversed>`,
+  `<li value>` and `ol`/`ul` `type` are honoured
 - Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
   the terminal as coloured, bold, underlined and struck spans — with a contrast pass that keeps
   unreadable author colours legible over the theme's field — plus link and hit geometry carried
@@ -70,10 +80,11 @@ Ready                              https://example.com
   uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
 - WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): generated content, list
-markers, presentational HTML and text alignment (the remaining M1-D work), links/forms/search (M2),
-mouse (M3), and the JavaScript seam/Boa integration
-(M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): CSS length units and the
+terminal cell metric — lengths currently ignore their unit, so `20px` of padding costs twenty
+columns — then presentational HTML and `text-align`, then scaled headings drawn from half-block
+glyphs; that finishes M1-D. After it: links/forms/search (M2), mouse (M3), and the JavaScript
+seam/Boa integration (M4–M5).
 
 ## Architecture
 
@@ -145,9 +156,10 @@ to DuckDuckGo's lite search for anything that isn't a URL.
   joined by the six layout laws: viewport-width monotonicity, painted-row bounds, disjoint leaf
   glyph cells, laminar per-row box families, engine-backed deepest-hit round trips, and scroll
   clamping as a fixed point under arbitrary key sequences.
-- **Render goldens** — ten fixture pages cover margins, headings, borders, links, wide characters,
-  `pre`, simple and collapsed/spanned tables, nested/captioned tables, and fixed-layout overflow,
-  with assertions for link geometry, colour contrast and `--dump` parity.
+- **Render goldens** — twelve fixture pages cover margins, headings, borders, links, wide
+  characters, `pre`, ordered/nested/reversed lists and their marker alignment, `::before`/`::after`
+  with counters and `attr()`, simple and collapsed/spanned tables, nested/captioned tables, and
+  fixed-layout overflow, with assertions for link geometry, colour contrast and `--dump` parity.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -167,8 +179,9 @@ the real clock.
 Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
-style/layout/paint ✅ · M1-C external CSS ✅ · M1-D tables ✅, generated content and legacy HTML
-styling in progress · M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
+style/layout/paint ✅ · M1-C external CSS ✅ · M1-D tables ✅ and generated content/markers ✅,
+with length units, legacy HTML styling and terminal typography still open · M2 tabs/keyboard/forms ·
+M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
 

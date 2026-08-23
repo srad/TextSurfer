@@ -24,6 +24,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `core/url.rs` — `url_fix` | not a parser | **No change** — delegates all real parsing to the `url` crate; scheme/host/search heuristics are address-bar UX behavior |
 | `css/parser.rs` | library adapter | **Keep** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
 | `css/parser.rs` — terminal media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
+| `css/cascade.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
 | Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.13 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
@@ -34,7 +35,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 
 | Source | What it establishes | Adopted here |
 |---|---|---|
-| [chawan](https://github.com/sourcehut-mirrors/chawan) (`doc/css.md`) | The terminal CSS contract: author colours **contrast-corrected against the terminal background**; `border-*-width` is **binary**; `font-weight > 500` = bold, `font-size` ignored; `text-decoration` underline/line-through; sub-cell inline margins/padding ignored; overflow-x displays, overflow-y clips, no scrollbars; `::before`/`::after` + counters + `list-style-type` for markers; link markers/hints for keyboard navigation | All locked as decisions below; markers and hints scheduled in M1-D/M2 |
+| [chawan](https://github.com/sourcehut-mirrors/chawan) (`doc/css.md`) | The terminal CSS contract: author colours **contrast-corrected against the terminal background**; `border-*-width` is **binary**; `font-weight > 500` = bold, `font-size` ignored; `text-decoration` underline/line-through; sub-cell inline margins/padding ignored; overflow-x displays, overflow-y clips, no scrollbars; `::before`/`::after` + counters + `list-style-type` for markers; link markers/hints for keyboard navigation | All locked as decisions below; markers landed in M1-D, link hints scheduled in M2. `font-size` ignored is the one item we depart from: the M1-D typography item replaces it with a half-block glyph ladder |
 | chawan + [w3m](https://w3m.sourceforge.net/) | A real **table layout** engine (colspan/rowspan) is what separates a usable terminal browser from lynx | M1-D, ahead of flex/grid |
 | lynx · w3m · chawan | Every one ships a **non-interactive dump mode** | `--dump` in M1-B; doubles as the golden-fixture harness |
 | [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer (Parley there, textwrap fragments here) | Confirms the M1-B architecture; no dependency |
@@ -62,15 +63,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, presentational attributes, `text-align` | (in progress — tables done) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content + markers done) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **319 lib · 5 binary · 4 pipeline · 14 corpus ·
-14 golden**.
+Test counts at the last green run (2026-08-23): **341 lib · 5 binary · 4 pipeline · 14 corpus ·
+16 golden**.
 Cross-cutting: test infrastructure (done: contract suites, snapshots, proptest, fakes) · gates (done:
 local only, no CI) · coverage floor (open: optional local, 80% overall / 90% css·layout·paint) ·
 external conformance corpus (M1-A done at 95.16% raw / 100% with xfail; test262 at M5).
@@ -108,7 +109,7 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
    ▼                                     script: JsEngine trait + JsHost ← per-loaded-document
  net::Fetch ⇒ html::HtmlParser ⇒ core(indextree DOM)   │ noop.rs · boa.rs (feature "js", default off)
    │        │
- css: CssParser(cssparser) → Cascade(selectors) → StyleTree
+ css: CssParser(cssparser) → Cascade(selectors) → StyleTree (+ pseudo boxes · list markers)
  layout::LayoutEngine → BoxTree (absolute coords, unbounded height, styled text fragments)
  paint::Painter → DisplayList (styled spans · NodeId hit-tags · link rects) → ui content widget
 ```
@@ -121,6 +122,9 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   document fragments, and DOM removal detaches rather than invalidating node handles.
 - The `DisplayList → ui content widget` edge lands in M1-B. Before it, the painter's hit and link
   lists were computed and discarded, and the content widget drew one flat colour.
+- `StyleTree` carries per-node `ComputedStyle` plus two side tables — resolved pseudo-element boxes
+  keyed by `(NodeId, PseudoElement)`, and list markers keyed by node. Generated text is
+  heap-allocated and `ComputedStyle` is `Copy`, so the strings live beside it rather than in it.
 - No tokio. `boa_engine 0.21.1` optional dep behind feature `js`; runtime `--js=off` overrides the feature.
 - Crate pins: report actual versions used in the updates log at each dependency milestone.
 
@@ -169,10 +173,15 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 - **Borders are binary**: any non-zero border width paints one box-drawing frame. Replaces the
   earlier "borders ≥2 cells doubled" phrasing, which nothing implemented and which contradicts the
   prior-art model.
-- `font-weight > 500` = bold; `font-size` is ignored; `text-decoration` maps to
-  underline/line-through; reverse video is available as a style bit.
-- Sub-cell margins and padding are ignored on inline boxes; all CSS lengths are cell-rounded and
-  capped at 65,535.
+- `font-weight > 500` = bold; `text-decoration` maps to underline/line-through; reverse video is
+  available as a style bit. `font-size` is ignored **pending the M1-D terminal typography item**,
+  which replaces this rule with a half-block glyph ladder — treat it as scheduled for revision, not
+  settled.
+- Sub-cell margins and padding are ignored on inline boxes; CSS lengths are capped at 65,535.
+- **Lengths currently ignore their unit** — `parse_length_token` rounds any `<dimension>` straight
+  into a cell count, so `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell. This was never a
+  decision; it is the defect the M1-D length-units item fixes, and the earlier phrasing here ("all
+  CSS lengths are cell-rounded") described it as though it were intended. Corrected 2026-08-23.
 - Overflow: the x axis displays (clipped at the viewport edge), the y axis extends the document, and
   there are no scrollbars.
 - `:visited` parses and **never matches** — page styling must not observe history.
@@ -181,6 +190,16 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   parse but do not convert to sRGB, so such declarations are ignored rather than guessed.
 - Out of scope for now, revisit when a page needs them: relative colours, `background-image`,
   `line-height`, fonts, border-radius, inline-element borders.
+- **Generated content is inline-level**: `display` on a pseudo-element is not honoured, and
+  `list-style-type` accepts keyword counter styles only — no `@counter-style`, no string types.
+- **List markers are outside markers** by default: the item reserves a field on its left, shared
+  and right-aligned across sibling items so numbers meet one text column, and wrapped lines align
+  under the item text. `list-style-position: inside` renders the marker as ordinary inline content.
+  `ul`/`ol` add no indent of their own — nesting indents because each level starts after its own
+  marker field.
+- **Subresources are same-scheme**: a document may only fetch stylesheets from its own scheme
+  (`http`/`https` count as one), so a remote page cannot name `file:///…` in a `<link>` and have
+  the browser read local files for it. Cross-scheme occurrences count as failed resources.
 
 ### Deferred — decision gates with explicit triggers
 - M5 gate: if Boa's async (fetch promises / timers / top-level await) can't keep the UI responsive
@@ -340,14 +359,47 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       *Proof:* unit/contract tests for cascade, fixup, spans, width and border conflicts; property laws
       for occupancy, glyph disjointness, hit boxes and width monotonicity; fixture goldens for simple,
       spanned/collapsed, nested/captioned and fixed-overflow tables.
-- [ ] **Generated content and markers** — `::before`/`::after` with `content`, counters
-      (`counter-reset`/`counter-increment`) and `list-style-type`, replacing the hardcoded `"• "` /
-      `"# "` prefixes. Fixes ordered lists, which currently render every `<ol>` item as a bullet.
-      *Proof:* `<ol>` numbers, nested lists number independently, `list-style-type: none` suppresses.
+- [x] **Generated content and markers** *(done)* — `::before`/`::after`/`::marker` parse and match,
+      `content` supports strings, `counter()`, `counters()`, `attr()` and `none`/`normal`, CSS
+      counters (`counter-reset`/`counter-increment`/`counter-set`) run over a depth-scoped stack,
+      and `list-style-type`/`list-style-position`/`list-style` drive markers. `Display::ListItem`
+      exists; `append_prefix` and its hardcoded `"• "` / `"# "` prefixes are gone. Outside markers
+      hang in a field reserved on the item's left padding, shared and right-aligned across sibling
+      items so `9.` and `10.` meet one text column; inside markers stay inline. `<ol start>`,
+      `<ol reversed>`, `<li value>` and `ol/ul type` map onto the counter engine at UA origin, and
+      implicit `list-item` operations merge with author counter declarations instead of being
+      replaced by them. Headings lost their `#` prefixes and gained UA bold; UA bullets step
+      disc→circle→square with nesting depth. Generated fragments carry the originating element's
+      `NodeId`, so link rects, hit-testing and search keep working through them.
+      *Proven by* twelve cascade tests (independent nesting, sibling-scope isolation,
+      `counters()` joining, `display: none` suppression, invalid `content` dropping only its own
+      declaration, `h1, .note::before` no longer losing the `h1` half, implicit-vs-authored counter
+      merging), six layout tests (shared marker field, hanging indent, inside markers, suppressed
+      markers, markers and generated content inside table cells, link rects spanning generated
+      content) and the `lists`/`generated` fixture goldens.
+- [ ] **Length units and the cell metric** — `parse_length_token` ignores the unit and the axis, so
+      `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell: `padding: 20px` eats a quarter of an
+      80-column viewport and `width: 960px` builds a 960-cell box. `parse_media_length` has the
+      matching flaw on the query side (`(min-width: 640px)` can never match, `40em` is
+      `MediaQuery::Never`), so both must change together or responsive sites flip to a layout
+      nobody chose. Adds a cell metric (~8px × ~16px), the absolute/relative unit table anchored to
+      a 16px root font size, axis-aware rounding, and MQ4 range syntax. Rewrites every fixture and
+      golden that currently writes `px` meaning cells. *Proof:* unit-conversion tests per unit and
+      axis; a responsive fixture picks the same breakpoint a browser would; existing goldens
+      re-baselined deliberately, not silently.
 - [ ] **Presentational HTML** — map `align`, `bgcolor`, `width`, `cellspacing`, `cellpadding`,
       `border`, `rules`, `frame`, `valign`/`vertical-align`, `<center>` and `<font color>` into the
       cascade at UA-origin specificity, plus `text-align` (left/right/center/justify→left).
       *Proof:* an old-school fixture page lays out as intended.
+- [ ] **Terminal typography** — heading and `font-size` scale drawn from bitmap glyph fonts into
+      half-block cells (two vertical pixels per cell, as `app/startpage.rs` already does for the
+      logo): 3×4 at two rows, 4×6 at three, 5×7 at four. Ladder ≥2em → 4 rows, ≥1.5em → 3,
+      ≥1.17em → 2, 1em → normal, <1em → dim, fed by UA heading sizes — which is why it follows the
+      unit work. Degrade-to-fit when a scaled line will not fit (a four-row heading holds six
+      characters at 40 columns), a normal-cell fallback for characters the font does not cover, and
+      rules for link rects, hit-testing and search highlight inside scaled runs. Revises the locked
+      "`font-size` is ignored" decision. *Proof:* ladder goldens per size, a degrade-to-fit golden,
+      hit-test and link-rect round trips through a scaled heading.
 - **Acceptance:** the fixture set above green; manual smoke on a table-heavy page (Wikipedia infobox)
   is readable without horizontal guessing.
 
@@ -447,12 +499,15 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
 
 - Contract suites, capability-parameterized, defined in M0, run against every impl (M1-A fakes …
   M5 Boa) — an interface is defined by its tests.
-- insta snapshots of ratatui `TestBackend` buffers (widget goldens), corpus goldens (M1-B),
-  DOM tree dumps (M1-A). `buffer_string` compares symbols only; style assertions use the
-  style-aware helper added in M1-B.
-- proptest layout laws (M1-B): width monotonicity and painted-row bounds are green; laminar boxes,
-  engine-backed deepest-hit round trip, disjoint leaf glyph cells and scroll-clamp fixed point
-  remain. Property tests for `url_fix`/`EditBuffer` continue from M0.
+- insta snapshots of ratatui `TestBackend` buffers (widget goldens), corpus goldens (M1-B; twelve
+  fixture pages under `tests/fixtures/` as of M1-D generated content), DOM tree dumps (M1-A).
+  `buffer_string` compares symbols only; style assertions use the style-aware helper added in M1-B.
+- proptest laws — all eight green. Six from M1-B: viewport-width monotonicity, painted-row bounds,
+  disjoint leaf glyph cells, laminar per-row box families and engine-backed deepest-hit round trip
+  (`layout/engine.rs`), plus scroll clamping as a fixed point under arbitrary key sequences
+  (`app/controller.rs`). Two more came with M1-D tables (`layout/table.rs`): generated spans never
+  overlap, and a wider table viewport never increases height. Property tests for
+  `url_fix`/`EditBuffer` continue from M0.
 - FakeFetch + fake clock + fake Host; no test touches the network or the real clock.
 - `tests/common/` shared fakes; inline `#[cfg(test)]` fakes where module-local.
 - `--dump` (M1-B) is the scriptable end-to-end harness: fixture in, golden text out.
@@ -606,3 +661,46 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   exact default canvas remains 78×18, larger tabs gain detail, and no image protocol or raster asset
   is used. The earlier keymap-reference requirement moved to the existing M2 help-overlay work
   because the accepted artwork contains no instructional copy.
+- 2026-08-23 — **Whole-crate audit (user), read module by module.** Findings recorded with an owning
+  milestone rather than fixed on the spot, except the two folded into the generated-content item:
+  - *Wrong rendering, now owned by the new M1-D length-units item:* CSS lengths ignore their unit and
+    axis; media queries compare CSS pixels against terminal columns and accept only `px`/`ch`;
+    `min_content_width` returns the widest **glyph** instead of the widest unbreakable word, so any
+    `AvailableSpace::MinContent` measurement reports 1 for ASCII text.
+  - *Fixed in this milestone:* subresources had no scheme policy, so a remote page could name
+    `file:///…` in a `<link>` and have `FileFetch` read local files for it; and `render_html` — the
+    entry point behind every render golden — used its own `<style>` walker that ignored the `media`
+    attribute, the `type` check and the `<template>` boundary that `PageLoad` honours, so the
+    fixture corpus and the app did not share a style-discovery path.
+  - *Owned by M2's chrome and keymap work:* the status bar prints internal telemetry
+    ("accepted gen 7 …"); quitting joins fetch workers that may be parked under the 30 s timeout, so
+    it can hang, while `shutdown_without_waiting` already exists; character bindings lowercase before
+    matching, so `Q`/`R`/`B` fire the unshifted actions and M2's planned `n`/`N` search pair cannot
+    work; the `Key::Enter`/`Key::Esc` arms for `Focus::Address` are unreachable.
+  - *Documentation corrections made in the same pass:* the locked terminal-CSS entry read "all CSS
+    lengths are cell-rounded", describing the unit defect above as if it were an intended rule; the
+    standing test-infrastructure section still listed four proptest laws as outstanding when all
+    eight have been green since M1-B/M1-D; and the custom-parser audit table had no row for the
+    `content`/`counter-*`/`list-style*` value grammar the generated-content work added.
+  - *Owned by M2 robustness / a hygiene pass:* eight Taffy `expect()` calls in the render path;
+    `Document::append`/`insert_before` and `Handle::node()` panic paths, safe only while html5ever's
+    contract holds and first exercised by M4's `MutateOp` funnel; `FetchPool::try_recv` maps
+    `Disconnected` to `None`, hiding a dead pool; `Document::detach` leaks `template_contents`
+    entries; `impl Node {}` is empty; `Document::children()` allocates a `Vec` per call in four
+    hot traversals; and `app::render::embedded_style_sheets` is now reachable only from tests since
+    `render_html` was rewired to drive `PageLoad`, so it should become `#[cfg(test)]` or its two
+    call sites should move to the `PageLoad` path.
+- 2026-08-23 — M1-D generated content, counters and list markers completed. No dependency was added:
+  **cssparser 0.37.0** parses `content` values and **selectors 0.40.0** already modelled
+  pseudo-elements, so `UnsupportedPseudoElement` became a real `PseudoElement` enum matched under
+  `MatchingMode::ForStatelessPseudoElement` behind a new `MatchTarget`. This closes the same bug
+  class M1-B fixed for dynamic pseudo-classes: a rule like `h1, .note::before { … }` previously
+  failed to parse and was discarded whole. `ComputedStyle` stays `Copy` — generated text lives in
+  `StyleTree` side tables keyed by node and pseudo-element. The Wikipedia smoke caught a real defect
+  before close: author `counter-increment` on a list item was replacing the implicit `list-item`
+  step that `display: list-item` implies, so every reference numbered `0.`; implicit and authored
+  counter operations now merge and only a same-named counter overrides. Local proof is green at
+  341 library · 5 binary · 4 pipeline · 14 corpus · 16 golden tests, and `--dump` renders the new
+  fixtures and Wikipedia over the real network without a panic. The Wikipedia render also confirmed
+  the length-unit defect from the audit above — `padding-left: 20px` indents twenty terminal cells —
+  which is why that item is sequenced next.

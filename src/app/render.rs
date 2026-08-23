@@ -6,7 +6,6 @@ use crate::core::style::{Palette, StyleTree};
 use crate::css::{
     BasicCascade, Cascade, ColorScheme, CssParser, CssparserParser, MediaContext, StyleSheet,
 };
-use crate::html::{Html5everParser, HtmlParser};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
 
@@ -44,26 +43,29 @@ pub fn response_kind(content_type: Option<&str>) -> ResponseKind {
     }
 }
 
+/// Renders a self-contained document through the same `PageLoad` driver the TUI and `--dump` use,
+/// so style discovery cannot diverge between the app and the fixture corpus. The synthetic
+/// `about:blank` base means no subresource can be fetched: this path never touches the network.
 pub fn render_html(
     source: &str,
     viewport: Size,
     palette: Palette,
     scripting: bool,
 ) -> RenderedPage {
-    let outcome = Html5everParser::new(scripting).parse_document(source);
-    let sheets = embedded_style_sheets(&outcome.document.borrow());
-    let media = MediaContext::screen()
-        .with_palette(palette)
-        .with_scripting(scripting)
-        .with_color_scheme(ColorScheme::Dark)
-        .with_viewport(viewport);
-    render_document(
-        outcome.document,
-        &sheets,
-        media,
-        palette,
-        outcome.parse_errors,
-    )
+    let base = url::Url::parse("about:blank").expect("the static synthetic base parses");
+    let mut load = super::page_load::PageLoad::new(
+        source,
+        base,
+        encoding_rs::UTF_8,
+        super::page_load::PageLoadOptions {
+            viewport,
+            palette,
+            scripting,
+            color_scheme: ColorScheme::Dark,
+            started: std::time::Duration::ZERO,
+        },
+    );
+    load.force_render()
 }
 
 pub fn render_document(
@@ -126,6 +128,29 @@ pub fn embedded_style_sheets(document: &Document) -> Vec<StyleSheet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_html_applies_the_same_style_discovery_rules_as_a_live_page_load() {
+        // A `<style>` inside a template is inert, one with a non-CSS type is ignored, and one
+        // whose media query does not match this viewport does not apply. The old fixture-only
+        // walker honoured none of the three.
+        let page = render_html(
+            "<template><style>p { display: none }</style></template>
+             <style type='text/plain'>p { display: none }</style>
+             <style media='print'>p { display: none }</style>
+             <p>visible</p>",
+            Size { cols: 40, rows: 24 },
+            Palette::default(),
+            false,
+        );
+        assert!(
+            page.painted
+                .text_lines()
+                .iter()
+                .any(|line| line.contains("visible")),
+            "none of the three inert sheets may hide the paragraph"
+        );
+    }
 
     #[test]
     fn rendering_html_reports_parse_and_style_diagnostics_with_the_painted_page() {

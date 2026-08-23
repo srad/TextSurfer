@@ -17,12 +17,13 @@ use selectors::context::{
 };
 use selectors::matching::matches_selector;
 use selectors::parser::{
-    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement, SelectorImpl, SelectorList,
-    SelectorParseErrorKind,
+    Component, NonTSPseudoClass, ParseRelative, Parser, PseudoElement as PseudoElementTrait,
+    Selector as ParsedSelector, SelectorImpl, SelectorList, SelectorParseErrorKind,
 };
 use selectors::{Element, OpaqueElement};
 
 use crate::core::dom::{AttrNs, Document, DomQuirksMode, ElementNs, Node, NodeId};
+use crate::core::style::PseudoElement;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Atom(String);
@@ -148,19 +149,45 @@ impl DynamicState {
     };
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum UnsupportedPseudoElement {}
+/// What a rule is being matched against: the element itself, or one of its pseudo-elements.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MatchTarget {
+    #[default]
+    Element,
+    Pseudo(PseudoElement),
+}
 
-impl ToCss for UnsupportedPseudoElement {
-    fn to_css<W>(&self, _dest: &mut W) -> fmt::Result
-    where
-        W: fmt::Write,
-    {
-        match *self {}
+fn pseudo_element_name(pseudo: PseudoElement) -> &'static str {
+    match pseudo {
+        PseudoElement::Before => "before",
+        PseudoElement::After => "after",
+        PseudoElement::Marker => "marker",
     }
 }
 
-impl PseudoElement for UnsupportedPseudoElement {
+fn parse_pseudo_element_name(name: &str) -> Option<PseudoElement> {
+    match name.to_ascii_lowercase().as_str() {
+        "before" => Some(PseudoElement::Before),
+        "after" => Some(PseudoElement::After),
+        "marker" => Some(PseudoElement::Marker),
+        _ => None,
+    }
+}
+
+/// Newtype so the `selectors` crate's `PseudoElement` trait can be implemented for our own enum.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SelectorPseudoElement(pub PseudoElement);
+
+impl ToCss for SelectorPseudoElement {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+    where
+        W: fmt::Write,
+    {
+        write!(dest, "::{}", pseudo_element_name(self.0))
+    }
+}
+
+impl PseudoElementTrait for SelectorPseudoElement {
     type Impl = TextSurferSelectorImpl;
 }
 
@@ -177,7 +204,7 @@ impl SelectorImpl for TextSurferSelectorImpl {
     type BorrowedLocalName = str;
     type BorrowedNamespaceUrl = str;
     type NonTSPseudoClass = DynamicPseudoClass;
-    type PseudoElement = UnsupportedPseudoElement;
+    type PseudoElement = SelectorPseudoElement;
 }
 
 #[derive(Default)]
@@ -205,6 +232,20 @@ impl<'i> Parser<'i> for SelectorParser {
                 name,
             ))
         })
+    }
+
+    fn parse_pseudo_element(
+        &self,
+        location: SourceLocation,
+        name: CowRcStr<'i>,
+    ) -> Result<SelectorPseudoElement, ParseError<'i, Self::Error>> {
+        parse_pseudo_element_name(&name)
+            .map(SelectorPseudoElement)
+            .ok_or_else(|| {
+                location.new_custom_error(SelectorParseErrorKind::UnsupportedPseudoClassOrElement(
+                    name,
+                ))
+            })
     }
 }
 
@@ -279,6 +320,7 @@ pub fn matching_specificity(
     document: &Document,
     id: NodeId,
     state: DynamicState,
+    target: MatchTarget,
 ) -> Option<u32> {
     let element = DomElement {
         document,
@@ -291,8 +333,12 @@ pub fn matching_specificity(
         DomQuirksMode::LimitedQuirks => QuirksMode::LimitedQuirks,
         DomQuirksMode::NoQuirks => QuirksMode::NoQuirks,
     };
+    let mode = match target {
+        MatchTarget::Element => MatchingMode::Normal,
+        MatchTarget::Pseudo(_) => MatchingMode::ForStatelessPseudoElement,
+    };
     let mut context = MatchingContext::new(
-        MatchingMode::Normal,
+        mode,
         None,
         &mut caches,
         quirks,
@@ -302,9 +348,23 @@ pub fn matching_specificity(
     selectors
         .slice()
         .iter()
+        .filter(|selector| selector_targets(selector, target))
         .filter(|selector| matches_selector(selector, 0, None, &element, &mut context))
         .map(|selector| selector.specificity())
         .max()
+}
+
+/// `ForStatelessPseudoElement` matching assumes the caller has already checked that the selector
+/// ends in the pseudo-element being matched, so filter the list before handing it to the crate.
+fn selector_targets(
+    selector: &ParsedSelector<TextSurferSelectorImpl>,
+    target: MatchTarget,
+) -> bool {
+    match (selector.pseudo_element(), target) {
+        (None, MatchTarget::Element) => true,
+        (Some(pseudo), MatchTarget::Pseudo(wanted)) => pseudo.0 == wanted,
+        _ => false,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -483,10 +543,10 @@ impl Element for DomElement<'_> {
 
     fn match_pseudo_element(
         &self,
-        pseudo: &UnsupportedPseudoElement,
+        _pseudo: &SelectorPseudoElement,
         _context: &mut MatchingContext<TextSurferSelectorImpl>,
     ) -> bool {
-        match *pseudo {}
+        false
     }
 
     fn apply_selector_flags(&self, _flags: selectors::matching::ElementSelectorFlags) {}
@@ -581,11 +641,22 @@ mod tests {
     use crate::core::dom::Attr;
 
     fn matches(selector: &str, document: &Document, id: NodeId, state: DynamicState) -> bool {
+        matches_target(selector, document, id, state, MatchTarget::Element)
+    }
+
+    fn matches_target(
+        selector: &str,
+        document: &Document,
+        id: NodeId,
+        state: DynamicState,
+        target: MatchTarget,
+    ) -> bool {
         matching_specificity(
             &parse(selector).expect("selector parses"),
             document,
             id,
             state,
+            target,
         )
         .is_some()
     }

@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <title>generated content</title>
+    <style>
+      .note::before { content: "Note: " }
+      .note::after { content: " (end)" }
+      .cite::after { content: " [" attr(data-source) "]" }
+      body { counter-reset: chapter }
+      .chapter { counter-increment: chapter }
+      .chapter::before { content: "Chapter " counter(chapter) ". " }
+      ol.outline, ol.outline ol { counter-reset: step }
+      ol.outline li { counter-increment: step }
+      ol.outline li::marker { content: counters(step, ".") ") " }
+      .bad::before { content: url(missing.png) }
+    </style>
+  </head>
+  <body>
+    <p class="note">a paragraph with generated edges</p>
+    <p class="cite" data-source="chawan">borrowed from prior art</p>
+    <p class="chapter">first chapter body</p>
+    <p class="chapter">second chapter body</p>
+    <ol class="outline">
+      <li>top level
+        <ol>
+          <li>nested one</li>
+          <li>nested two</li>
+        </ol>
+      </li>
+      <li>second top level</li>
+    </ol>
+    <p class="bad">an invalid content value generates nothing</p>
+  </body>
+</html>

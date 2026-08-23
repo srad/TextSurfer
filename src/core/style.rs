@@ -8,6 +8,7 @@ pub enum Display {
     #[default]
     Inline,
     Block,
+    ListItem,
     Table,
     InlineTable,
     TableHeaderGroup,
@@ -18,6 +19,119 @@ pub enum Display {
     TableColumn,
     TableColumnGroup,
     TableCaption,
+}
+
+impl Display {
+    /// Block containers hold a block formatting context of their own; list items are block
+    /// containers that additionally carry a marker.
+    pub const fn is_block_container(self) -> bool {
+        matches!(self, Self::Block | Self::ListItem)
+    }
+}
+
+/// The pseudo-elements the cascade can produce boxes for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PseudoElement {
+    Before,
+    Marker,
+    After,
+}
+
+/// The marker glyph or numbering style of a list item.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListStyleType {
+    None,
+    #[default]
+    Disc,
+    Circle,
+    Square,
+    Decimal,
+    DecimalLeadingZero,
+    LowerAlpha,
+    UpperAlpha,
+    LowerRoman,
+    UpperRoman,
+}
+
+impl ListStyleType {
+    pub const fn is_numeric(self) -> bool {
+        !matches!(self, Self::None | Self::Disc | Self::Circle | Self::Square)
+    }
+
+    /// Renders `value` in this counter style, without the trailing separator.
+    pub fn render(self, value: i64) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Disc => "\u{2022}".to_string(),
+            Self::Circle => "\u{25e6}".to_string(),
+            Self::Square => "\u{25aa}".to_string(),
+            Self::Decimal => value.to_string(),
+            Self::DecimalLeadingZero => {
+                if (0..10).contains(&value) {
+                    format!("0{value}")
+                } else {
+                    value.to_string()
+                }
+            }
+            Self::LowerAlpha => alphabetic(value, false),
+            Self::UpperAlpha => alphabetic(value, true),
+            Self::LowerRoman => roman(value, false),
+            Self::UpperRoman => roman(value, true),
+        }
+    }
+}
+
+fn alphabetic(value: i64, upper: bool) -> String {
+    if value < 1 {
+        return value.to_string();
+    }
+    let base = if upper { b'A' } else { b'a' };
+    let mut remaining = value;
+    let mut letters = Vec::new();
+    while remaining > 0 {
+        let index = (remaining - 1) % 26;
+        letters.push((base + index as u8) as char);
+        remaining = (remaining - 1) / 26;
+    }
+    letters.iter().rev().collect()
+}
+
+fn roman(value: i64, upper: bool) -> String {
+    const NUMERALS: [(i64, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    if !(1..4000).contains(&value) {
+        return value.to_string();
+    }
+    let mut remaining = value;
+    let mut out = String::new();
+    for (amount, numeral) in NUMERALS {
+        while remaining >= amount {
+            out.push_str(numeral);
+            remaining -= amount;
+        }
+    }
+    if upper { out.to_uppercase() } else { out }
+}
+
+/// Where a list marker sits relative to the item's content box.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListStylePosition {
+    #[default]
+    Outside,
+    Inside,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -298,6 +412,8 @@ pub struct ComputedStyle {
     pub border_collapse: BorderCollapse,
     pub border_spacing: BorderSpacing,
     pub caption_side: CaptionSide,
+    pub list_style_type: ListStyleType,
+    pub list_style_position: ListStylePosition,
     pub color: Option<Rgb>,
     pub background: Option<Rgb>,
     pub bold: bool,
@@ -319,9 +435,29 @@ impl ComputedStyle {
     }
 }
 
+/// Generated content for one pseudo-element of one originating element. The text is resolved by
+/// the cascade (counters and `attr()` included), so layout only has to place it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PseudoBox {
+    pub text: String,
+    pub style: ComputedStyle,
+}
+
+/// A resolved list marker. `reserve` is the width of the marker field shared by every list item
+/// with the same parent, so numbers line up on one content column.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Marker {
+    pub text: String,
+    pub reserve: usize,
+    pub position: ListStylePosition,
+    pub style: ComputedStyle,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleTree {
     styles: HashMap<NodeId, ComputedStyle>,
+    pseudo: HashMap<(NodeId, PseudoElement), PseudoBox>,
+    markers: HashMap<NodeId, Marker>,
 }
 
 impl StyleTree {
@@ -331,6 +467,22 @@ impl StyleTree {
 
     pub fn get(&self, node: NodeId) -> ComputedStyle {
         self.styles.get(&node).copied().unwrap_or_default()
+    }
+
+    pub fn insert_pseudo(&mut self, node: NodeId, which: PseudoElement, box_: PseudoBox) {
+        self.pseudo.insert((node, which), box_);
+    }
+
+    pub fn pseudo(&self, node: NodeId, which: PseudoElement) -> Option<&PseudoBox> {
+        self.pseudo.get(&(node, which))
+    }
+
+    pub fn insert_marker(&mut self, node: NodeId, marker: Marker) {
+        self.markers.insert(node, marker);
+    }
+
+    pub fn marker(&self, node: NodeId) -> Option<&Marker> {
+        self.markers.get(&node)
     }
 }
 

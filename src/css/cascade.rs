@@ -9,15 +9,19 @@ use crate::core::dom::{AttrNs, ElementNs, Node, NodeId};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderCollapse, BorderColor, BorderEdges, BorderLineStyle, BorderSide, BorderSpacing,
-    BoxSizing, CaptionSide, ComputedStyle, CssPercentage, CssWidth, Display, EdgeSizes, Palette,
-    Rgb, StyleTree, TableLayoutMode, WhiteSpace,
+    BoxSizing, CaptionSide, ComputedStyle, CssPercentage, CssWidth, Display, EdgeSizes,
+    ListStylePosition, ListStyleType, Marker, Palette, PseudoBox, PseudoElement, Rgb, StyleTree,
+    TableLayoutMode, WhiteSpace,
 };
 use crate::css::parser::{
     ColorScheme, CssRule, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
     ScriptingValue, StyleRule, parse_declarations,
 };
-use crate::css::selectors::{BucketKey, DynamicState, bucket_keys, matching_specificity};
+use crate::css::selectors::{
+    BucketKey, DynamicState, MatchTarget, bucket_keys, matching_specificity,
+};
 use crate::css::{Declaration, StyleSheet};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MediaTarget {
@@ -104,20 +108,31 @@ fn cascade_document(
     let mut tree = StyleTree::default();
     let rules = active_style_rules(sheets, media);
     let index = bucketed.then(|| RuleIndex::new(&rules, document));
-    for id in elements_in_document_order(document) {
+    let mut counters = CounterScopes::default();
+    let mut markers: Vec<PendingMarker> = Vec::new();
+    let mut hidden_depth: Option<usize> = None;
+    for (id, depth) in elements_in_document_order(document) {
+        counters.enter(depth);
+        if hidden_depth.is_some_and(|hidden| depth <= hidden) {
+            hidden_depth = None;
+        }
         let parent_style = document.parent(id).map(|parent| tree.get(parent));
         let mut style = ua_style(document, id, parent_style, media.palette);
         let mut declarations = Vec::new();
         let mut order = 0usize;
-        let candidates = index.as_ref().map_or_else(
+        let candidates: Vec<usize> = index.as_ref().map_or_else(
             || (0..rules.len()).collect(),
             |index| index.candidates(document, id),
         );
-        for rule_index in candidates {
+        for rule_index in candidates.iter().copied() {
             let rule = rules[rule_index];
-            if let Some(specificity) =
-                matching_specificity(&rule.selectors, document, id, media.state)
-            {
+            if let Some(specificity) = matching_specificity(
+                &rule.selectors,
+                document,
+                id,
+                media.state,
+                MatchTarget::Element,
+            ) {
                 for declaration in &rule.declarations {
                     declarations.push((
                         declaration.important,
@@ -137,8 +152,10 @@ fn cascade_document(
         }
         declarations
             .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
+        let mut authored_counters = AuthoredCounterOps::default();
         for (_, _, _, declaration) in declarations {
             apply_declaration(&mut style, parent_style, &declaration);
+            authored_counters.apply(&declaration);
         }
         if matches!(
             style.display,
@@ -152,8 +169,174 @@ fn cascade_document(
             style.width = CssWidth::Auto;
         }
         tree.insert(id, style);
+        if style.display == Display::None && hidden_depth.is_none() {
+            hidden_depth = Some(depth);
+        }
+        if hidden_depth.is_some() {
+            continue;
+        }
+        counters.run(depth, &authored_counters.resolve(document, id, style));
+        for which in [PseudoElement::Before, PseudoElement::After] {
+            if let Some(pseudo) = cascade_pseudo(
+                &rules,
+                &candidates,
+                document,
+                id,
+                media,
+                which,
+                style,
+                &counters,
+                None,
+            ) {
+                tree.insert_pseudo(id, which, pseudo);
+            }
+        }
+        if style.display == Display::ListItem {
+            let fallback = default_marker_text(style.list_style_type, &counters);
+            if let Some(marker) = cascade_pseudo(
+                &rules,
+                &candidates,
+                document,
+                id,
+                media,
+                PseudoElement::Marker,
+                style,
+                &counters,
+                fallback,
+            ) {
+                markers.push(PendingMarker {
+                    node: id,
+                    parent: document.parent(id),
+                    text: marker.text,
+                    position: style.list_style_position,
+                    style: marker.style,
+                });
+            }
+        }
+    }
+    let mut fields: HashMap<Option<NodeId>, usize> = HashMap::new();
+    for marker in &markers {
+        if marker.position == ListStylePosition::Outside {
+            let width = UnicodeWidthStr::width(marker.text.as_str());
+            let field = fields.entry(marker.parent).or_default();
+            *field = (*field).max(width);
+        }
+    }
+    for marker in markers {
+        let reserve = if marker.position == ListStylePosition::Outside {
+            fields.get(&marker.parent).copied().unwrap_or_default()
+        } else {
+            0
+        };
+        tree.insert_marker(
+            marker.node,
+            Marker {
+                text: marker.text,
+                reserve,
+                position: marker.position,
+                style: marker.style,
+            },
+        );
     }
     tree
+}
+
+struct PendingMarker {
+    node: NodeId,
+    parent: Option<NodeId>,
+    text: String,
+    position: ListStylePosition,
+    style: ComputedStyle,
+}
+
+/// Cascades one pseudo-element of `id`. `fallback` is the UA-supplied content used when no author
+/// rule declares `content` — markers have one, `::before`/`::after` do not.
+#[allow(clippy::too_many_arguments)]
+fn cascade_pseudo(
+    rules: &[&StyleRule],
+    candidates: &[usize],
+    document: &Document,
+    id: NodeId,
+    media: MediaContext,
+    which: PseudoElement,
+    origin: ComputedStyle,
+    counters: &CounterScopes,
+    fallback: Option<String>,
+) -> Option<PseudoBox> {
+    let mut declarations = Vec::new();
+    let mut order = 0usize;
+    for rule_index in candidates.iter().copied() {
+        let rule = rules[rule_index];
+        if let Some(specificity) = matching_specificity(
+            &rule.selectors,
+            document,
+            id,
+            media.state,
+            MatchTarget::Pseudo(which),
+        ) {
+            for declaration in &rule.declarations {
+                declarations.push((
+                    declaration.important,
+                    specificity,
+                    order,
+                    declaration.clone(),
+                ));
+                order += 1;
+            }
+        }
+    }
+    if declarations.is_empty() && fallback.is_none() {
+        return None;
+    }
+    declarations
+        .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
+    let inherited = ComputedStyle {
+        display: Display::Inline,
+        white_space: origin.white_space,
+        color: origin.color,
+        background: origin.background,
+        bold: origin.bold,
+        underline: origin.underline,
+        strike: origin.strike,
+        reverse: origin.reverse,
+        list_style_type: origin.list_style_type,
+        list_style_position: origin.list_style_position,
+        ..Default::default()
+    };
+    let mut style = inherited;
+    let mut content = None;
+    for (_, _, _, declaration) in declarations {
+        apply_declaration(&mut style, Some(inherited), &declaration);
+        if declaration.name == "content"
+            && let Some(spec) = parse_content(&declaration.value)
+        {
+            content = Some(spec);
+        }
+    }
+    style.display = Display::Inline;
+    let text = match content {
+        Some(ContentSpec::None) => return None,
+        Some(ContentSpec::Pieces(pieces)) => resolve_content(&pieces, document, id, counters),
+        None => fallback?,
+    };
+    if text.is_empty() {
+        return None;
+    }
+    Some(PseudoBox { text, style })
+}
+
+/// The UA marker carries its own trailing separator, so an author `::marker` that supplies its
+/// own spacing is not charged for a second gutter.
+fn default_marker_text(list_style_type: ListStyleType, counters: &CounterScopes) -> Option<String> {
+    if list_style_type == ListStyleType::None {
+        return None;
+    }
+    let rendered = list_style_type.render(counters.value(LIST_ITEM_COUNTER));
+    Some(if list_style_type.is_numeric() {
+        format!("{rendered}. ")
+    } else {
+        format!("{rendered} ")
+    })
 }
 
 #[cfg(test)]
@@ -328,17 +511,490 @@ fn media_feature_matches(feature: MediaFeature, media: MediaContext) -> bool {
     }
 }
 
-fn elements_in_document_order(document: &Document) -> Vec<NodeId> {
+fn elements_in_document_order(document: &Document) -> Vec<(NodeId, usize)> {
     let mut elements = Vec::new();
-    let mut stack: Vec<NodeId> = document.roots().iter().rev().copied().collect();
-    while let Some(id) = stack.pop() {
+    let mut stack: Vec<(NodeId, usize)> = document
+        .roots()
+        .iter()
+        .rev()
+        .map(|root| (*root, 0usize))
+        .collect();
+    while let Some((id, depth)) = stack.pop() {
         if matches!(document.node(id), Some(Node::Element { .. })) {
-            elements.push(id);
+            elements.push((id, depth));
         }
         let children = document.children(id);
-        stack.extend(children.into_iter().rev());
+        stack.extend(
+            children
+                .into_iter()
+                .rev()
+                .map(|child| (child, depth.saturating_add(1))),
+        );
     }
     elements
+}
+
+pub const LIST_ITEM_COUNTER: &str = "list-item";
+
+/// One counter instance. A counter created at `depth` stays in scope for that element, its
+/// descendants and its following siblings, which is exactly "entries deeper than the element
+/// being visited are out of scope".
+struct CounterEntry {
+    depth: usize,
+    name: String,
+    value: i64,
+}
+
+#[derive(Default)]
+struct CounterScopes {
+    entries: Vec<CounterEntry>,
+}
+
+impl CounterScopes {
+    fn enter(&mut self, depth: usize) {
+        self.entries.retain(|entry| entry.depth <= depth);
+    }
+
+    fn run(&mut self, depth: usize, ops: &CounterOps) {
+        for (name, value) in &ops.reset {
+            self.reset(depth, name, *value);
+        }
+        for (name, value) in &ops.increment {
+            self.adjust(name, *value);
+        }
+        for (name, value) in &ops.set {
+            self.assign(name, *value);
+        }
+    }
+
+    fn reset(&mut self, depth: usize, name: &str, value: i64) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.depth == depth && entry.name == name)
+        {
+            entry.value = value;
+            return;
+        }
+        self.entries.push(CounterEntry {
+            depth,
+            name: name.to_string(),
+            value,
+        });
+    }
+
+    fn adjust(&mut self, name: &str, by: i64) {
+        match self
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.name == name)
+        {
+            Some(entry) => entry.value = entry.value.saturating_add(by),
+            None => self.entries.push(CounterEntry {
+                depth: 0,
+                name: name.to_string(),
+                value: by,
+            }),
+        }
+    }
+
+    fn assign(&mut self, name: &str, value: i64) {
+        match self
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.name == name)
+        {
+            Some(entry) => entry.value = value,
+            None => self.entries.push(CounterEntry {
+                depth: 0,
+                name: name.to_string(),
+                value,
+            }),
+        }
+    }
+
+    fn value(&self, name: &str) -> i64 {
+        self.entries
+            .iter()
+            .rev()
+            .find(|entry| entry.name == name)
+            .map_or(0, |entry| entry.value)
+    }
+
+    fn values(&self, name: &str) -> Vec<i64> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.name == name)
+            .map(|entry| entry.value)
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CounterOps {
+    reset: Vec<(String, i64)>,
+    increment: Vec<(String, i64)>,
+    set: Vec<(String, i64)>,
+}
+
+/// The counter properties an author declared on one element. `None` means "not declared", so the
+/// UA-derived list for that property survives; a declared list replaces it outright.
+#[derive(Default)]
+struct AuthoredCounterOps {
+    reset: Option<Vec<(String, i64)>>,
+    increment: Option<Vec<(String, i64)>>,
+    set: Option<Vec<(String, i64)>>,
+}
+
+impl AuthoredCounterOps {
+    fn apply(&mut self, declaration: &Declaration) {
+        let slot = match declaration.name.as_str() {
+            "counter-reset" => &mut self.reset,
+            "counter-increment" => &mut self.increment,
+            "counter-set" => &mut self.set,
+            _ => return,
+        };
+        let default = if declaration.name == "counter-increment" {
+            1
+        } else {
+            0
+        };
+        if let Some(values) = parse_counter_values(&declaration.value, default) {
+            *slot = Some(values);
+        }
+    }
+
+    fn resolve(&self, document: &Document, id: NodeId, style: ComputedStyle) -> CounterOps {
+        let ua = ua_counter_ops(document, id, style);
+        CounterOps {
+            reset: merge_counter_ops(self.reset.as_deref(), ua.reset),
+            increment: merge_counter_ops(self.increment.as_deref(), ua.increment),
+            set: merge_counter_ops(self.set.as_deref(), ua.set),
+        }
+    }
+}
+
+/// The `list-item` operations implied by `display: list-item` and by `ol`/`ul` are *implicit*: an
+/// author who increments some counter of their own does not thereby stop a list from numbering.
+/// Only naming the same counter overrides the implicit operation.
+fn merge_counter_ops(
+    authored: Option<&[(String, i64)]>,
+    implicit: Vec<(String, i64)>,
+) -> Vec<(String, i64)> {
+    let Some(authored) = authored else {
+        return implicit;
+    };
+    let mut merged: Vec<(String, i64)> = implicit
+        .into_iter()
+        .filter(|(name, _)| !authored.iter().any(|(other, _)| other == name))
+        .collect();
+    merged.extend(authored.iter().cloned());
+    merged
+}
+
+/// `ol`/`ul` open a `list-item` scope, list items step it, and the HTML ordinal attributes
+/// (`start`, `reversed`, `value`) are expressed as counter operations at UA origin.
+fn ua_counter_ops(document: &Document, id: NodeId, style: ComputedStyle) -> CounterOps {
+    let mut ops = CounterOps::default();
+    let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
+        return ops;
+    };
+    if *ns == ElementNs::Html && matches!(name.as_str(), "ol" | "ul" | "menu") {
+        let reversed = name == "ol" && has_attr(attrs, "reversed");
+        let start = attr_number(attrs, "start");
+        let first = if reversed {
+            start.unwrap_or_else(|| list_item_count(document, id))
+        } else {
+            start.unwrap_or(1)
+        };
+        let step: i64 = if reversed { -1 } else { 1 };
+        ops.reset
+            .push((LIST_ITEM_COUNTER.to_string(), first.saturating_sub(step)));
+    }
+    if style.display == Display::ListItem {
+        let reversed = document
+            .parent(id)
+            .and_then(|parent| document.node(parent))
+            .is_some_and(|node| match node {
+                Node::Element { name, ns, attrs } => {
+                    *ns == ElementNs::Html && name == "ol" && has_attr(attrs, "reversed")
+                }
+                _ => false,
+            });
+        ops.increment
+            .push((LIST_ITEM_COUNTER.to_string(), if reversed { -1 } else { 1 }));
+        if *ns == ElementNs::Html
+            && name == "li"
+            && let Some(value) = attr_number(attrs, "value")
+        {
+            ops.set.push((LIST_ITEM_COUNTER.to_string(), value));
+        }
+    }
+    ops
+}
+
+fn list_item_count(document: &Document, list: NodeId) -> i64 {
+    document
+        .children(list)
+        .into_iter()
+        .filter(|child| match document.node(*child) {
+            Some(Node::Element { name, ns, .. }) => *ns == ElementNs::Html && name == "li",
+            _ => false,
+        })
+        .count() as i64
+}
+
+fn has_attr(attrs: &[crate::core::dom::Attr], name: &str) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.ns == AttrNs::None && attr.name.eq_ignore_ascii_case(name))
+}
+
+fn attr_value<'a>(attrs: &'a [crate::core::dom::Attr], name: &str) -> Option<&'a str> {
+    attrs
+        .iter()
+        .find(|attr| attr.ns == AttrNs::None && attr.name.eq_ignore_ascii_case(name))
+        .map(|attr| attr.value.as_str())
+}
+
+fn attr_number(attrs: &[crate::core::dom::Attr], name: &str) -> Option<i64> {
+    attr_value(attrs, name)?.trim().parse::<i64>().ok()
+}
+
+fn parse_counter_values(source: &str, default: i64) -> Option<Vec<(String, i64)>> {
+    if parse_ident(source).as_deref() == Some("none") {
+        return Some(Vec::new());
+    }
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut values: Vec<(String, i64)> = Vec::new();
+    while !parser.is_exhausted() {
+        let name = parser.expect_ident_cloned().ok()?.to_string();
+        if is_css_wide_keyword(&name) {
+            return None;
+        }
+        let value = parser
+            .try_parse(|input| input.expect_integer())
+            .map_or(default, i64::from);
+        values.push((name, value));
+    }
+    (!values.is_empty()).then_some(values)
+}
+
+fn is_css_wide_keyword(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "initial" | "inherit" | "unset" | "revert" | "none"
+    )
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ContentSpec {
+    None,
+    Pieces(Vec<ContentPiece>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ContentPiece {
+    Text(String),
+    Counter {
+        name: String,
+        style: ListStyleType,
+    },
+    Counters {
+        name: String,
+        separator: String,
+        style: ListStyleType,
+    },
+    Attr(String),
+}
+
+/// Parses a `content` value. Anything the terminal cannot render (`url()`, quotes, images) makes
+/// the whole declaration invalid, which is what the spec asks for and keeps half-rendered
+/// generated content off the screen.
+fn parse_content(source: &str) -> Option<ContentSpec> {
+    if let Some(keyword) = parse_ident(source) {
+        return match keyword.as_str() {
+            "none" | "normal" => Some(ContentSpec::None),
+            _ => None,
+        };
+    }
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut pieces = Vec::new();
+    while !parser.is_exhausted() {
+        let token = parser.next().ok()?.clone();
+        match token {
+            Token::QuotedString(value) => pieces.push(ContentPiece::Text(value.to_string())),
+            Token::Function(name) => {
+                let name = name.to_ascii_lowercase();
+                let piece = parser
+                    .parse_nested_block(|input| parse_content_function(&name, input))
+                    .ok()?;
+                pieces.push(piece);
+            }
+            _ => return None,
+        }
+    }
+    (!pieces.is_empty()).then_some(ContentSpec::Pieces(pieces))
+}
+
+fn parse_content_function<'i>(
+    name: &str,
+    input: &mut Parser<'i, '_>,
+) -> Result<ContentPiece, cssparser::ParseError<'i, ()>> {
+    let invalid = |input: &Parser<'i, '_>| input.new_custom_error(());
+    match name {
+        "attr" => {
+            let attribute = input.expect_ident_cloned()?.to_string();
+            input.expect_exhausted()?;
+            Ok(ContentPiece::Attr(attribute))
+        }
+        "counter" => {
+            let counter = input.expect_ident_cloned()?.to_string();
+            let style = parse_counter_style_argument(input)?;
+            input.expect_exhausted()?;
+            Ok(ContentPiece::Counter {
+                name: counter,
+                style,
+            })
+        }
+        "counters" => {
+            let counter = input.expect_ident_cloned()?.to_string();
+            input.expect_comma()?;
+            let separator = input.expect_string_cloned()?.to_string();
+            let style = parse_counter_style_argument(input)?;
+            input.expect_exhausted()?;
+            Ok(ContentPiece::Counters {
+                name: counter,
+                separator,
+                style,
+            })
+        }
+        _ => Err(invalid(input)),
+    }
+}
+
+fn parse_counter_style_argument<'i>(
+    input: &mut Parser<'i, '_>,
+) -> Result<ListStyleType, cssparser::ParseError<'i, ()>> {
+    if input.try_parse(|input| input.expect_comma()).is_err() {
+        return Ok(ListStyleType::Decimal);
+    }
+    let style = input.expect_ident_cloned()?;
+    Ok(parse_list_style_type(&style).unwrap_or(ListStyleType::Decimal))
+}
+
+fn resolve_content(
+    pieces: &[ContentPiece],
+    document: &Document,
+    id: NodeId,
+    counters: &CounterScopes,
+) -> String {
+    let mut out = String::new();
+    for piece in pieces {
+        match piece {
+            ContentPiece::Text(text) => out.push_str(text),
+            ContentPiece::Counter { name, style } => {
+                out.push_str(&style.render(counters.value(name)));
+            }
+            ContentPiece::Counters {
+                name,
+                separator,
+                style,
+            } => {
+                let rendered: Vec<_> = counters
+                    .values(name)
+                    .into_iter()
+                    .map(|value| style.render(value))
+                    .collect();
+                out.push_str(&rendered.join(separator));
+            }
+            ContentPiece::Attr(name) => {
+                if let Some(Node::Element { attrs, .. }) = document.node(id)
+                    && let Some(value) = attr_value(attrs, name)
+                {
+                    out.push_str(value);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn parse_list_style_position(value: &str) -> Option<ListStylePosition> {
+    match value.to_ascii_lowercase().as_str() {
+        "outside" => Some(ListStylePosition::Outside),
+        "inside" => Some(ListStylePosition::Inside),
+        _ => None,
+    }
+}
+
+/// `list-style` sets type, position and image; `none` may stand for either type or image, and an
+/// image we cannot render leaves the type alone.
+fn apply_list_style_shorthand(style: &mut ComputedStyle, source: &str) {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut list_type = None;
+    let mut position = None;
+    let mut saw_none = false;
+    while !parser.is_exhausted() {
+        let Ok(token) = parser.next().cloned() else {
+            return;
+        };
+        match token {
+            Token::Ident(value) => {
+                if value.eq_ignore_ascii_case("none") {
+                    saw_none = true;
+                } else if let Some(value) = parse_list_style_position(&value) {
+                    position = Some(value);
+                } else if let Some(value) = parse_list_style_type(&value) {
+                    list_type = Some(value);
+                } else {
+                    return;
+                }
+            }
+            Token::UnquotedUrl(_) => {}
+            Token::Function(name) if name.eq_ignore_ascii_case("url") => {
+                if parser.parse_nested_block(consume_block).is_err() {
+                    return;
+                }
+            }
+            _ => return,
+        }
+    }
+    if let Some(value) = list_type {
+        style.list_style_type = value;
+    } else if saw_none {
+        style.list_style_type = ListStyleType::None;
+    }
+    if let Some(value) = position {
+        style.list_style_position = value;
+    }
+}
+
+fn consume_block<'i>(input: &mut Parser<'i, '_>) -> Result<(), cssparser::ParseError<'i, ()>> {
+    while input.next().is_ok() {}
+    Ok(())
+}
+
+fn parse_list_style_type(value: &str) -> Option<ListStyleType> {
+    match value.to_ascii_lowercase().as_str() {
+        "none" => Some(ListStyleType::None),
+        "disc" => Some(ListStyleType::Disc),
+        "circle" => Some(ListStyleType::Circle),
+        "square" => Some(ListStyleType::Square),
+        "decimal" => Some(ListStyleType::Decimal),
+        "decimal-leading-zero" => Some(ListStyleType::DecimalLeadingZero),
+        "lower-alpha" | "lower-latin" => Some(ListStyleType::LowerAlpha),
+        "upper-alpha" | "upper-latin" => Some(ListStyleType::UpperAlpha),
+        "lower-roman" => Some(ListStyleType::LowerRoman),
+        "upper-roman" => Some(ListStyleType::UpperRoman),
+        _ => None,
+    }
 }
 
 fn ua_style(
@@ -354,6 +1010,8 @@ fn ua_style(
             bold: inherited.bold,
             underline: inherited.underline,
             strike: inherited.strike,
+            list_style_type: inherited.list_style_type,
+            list_style_position: inherited.list_style_position,
             ..Default::default()
         };
     };
@@ -363,6 +1021,8 @@ fn ua_style(
             bold: inherited.bold,
             underline: inherited.underline,
             strike: inherited.strike,
+            list_style_type: inherited.list_style_type,
+            list_style_position: inherited.list_style_position,
             ..Default::default()
         };
     }
@@ -389,7 +1049,6 @@ fn ua_style(
             | "blockquote"
             | "ul"
             | "ol"
-            | "li"
             | "dl"
             | "dt"
             | "dd"
@@ -406,6 +1065,8 @@ fn ua_style(
             | "hr"
     ) {
         Display::Block
+    } else if name == "li" {
+        Display::ListItem
     } else {
         match name.as_str() {
             "table" => Display::Table,
@@ -427,10 +1088,24 @@ fn ua_style(
         bold: inherited.bold,
         underline: inherited.underline,
         strike: inherited.strike,
+        list_style_type: inherited.list_style_type,
+        list_style_position: inherited.list_style_position,
         ..Default::default()
     };
     if name == "pre" {
         style.white_space = WhiteSpace::Pre;
+    }
+    if matches!(name.as_str(), "ul" | "menu") {
+        style.list_style_type = nested_bullet_type(document, id);
+    }
+    if name == "ol" {
+        style.list_style_type = ListStyleType::Decimal;
+    }
+    if matches!(name.as_str(), "ol" | "ul" | "menu" | "li")
+        && let Some(value) = attr_value(attrs, "type")
+        && let Some(list_type) = parse_html_list_type(value)
+    {
+        style.list_style_type = list_type;
     }
     if name == "table" {
         style.border_spacing = BorderSpacing::new(1, 0);
@@ -461,11 +1136,43 @@ fn ua_style(
     if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
         style.margin.top = 1;
         style.margin.bottom = 1;
+        style.bold = true;
     }
     if name == "blockquote" {
         style.margin.left = 2;
     }
     style
+}
+
+/// Real UA sheets step the bullet through disc, circle and square as unordered lists nest.
+fn nested_bullet_type(document: &Document, id: NodeId) -> ListStyleType {
+    let mut lists = 0usize;
+    let mut current = document.parent(id);
+    while let Some(node) = current {
+        if let Some(Node::Element { name, ns, .. }) = document.node(node)
+            && *ns == ElementNs::Html
+            && matches!(name.as_str(), "ul" | "menu")
+        {
+            lists += 1;
+        }
+        current = document.parent(node);
+    }
+    match lists % 3 {
+        0 => ListStyleType::Disc,
+        1 => ListStyleType::Circle,
+        _ => ListStyleType::Square,
+    }
+}
+
+fn parse_html_list_type(value: &str) -> Option<ListStyleType> {
+    match value.trim() {
+        "1" => Some(ListStyleType::Decimal),
+        "a" => Some(ListStyleType::LowerAlpha),
+        "A" => Some(ListStyleType::UpperAlpha),
+        "i" => Some(ListStyleType::LowerRoman),
+        "I" => Some(ListStyleType::UpperRoman),
+        other => parse_list_style_type(other),
+    }
 }
 
 fn inline_style(document: &Document, id: NodeId) -> Option<&str> {
@@ -648,6 +1355,22 @@ fn apply_declaration(
                 style.caption_side = value;
             }
         }
+        "list-style-type" => {
+            if let Some(value) = parse_ident(&declaration.value)
+                .as_deref()
+                .and_then(parse_list_style_type)
+            {
+                style.list_style_type = value;
+            }
+        }
+        "list-style-position" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| parse_list_style_position(&value))
+            {
+                style.list_style_position = value;
+            }
+        }
+        "list-style" => apply_list_style_shorthand(style, &declaration.value),
         _ => {}
     }
 }
@@ -704,6 +1427,12 @@ fn apply_css_wide(
         "border-collapse" => style.border_collapse = source.border_collapse,
         "border-spacing" => style.border_spacing = source.border_spacing,
         "caption-side" => style.caption_side = source.caption_side,
+        "list-style-type" => style.list_style_type = source.list_style_type,
+        "list-style-position" => style.list_style_position = source.list_style_position,
+        "list-style" => {
+            style.list_style_type = source.list_style_type;
+            style.list_style_position = source.list_style_position;
+        }
         _ => {}
     }
 }
@@ -717,6 +1446,9 @@ fn is_inherited(property: &str) -> bool {
             | "border-collapse"
             | "border-spacing"
             | "caption-side"
+            | "list-style"
+            | "list-style-type"
+            | "list-style-position"
     )
 }
 
@@ -1076,7 +1808,7 @@ fn parse_length_token(parser: &mut Parser<'_, '_>) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::app::render::embedded_style_sheets;
-    use crate::core::dom::{Attr, ElementNs};
+    use crate::core::dom::{Attr, ElementNs, SharedDocument};
     use crate::css::{CssParser, CssparserParser};
     use crate::html::{Html5everParser, HtmlParser};
 
@@ -1487,6 +2219,8 @@ mod tests {
             include_str!("../../tests/fixtures/margins.html"),
             include_str!("../../tests/fixtures/pre.html"),
             include_str!("../../tests/fixtures/wide.html"),
+            include_str!("../../tests/fixtures/lists.html"),
+            include_str!("../../tests/fixtures/generated.html"),
         ] {
             let outcome = Html5everParser::new(false).parse_document(source);
             let document = outcome.document.borrow();
@@ -1527,6 +2261,207 @@ mod tests {
                 .get(p)
                 .display,
             Display::None
+        );
+    }
+
+    /// Cascades `source` and returns the style tree plus every element in document order, so a
+    /// test can name nodes by their position without rebuilding the DOM by hand.
+    fn cascade_source(source: &str) -> (SharedDocument, StyleTree, Vec<NodeId>) {
+        let outcome = Html5everParser::new(false).parse_document(source);
+        let (styles, order) = {
+            let document = outcome.document.borrow();
+            let sheets = embedded_style_sheets(&document);
+            let styles = BasicCascade.apply(&sheets, &document, MediaContext::screen());
+            let order = elements_in_document_order(&document)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+            (styles, order)
+        };
+        (outcome.document, styles, order)
+    }
+
+    fn markers_of(source: &str) -> Vec<String> {
+        let (_, styles, order) = cascade_source(source);
+        order
+            .iter()
+            .filter_map(|id| styles.marker(*id))
+            .map(|marker| marker.text.trim_end().to_string())
+            .collect()
+    }
+
+    fn pseudo_texts(source: &str, which: PseudoElement) -> Vec<String> {
+        let (_, styles, order) = cascade_source(source);
+        order
+            .iter()
+            .filter_map(|id| styles.pseudo(*id, which))
+            .map(|pseudo| pseudo.text.clone())
+            .collect()
+    }
+
+    #[test]
+    fn ordered_lists_number_and_unordered_lists_bullet() {
+        assert_eq!(
+            markers_of("<ol><li>a</li><li>b</li><li>c</li></ol>"),
+            vec!["1.", "2.", "3."]
+        );
+        assert_eq!(markers_of("<ul><li>a</li><li>b</li></ul>"), vec!["•", "•"]);
+    }
+
+    #[test]
+    fn nested_lists_number_independently_of_their_parent_list() {
+        assert_eq!(
+            markers_of(
+                "<ol><li>one<ol><li>inner one</li><li>inner two</li></ol></li>\
+                 <li>two</li></ol>"
+            ),
+            vec!["1.", "1.", "2.", "2."]
+        );
+    }
+
+    #[test]
+    fn a_sibling_counter_reset_does_not_leak_into_an_earlier_siblings_subtree() {
+        // `second` resets the counter at its own depth. `first`'s child was visited earlier and
+        // must still see the outer value, while `second`'s child sees the reset one.
+        let source = "<style>
+                #second { counter-reset: n 10 }
+                span { counter-increment: n }
+                span::before { content: counter(n) }
+             </style>
+             <div id='first'><span>a</span></div>
+             <div id='second'><span>b</span></div>
+             <div id='third'><span>c</span></div>";
+        assert_eq!(
+            pseudo_texts(source, PseudoElement::Before),
+            ["1", "11", "12"]
+        );
+    }
+
+    #[test]
+    fn counters_joins_every_nesting_level_outer_to_inner() {
+        let source = "<style>
+                ol { counter-reset: step }
+                li { counter-increment: step }
+                li::before { content: counters(step, '.') }
+             </style>
+             <ol><li>a<ol><li>b</li><li>c</li></ol></li><li>d</li></ol>";
+        assert_eq!(
+            pseudo_texts(source, PseudoElement::Before),
+            ["1", "1.1", "1.2", "2"]
+        );
+    }
+
+    #[test]
+    fn display_none_subtrees_neither_increment_counters_nor_generate_content() {
+        let source = "<style>
+                span { counter-increment: n }
+                span::before { content: counter(n) }
+                .hidden { display: none }
+             </style>
+             <span>a</span>
+             <div class='hidden'><span>skipped</span></div>
+             <span>b</span>";
+        assert_eq!(pseudo_texts(source, PseudoElement::Before), ["1", "2"]);
+    }
+
+    #[test]
+    fn ordered_list_attributes_drive_the_list_item_counter() {
+        assert_eq!(
+            markers_of("<ol start='3'><li>a</li><li value='7'>b</li><li>c</li></ol>"),
+            vec!["3.", "7.", "8."]
+        );
+        assert_eq!(
+            markers_of("<ol reversed><li>a</li><li>b</li><li>c</li></ol>"),
+            vec!["3.", "2.", "1."]
+        );
+        assert_eq!(
+            markers_of("<ol type='i'><li>a</li><li>b</li><li>c</li><li>d</li></ol>"),
+            vec!["i.", "ii.", "iii.", "iv."]
+        );
+    }
+
+    #[test]
+    fn unsupported_content_components_invalidate_only_their_own_declaration() {
+        let source = "<style>
+                p::before { content: 'kept ' }
+                p::after { content: url(nope.png) }
+             </style>
+             <p>body</p>";
+        assert_eq!(pseudo_texts(source, PseudoElement::Before), ["kept "]);
+        assert!(pseudo_texts(source, PseudoElement::After).is_empty());
+    }
+
+    #[test]
+    fn a_pseudo_element_in_a_selector_list_no_longer_discards_its_siblings() {
+        let (_, styles, order) = cascade_source(
+            "<style>h1, .note::before { color: #ff0000 }</style>\
+             <h1>heading</h1><p class='note'>note</p>",
+        );
+        let heading = order
+            .iter()
+            .copied()
+            .find(|id| styles.get(*id).color == Some(Rgb::new(255, 0, 0)));
+        assert!(heading.is_some(), "the h1 half of the list still matches");
+    }
+
+    #[test]
+    fn generated_content_inherits_from_its_originating_element() {
+        let (_, styles, order) = cascade_source(
+            "<style>p { color: #00ff00 } p::before { content: 'x' }</style><p>body</p>",
+        );
+        let pseudo = order
+            .iter()
+            .find_map(|id| styles.pseudo(*id, PseudoElement::Before))
+            .expect("generated content");
+        assert_eq!(pseudo.style.color, Some(Rgb::new(0, 255, 0)));
+    }
+
+    #[test]
+    fn an_author_counter_does_not_stop_a_list_from_numbering() {
+        // Real sites (Wikipedia's reference lists among them) increment a counter of their own on
+        // list items. The implicit `list-item` step that `display: list-item` implies must survive.
+        assert_eq!(
+            markers_of(
+                "<style>li { counter-increment: mine }</style>\
+                 <ol><li>a</li><li>b</li><li>c</li></ol>"
+            ),
+            vec!["1.", "2.", "3."]
+        );
+        assert_eq!(
+            markers_of(
+                "<style>ol { counter-reset: mine }</style>\
+                 <ol><li>a</li><li>b</li></ol>"
+            ),
+            vec!["1.", "2."]
+        );
+    }
+
+    #[test]
+    fn naming_the_list_item_counter_explicitly_does_override_the_implicit_step() {
+        assert_eq!(
+            markers_of(
+                "<style>li { counter-increment: list-item 2 }</style>\
+                 <ol><li>a</li><li>b</li></ol>"
+            ),
+            vec!["2.", "4."]
+        );
+    }
+
+    #[test]
+    fn a_marker_rule_overrides_the_ua_marker_text() {
+        assert_eq!(
+            markers_of(
+                "<style>li::marker { content: '-> ' }</style>\
+                 <ul><li>a</li><li>b</li></ul>"
+            ),
+            vec!["->", "->"]
+        );
+    }
+
+    #[test]
+    fn list_style_type_none_suppresses_the_marker_entirely() {
+        assert!(
+            markers_of("<style>li { list-style-type: none }</style><ul><li>a</li></ul>").is_empty()
         );
     }
 }

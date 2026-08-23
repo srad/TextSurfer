@@ -1,0 +1,37 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"lists.html\")"
+---
+1. first item
+2. second item that is long enough to
+   wrap across the viewport width
+3. third item
+
+3. starts at three
+7. jumps to seven
+8. then eight
+
+3. counts down
+2. from three
+1. to one
+
+ i. roman one
+ii. roman two
+
+A. letter A
+B. letter B
+
+ 1. eighth needs one column
+ 9. ninth
+10. tenth needs two
+
+• outer bullet
+  1. nested counts on its own
+  2. second nested
+
+• outer again
+
+no marker, no field
+
+• inside marker wraps under the marker
+not the text

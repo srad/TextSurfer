@@ -13,7 +13,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::geom::Size;
 use crate::core::style::{
-    BorderEdges, BoxSizing, CellStyle, ComputedStyle, CssWidth, Display, Rgb, StyleTree, WhiteSpace,
+    BorderEdges, BoxSizing, CellStyle, ComputedStyle, CssWidth, Display, ListStylePosition, Marker,
+    PseudoElement, Rgb, StyleTree, WhiteSpace,
 };
 use crate::layout::table::{TableFormatter, TableLimits, TableOutput};
 
@@ -254,6 +255,19 @@ impl LayoutEngine for TaffyLayoutEngine {
                         style: flow[index].style.cell_style(),
                     });
                 }
+                if let Some(marker) = &flow[index].marker {
+                    // Right-aligned in the reserved field: every marker's right edge meets the
+                    // content column, so `9.` and `10.` share one text column.
+                    let width = UnicodeWidthStr::width(marker.text.as_str());
+                    tree.fragments.push(TextFragment {
+                        node: owner,
+                        col: content_rect.col.saturating_sub(width),
+                        row: content_rect.row,
+                        text: marker.text.clone(),
+                        depth: flow[index].depth,
+                        style: marker.style.cell_style(),
+                    });
+                }
             }
             if !flow[index].inline.is_empty() {
                 let rect = layout_rect(absolute_col, absolute_row, layout.size);
@@ -388,6 +402,9 @@ struct FlowBox {
     children: Vec<usize>,
     rule: bool,
     table: Option<NodeId>,
+    /// An outside list marker. Its `reserve` widens the box's left padding so the marker field
+    /// sits inside the border box, and the marker paints right-aligned in that field.
+    marker: Option<Marker>,
 }
 
 #[derive(Clone)]
@@ -424,6 +441,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
         children: Vec::new(),
         rule: false,
         table: None,
+        marker: None,
     }];
     let mut tasks = vec![(0usize, None)];
     while let Some((flow_index, container)) = tasks.pop() {
@@ -447,21 +465,40 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
             .collect();
         let mut buffer = Vec::new();
         if let Some(node) = container {
-            append_prefix(
-                document,
-                node,
-                InlineContext {
-                    depth: flow[flow_index].depth,
-                    ..inherited
-                },
-                &mut buffer,
-            );
+            let own = InlineContext {
+                depth: flow[flow_index].depth,
+                ..inherited
+            };
+            if let Some(marker) = styles.marker(node)
+                && marker.position == ListStylePosition::Inside
+            {
+                buffer.push(InlinePiece {
+                    node,
+                    text: marker.text.clone(),
+                    white_space: marker.style.white_space,
+                    depth: own.depth,
+                    style: marker.style.cell_style(),
+                    table: None,
+                });
+            }
+            append_pseudo(styles, node, PseudoElement::Before, own, &mut buffer);
         }
         let mut children = Vec::new();
         let mut nested_tasks = Vec::new();
         while let Some(event) = events.pop() {
             match event {
                 FlowEvent::RightEdge(node, style, context) => {
+                    append_pseudo(
+                        styles,
+                        node,
+                        PseudoElement::After,
+                        InlineContext {
+                            white_space: style.white_space,
+                            style: style.cell_style(),
+                            depth: context.depth + 1,
+                        },
+                        &mut buffer,
+                    );
                     append_edge(node, style, false, context, &mut buffer);
                 }
                 FlowEvent::Enter(node, context) => match document.node(node) {
@@ -494,6 +531,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                                 children: Vec::new(),
                                 rule: false,
                                 table: Some(node),
+                                marker: None,
                             });
                             children.push(child);
                         } else if style.display == Display::InlineTable {
@@ -510,7 +548,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                                     0,
                                 )),
                             });
-                        } else if style.display == Display::Block {
+                        } else if style.display.is_block_container() {
                             flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
                             let child = flow.len();
                             flow.push(FlowBox {
@@ -521,6 +559,13 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                                 children: Vec::new(),
                                 rule: *ns == ElementNs::Html && name == "hr",
                                 table: None,
+                                marker: styles
+                                    .marker(node)
+                                    .filter(|marker| {
+                                        marker.position == ListStylePosition::Outside
+                                            && marker.reserve > 0
+                                    })
+                                    .cloned(),
                             });
                             children.push(child);
                             nested_tasks.push((child, Some(node)));
@@ -545,6 +590,13 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                         } else {
                             append_edge(node, style, true, context, &mut buffer);
                             events.push(FlowEvent::RightEdge(node, style, context));
+                            append_pseudo(
+                                styles,
+                                node,
+                                PseudoElement::Before,
+                                element_context,
+                                &mut buffer,
+                            );
                             events.extend(
                                 document
                                     .children(node)
@@ -564,6 +616,18 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                     _ => {}
                 },
             }
+        }
+        if let Some(node) = container {
+            append_pseudo(
+                styles,
+                node,
+                PseudoElement::After,
+                InlineContext {
+                    depth: flow[flow_index].depth,
+                    ..inherited
+                },
+                &mut buffer,
+            );
         }
         flush_inline(&mut flow, &mut children, &mut buffer, depth);
         flow[flow_index].children = children;
@@ -616,35 +680,29 @@ fn flush_inline(
         children: Vec::new(),
         rule: false,
         table: None,
+        marker: None,
     });
     children.push(child);
 }
 
-fn append_prefix(
-    document: &Document,
+/// Pushes the generated content the cascade resolved for one pseudo-element, tagged with the
+/// originating element so hit-testing, link rects and search keep working through it.
+fn append_pseudo(
+    styles: &StyleTree,
     node: NodeId,
+    which: PseudoElement,
     context: InlineContext,
     buffer: &mut Vec<InlinePiece>,
 ) {
-    let Some(Node::Element { name, ns, .. }) = document.node(node) else {
-        return;
-    };
-    if *ns != ElementNs::Html {
-        return;
-    }
-    let text = if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-        format!("{} ", "#".repeat(name[1..].parse::<usize>().unwrap_or(1)))
-    } else if name == "li" {
-        "• ".to_string()
-    } else {
+    let Some(pseudo) = styles.pseudo(node, which) else {
         return;
     };
     buffer.push(InlinePiece {
         node,
-        text,
-        white_space: context.white_space,
+        text: pseudo.text.clone(),
+        white_space: pseudo.style.white_space,
         depth: context.depth,
-        style: context.style,
+        style: pseudo.style.cell_style(),
         table: None,
     });
 }
@@ -755,7 +813,13 @@ fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> TaffyStyle 
             bottom: LengthPercentageAuto::length(flow.style.margin.bottom as f32),
         },
         padding: TaffyRect {
-            left: LengthPercentage::length(flow.style.padding.left as f32),
+            left: LengthPercentage::length(
+                flow.style
+                    .padding
+                    .left
+                    .saturating_add(flow.marker.as_ref().map_or(0, |marker| marker.reserve))
+                    as f32,
+            ),
             right: LengthPercentage::length(flow.style.padding.right as f32),
             top: LengthPercentage::length(flow.style.padding.top as f32),
             bottom: LengthPercentage::length(flow.style.padding.bottom as f32),
@@ -1803,6 +1867,80 @@ mod tests {
                 .text_lines()
                 .iter()
                 .all(String::is_empty)
+        );
+    }
+
+    /// Lays `source` out at `cols` and returns the painted rows, so marker geometry can be
+    /// asserted as the columns a reader actually sees.
+    fn rendered_rows(source: &str, cols: u16) -> Vec<String> {
+        crate::app::render::render_html(source, Size { cols, rows: 24 }, Palette::DEFAULT, false)
+            .painted
+            .text_lines()
+    }
+
+    #[test]
+    fn the_marker_field_is_shared_by_every_sibling_so_numbers_share_one_text_column() {
+        let rows = rendered_rows(
+            "<ol start='9'><li>nine</li><li>ten</li><li>eleven</li></ol>",
+            30,
+        );
+        assert_eq!(rows, [" 9. nine", "10. ten", "11. eleven", ""]);
+    }
+
+    #[test]
+    fn outside_markers_hang_so_wrapped_lines_align_under_the_item_text() {
+        let rows = rendered_rows("<ul><li>alpha beta gamma delta</li></ul>", 12);
+        assert_eq!(rows, ["• alpha beta", "  gamma", "  delta", ""]);
+    }
+
+    #[test]
+    fn inside_markers_keep_the_marker_inline_with_no_hanging_indent() {
+        let rows = rendered_rows(
+            "<ul style='list-style-position: inside'><li>alpha beta gamma</li></ul>",
+            12,
+        );
+        assert_eq!(rows, ["• alpha beta", "gamma", ""]);
+    }
+
+    #[test]
+    fn a_suppressed_marker_reserves_no_field_at_all() {
+        let rows = rendered_rows("<ul style='list-style-type: none'><li>alpha</li></ul>", 12);
+        assert_eq!(rows, ["alpha", ""]);
+    }
+
+    #[test]
+    fn generated_content_and_markers_render_inside_table_cells() {
+        let rows = rendered_rows(
+            "<style>td::before { content: '> ' }</style>\
+             <table><tr><td><ul><li>cell item</li></ul></td></tr></table>",
+            24,
+        );
+        let text = rows.join("\n");
+        assert!(
+            text.contains('>'),
+            "generated content reaches the cell: {text}"
+        );
+        assert!(
+            text.contains('\u{2022}'),
+            "the marker reaches the cell: {text}"
+        );
+    }
+
+    #[test]
+    fn generated_content_is_tagged_with_its_originating_element_for_hit_testing() {
+        use crate::html::HtmlParser;
+        let outcome = crate::html::Html5everParser::new(false)
+            .parse_document("<style>a::after { content: ' (link)' }</style><a href='/x'>go</a>");
+        let document = outcome.document.borrow();
+        let sheets = crate::app::render::embedded_style_sheets(&document);
+        let styles = BasicCascade.apply(&sheets, &document, MediaContext::screen());
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 24 });
+        let link = tree.links.first().expect("the anchor is a link");
+        let painted: usize = link.rects.iter().map(|rect| rect.width).sum();
+        assert_eq!(
+            painted,
+            "go (link)".len(),
+            "generated content joins the link's own rects"
         );
     }
 }

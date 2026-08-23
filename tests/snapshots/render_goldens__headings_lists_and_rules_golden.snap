@@ -3,17 +3,17 @@ source: tests/render_goldens.rs
 expression: "golden(\"headings.html\")"
 ---
 
-# Top level
+Top level
 
 Body copy under the first heading.
 
-## Second level
+Second level
 
-### Third level
+Third level
 
 • first item
 • second item that is long enough to
-wrap across the viewport width
+  wrap across the viewport width
 
 ────────────────────────────────────────
 After the rule.

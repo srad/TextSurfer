@@ -47,6 +47,16 @@ fn headings_lists_and_rules_golden() {
 }
 
 #[test]
+fn list_markers_and_counters_golden() {
+    insta::assert_snapshot!(golden("lists.html"));
+}
+
+#[test]
+fn generated_content_golden() {
+    insta::assert_snapshot!(golden("generated.html"));
+}
+
+#[test]
 fn borders_golden() {
     insta::assert_snapshot!(golden("borders.html"));
 }

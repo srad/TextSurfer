@@ -1,0 +1,21 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"generated.html\")"
+---
+Note: a paragraph with generated edges
+(end)
+
+borrowed from prior art [chawan]
+
+Chapter 1. first chapter body
+
+Chapter 2. second chapter body
+
+1) top level
+   1.1) nested one
+   1.2) nested two
+
+2) second top level
+
+an invalid content value generates
+nothing

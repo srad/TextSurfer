@@ -385,6 +385,15 @@ impl PageLoad {
         imports
     }
 
+    /// A page may only pull subresources from its own scheme. Without this an `http(s)` document
+    /// could name `file:///…` in a `<link>` and have the browser read local files for it.
+    fn scheme_allowed(&self, url: &Url) -> bool {
+        match self.document_url.scheme() {
+            "http" | "https" => matches!(url.scheme(), "http" | "https"),
+            scheme => url.scheme() == scheme,
+        }
+    }
+
     fn add_occurrence(
         &mut self,
         mut url: Url,
@@ -394,6 +403,10 @@ impl PageLoad {
         environment: &'static Encoding,
     ) -> Option<usize> {
         if self.external_disabled {
+            return None;
+        }
+        if !self.scheme_allowed(&url) {
+            self.failed_resources = self.failed_resources.saturating_add(1);
             return None;
         }
         if self.occurrences.len() >= MAX_EXTERNAL_OCCURRENCES {
@@ -755,6 +768,43 @@ mod tests {
         assert_eq!(load.external_occurrences(), 2);
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].url.as_str(), "https://example.com/assets/a.css");
+    }
+
+    #[test]
+    fn a_remote_page_cannot_pull_a_subresource_from_another_scheme() {
+        let mut load = load(
+            "<link rel=stylesheet href='file:///C:/secrets.css'>
+             <link rel=stylesheet href='https://cdn.example/ok.css'>",
+        );
+        let commands = load.take_commands();
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.url.as_str())
+                .collect::<Vec<_>>(),
+            ["https://cdn.example/ok.css"],
+            "only the same-scheme sheet is fetched"
+        );
+        assert_eq!(load.failed_resources(), 1);
+    }
+
+    #[test]
+    fn a_local_page_may_still_load_its_own_local_stylesheets() {
+        let mut load = PageLoad::new(
+            "<link rel=stylesheet href='theme.css'>",
+            Url::parse("file:///C:/site/page.html").unwrap(),
+            UTF_8,
+            PageLoadOptions {
+                viewport: Size { cols: 80, rows: 24 },
+                palette: Palette::default(),
+                scripting: false,
+                color_scheme: ColorScheme::Dark,
+                started: Duration::ZERO,
+            },
+        );
+        let commands = load.take_commands();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].url.as_str(), "file:///C:/site/theme.css");
     }
 
     #[test]
