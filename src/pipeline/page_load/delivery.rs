@@ -10,7 +10,8 @@ use crate::net::{
     FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId, charset_from_content_type,
 };
 
-use super::{FetchState, MAX_EXTERNAL_BYTES, PageLoad, normalized_url};
+use super::resource_url::normalized_url;
+use super::{FetchState, MAX_EXTERNAL_BYTES, PageLoad};
 
 struct EncodingRs;
 

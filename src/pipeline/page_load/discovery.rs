@@ -8,9 +8,10 @@ use crate::css::{
 };
 use crate::net::ResourceId;
 
+use super::resource_url::normalized_url;
 use super::{
     FetchCommand, FetchEntry, FetchState, MAX_EXTERNAL_OCCURRENCES, MAX_IMPORT_DEPTH, Occurrence,
-    PageLoad, RootSource, normalized_url,
+    PageLoad, RootSource,
 };
 
 enum DiscoveredRoot {

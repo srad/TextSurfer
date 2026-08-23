@@ -1,5 +1,6 @@
 mod delivery;
 mod discovery;
+mod resource_url;
 mod settle;
 mod sheets;
 
@@ -213,10 +214,4 @@ impl PageLoad {
     pub fn external_disabled(&self) -> bool {
         self.external_disabled
     }
-}
-
-fn normalized_url(url: &Url) -> String {
-    let mut normalized = url.clone();
-    normalized.set_fragment(None);
-    normalized.into()
 }

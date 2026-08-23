@@ -12,6 +12,10 @@ use crate::css::{ColorScheme, CssParser, CssparserParser};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::pipeline::render::embedded_style_sheets;
 
+fn apply_naive(sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree {
+    super::document::cascade_document(sheets, document, media, false)
+}
+
 #[test]
 fn ua_and_author_rules_form_a_computed_style_tree() {
     let mut document = Document::new();

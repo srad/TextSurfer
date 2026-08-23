@@ -70,7 +70,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **348 lib · 5 binary · 4 fetch-pipeline · 14 corpus ·
+Test counts at the last green run (2026-08-23): **349 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
 24 golden**.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -180,8 +180,9 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   `pipeline` sits above `paint` and below `ui`/`app`; it takes its palette by injection rather than
   reaching up to `ui::theme`.
 - **A module is a responsibility, not a file.** Directory modules with one submodule per job, the
-  public surface in `mod.rs`, tests in a sibling `tests.rs`. Rules live in AGENTS.md "Module
-  structure"; line budgets are a prompt to look for a second responsibility, not a defect threshold.
+  public surface in `mod.rs`, tests in a sibling `tests.rs` or `tests/` directory. Rules live in
+  AGENTS.md "Module structure"; line budgets are a prompt to look for a second responsibility, not
+  a defect threshold.
 - Native text renderer (lynx/w3m/chawan family), not embedded-engine (carbonyl/browsh family) — our
   value is small footprint + terminal-native layout.
 - CSS box model from day one (`(rejected)`: lynx-style linear flow — user chose box model).
@@ -869,3 +870,32 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   the one deliberate test movement is `dump_lines` and its case going from the binary to `pipeline`
   (binary 5 → 4, library +1). `layout/table.rs::layout_model` is the sole non-mechanical extraction
   and gets its own reviewed commit.
+- 2026-08-23 — **Project structure pass continuation corrected before code.** The first six slices
+  through the pipeline extraction are already landed; the remaining work stays uncommitted at the
+  user's direction. The continuation closes residual responsibility leaks in the touched pipeline,
+  CSS, tab, and terminal-adapter modules before splitting table layout. Table layout is separated
+  mechanically first, then its orchestration is expressed as model, geometry, caption, column,
+  cell, and placement phases without changing caption-width feedback, recursion, clipping, paint
+  order, or merge identifiers. The remaining engine, DOM, style, painter, encoding, controller,
+  and script-test splits preserve their existing module-level public paths and test-module names.
+  The verified pre-continuation baseline is 349 library · 4 binary · 4 fetch-pipeline · 14 corpus ·
+  24 render-golden tests in both default and `js` configurations; no dependency changes are needed.
+- 2026-08-23 — **Project structure pass continuation complete, left uncommitted.** No dependency or
+  behavior changed. Pipeline rendering and dumping, stylesheet URL normalization, CSS selector
+  parsing/matching, tab state, and terminal-adapter tests now have responsibility-specific modules.
+  Table formatting is split into model, sizing, content, border, caption, geometry, and placement
+  responsibilities, with the orchestration retaining its explicit measurement-to-placement phase
+  order. Layout engine, DOM, computed style, painter, encoding, controller, and script tests now
+  follow the directory-module and sibling-test rules; controller tests are further grouped by
+  delivery, key/viewport, and navigation responsibility. Public paths, table merge identities,
+  include paths, and depth-relative visibility were audited after the moves. All five local gates
+  are green at 349 library · 4 binary · 4 fetch-pipeline · 14 corpus · 24 render-golden tests in
+  both default and `js` configurations; the selector-bucketing benchmark also builds. No lower
+  layer imports `crate::app`, no `.snap.new` was created, and the human terminal smoke remains
+  pending.
+- 2026-08-23 — **Structure-pass documentation aligned for the local commit.** The README architecture
+  now includes the promoted `pipeline` subsystem and the current composition boundaries; the
+  standing module rule now covers both sibling test-file forms. Historical update entries remain
+  unchanged. The user approved one local commit for the uncommitted
+  continuation, superseding its earlier per-module commit outline. No source or dependency changed
+  in this documentation follow-up.

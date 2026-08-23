@@ -1,0 +1,28 @@
+mod document;
+mod embedded;
+mod response;
+
+#[cfg(test)]
+mod tests;
+
+use crate::core::dom::SharedDocument;
+use crate::core::style::StyleTree;
+use crate::paint::DisplayList;
+
+pub use document::{paint_document, render_document, render_html};
+pub use embedded::embedded_style_sheets;
+pub use response::response_kind;
+
+pub enum ResponseKind {
+    Html,
+    PlainText,
+    Unsupported(String),
+}
+
+pub struct RenderedPage {
+    pub document: SharedDocument,
+    pub styles: StyleTree,
+    pub painted: DisplayList,
+    pub parse_errors: usize,
+    pub css_warnings: usize,
+}

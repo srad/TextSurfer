@@ -6,7 +6,7 @@ pub mod noop;
 #[cfg(test)]
 mod contract;
 #[cfg(test)]
-mod mod_tests;
+mod tests;
 
 pub use capabilities::Capabilities;
 pub use engine::JsEngine;

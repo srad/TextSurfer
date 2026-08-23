@@ -98,26 +98,19 @@ integration (M4–M5).
 ## Architecture
 
 ```
-┌──────────┐      ┌────────────────┐      ┌────────┐      ┌───────────┐
-│  events  │ ───► │   app          │ ───► │   ui   │ ───► │  ratatui  │
-│  (core)  │      │  (I/O-free)    │      │widgets │      │  chrome   │
-└──────────┘      └───────┬────────┘      └────────┘      └───────────┘
-                          │  deliver_fetch (tab ID + generation)
-                  ┌───────▼────────┐
-                  │  net           │  4 joined workers
-                  │  UreqFetch     │  ureq · crossbeam · mediatype
-                  │  FileFetch     │
-                  │  FetchPool     │
-                  └───────┬────────┘
-                  ┌───────▼────────┐
-                  │  html          │  html5ever → indextree DOM
-                  │  css/layout    │  selectors → Taffy → paint
-                  └────────────────┘
+ main.rs — terminal adapter: CLI · event loop · crossterm→core events
+   ▼
+ app — I/O-free composition root · controller · tabs · Navigate adapter · start page
+   ├──────────────► ui — ratatui chrome and widgets
+   ├──────────────► net — UreqFetch · FileFetch · joined 4-worker FetchPool
+   └──────────────► pipeline — PageLoad resource graph · render facade · --dump
+                       ▼
+                  html → core DOM → css → layout → paint → DisplayList
 ```
 
 Single crate, module-per-layer: `core` · `net` · `html` · `css` · `layout` · `paint` · `script` ·
-`ui` · `app` + a thin `main`. Concrete wiring happens only in the composition root; the app itself
-never touches crossterm, the network, or the clock.
+`pipeline` · `ui` · `app` + a thin `main`. Concrete wiring happens only in `app`/`main`; the app
+never imports crossterm or a concrete fetch implementation, and time remains injected.
 
 ## Getting started
 

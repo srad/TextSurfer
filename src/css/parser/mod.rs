@@ -10,15 +10,14 @@ mod tests;
 use cssparser::{Parser, ParserInput, StyleSheetParser};
 
 use ast::rule_has_content;
-use declarations::parse_declarations_from_parser;
-use media::parse_media_query_list;
 use sheet::SheetParser;
 
 pub use ast::{CssRule, Declaration, ImportRule, MediaRule, StyleRule, StyleSheet};
+pub use declarations::parse_declarations;
 pub use diagnostics::{CssDiagnostic, CssDiagnosticKind, CssDiagnostics, CssSourcePosition};
 pub use media::{
     ColorScheme, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
-    ScriptingValue,
+    ScriptingValue, parse_media_queries,
 };
 
 pub trait CssParser: Send + Sync {
@@ -40,18 +39,4 @@ impl CssParser for CssparserParser {
             .collect();
         StyleSheet { rules, diagnostics }
     }
-}
-
-pub fn parse_media_queries(source: &str) -> MediaQueryList {
-    let mut input = ParserInput::new(source);
-    let mut input = Parser::new(&mut input);
-    let mut diagnostics = CssDiagnostics::default();
-    parse_media_query_list(&mut input, &mut diagnostics)
-        .unwrap_or_else(|_| MediaQueryList::Any(vec![MediaQuery::Never]))
-}
-
-pub fn parse_declarations(source: &str) -> Vec<Declaration> {
-    let mut input = ParserInput::new(source);
-    let mut input = Parser::new(&mut input);
-    parse_declarations_from_parser(&mut input)
 }

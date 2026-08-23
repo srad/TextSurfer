@@ -1,0 +1,413 @@
+use super::contrast::MIN_CONTRAST;
+use super::*;
+use crate::core::dom::{Document, ElementNs};
+use crate::core::style::{BorderEdges, BorderLineStyle, BorderSide, Rgb, Rgba};
+use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, TextFragment};
+
+fn painted(tree: &BoxTree) -> DisplayList {
+    BasicPainter.paint(tree, Palette::default())
+}
+
+fn plain_box(node: NodeId, rect: LayoutRect, depth: usize) -> LayoutBox {
+    LayoutBox {
+        node,
+        border_rect: rect,
+        content_rect: rect,
+        depth,
+        style: CellStyle::default(),
+    }
+}
+
+#[test]
+fn paints_wide_graphemes_without_exceeding_the_cell_width() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "p", ElementNs::Html, vec![]);
+    let tree = BoxTree {
+        width: 4,
+        height: 1,
+        fragments: vec![TextFragment {
+            node,
+            col: 1,
+            row: 0,
+            text: "界x".to_string(),
+            depth: 0,
+            style: CellStyle::default(),
+        }],
+        ..Default::default()
+    };
+    assert_eq!(painted(&tree).text_lines(), vec![" 界x"]);
+}
+
+#[test]
+fn hit_testing_returns_the_deepest_box() {
+    let mut document = Document::new();
+    let parent = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let child = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
+    let parent_rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 10,
+        height: 3,
+    };
+    let child_rect = LayoutRect {
+        col: 1,
+        row: 1,
+        width: 4,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 10,
+        height: 3,
+        boxes: vec![
+            plain_box(parent, parent_rect, 0),
+            plain_box(child, child_rect, 1),
+        ],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    assert_eq!(display.hit_test(2, 1), Some(child));
+    assert_eq!(display.hit_test(8, 1), Some(parent));
+}
+
+#[test]
+fn overwriting_a_wide_grapheme_never_leaves_an_overwide_row() {
+    let mut document = Document::new();
+    let back = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let front = document.insert_element(None, "span", ElementNs::Html, vec![]);
+    let tree = BoxTree {
+        width: 2,
+        height: 1,
+        fragments: vec![
+            TextFragment {
+                node: back,
+                col: 0,
+                row: 0,
+                text: "界".to_string(),
+                depth: 0,
+                style: CellStyle::default(),
+            },
+            TextFragment {
+                node: front,
+                col: 1,
+                row: 0,
+                text: "x".to_string(),
+                depth: 1,
+                style: CellStyle::default(),
+            },
+        ],
+        ..Default::default()
+    };
+    let lines = painted(&tree).text_lines();
+    assert_eq!(lines, vec![" x"]);
+    assert_eq!(UnicodeWidthStr::width(lines[0].as_str()), 2);
+}
+
+#[test]
+fn borders_are_drawn_from_box_geometry() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let rect = LayoutRect {
+        col: 1,
+        row: 0,
+        width: 4,
+        height: 3,
+    };
+    let tree = BoxTree {
+        width: 6,
+        height: 3,
+        boxes: vec![LayoutBox {
+            node,
+            border_rect: rect,
+            content_rect: LayoutRect {
+                col: 2,
+                row: 1,
+                width: 2,
+                height: 1,
+            },
+            depth: 0,
+            style: CellStyle::default(),
+        }],
+        strokes: vec![BorderStroke {
+            rect,
+            edges: BorderEdges::uniform(BorderSide {
+                style: BorderLineStyle::Solid,
+                ..Default::default()
+            }),
+            style: CellStyle::default(),
+            depth: 0,
+            merge_group: 1,
+        }],
+        ..Default::default()
+    };
+    assert_eq!(painted(&tree).text_lines(), vec![" ┌──┐", " │  │", " └──┘"]);
+}
+
+#[test]
+fn untouched_document_rows_do_not_require_dense_cell_buffers() {
+    let tree = BoxTree {
+        width: 200,
+        height: 20_000,
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    assert_eq!(display.rows.len(), 20_000);
+    assert!(display.rows.iter().all(|row| row.spans.is_empty()));
+}
+
+#[test]
+fn backgrounds_paint_under_text_in_depth_order() {
+    let mut document = Document::new();
+    let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let inner = document.insert_element(Some(outer), "span", ElementNs::Html, vec![]);
+    let outer_rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 4,
+        height: 1,
+    };
+    let inner_rect = LayoutRect {
+        col: 2,
+        row: 0,
+        width: 2,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 4,
+        height: 1,
+        boxes: vec![
+            LayoutBox {
+                style: CellStyle {
+                    bg: Some(Rgb::new(10, 10, 10)),
+                    ..Default::default()
+                },
+                ..plain_box(outer, outer_rect, 0)
+            },
+            LayoutBox {
+                style: CellStyle {
+                    bg: Some(Rgb::new(20, 20, 20)),
+                    ..Default::default()
+                },
+                ..plain_box(inner, inner_rect, 1)
+            },
+        ],
+        fills: vec![
+            BackgroundFill {
+                rect: outer_rect,
+                color: Rgb::new(10, 10, 10),
+                depth: 0,
+            },
+            BackgroundFill {
+                rect: inner_rect,
+                color: Rgb::new(20, 20, 20),
+                depth: 1,
+            },
+        ],
+        fragments: vec![TextFragment {
+            node: inner,
+            col: 2,
+            row: 0,
+            text: "hi".to_string(),
+            depth: 1,
+            style: CellStyle {
+                fg: Some(Rgba::opaque(Rgb::WHITE)),
+                ..Default::default()
+            },
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    let spans = &display.rows[0].spans;
+    assert_eq!(spans[0].style.bg, Some(Rgb::new(10, 10, 10)));
+    assert_eq!(spans[1].text, "hi");
+    assert_eq!(spans[1].style.bg, Some(Rgb::new(20, 20, 20)));
+    assert_eq!(spans[1].style.fg, Some(Rgba::opaque(Rgb::WHITE)));
+}
+
+#[test]
+fn partial_foreground_alpha_resolves_against_the_deepest_background() {
+    let mut document = Document::new();
+    let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let inner = document.insert_element(Some(outer), "span", ElementNs::Html, vec![]);
+    let outer_rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 8,
+        height: 1,
+    };
+    let inner_rect = LayoutRect {
+        col: 1,
+        row: 0,
+        width: 6,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 8,
+        height: 1,
+        fills: vec![
+            BackgroundFill {
+                rect: outer_rect,
+                color: Rgb::new(0, 0, 128),
+                depth: 0,
+            },
+            BackgroundFill {
+                rect: inner_rect,
+                color: Rgb::BLACK,
+                depth: 1,
+            },
+        ],
+        fragments: vec![TextFragment {
+            node: inner,
+            col: 2,
+            row: 0,
+            text: "half".to_string(),
+            depth: 1,
+            style: CellStyle {
+                fg: Some(Rgba::new(255, 255, 255, 128)),
+                ..Default::default()
+            },
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    let span = display.rows[0]
+        .spans
+        .iter()
+        .find(|span| span.text == "half")
+        .unwrap();
+    assert_eq!(span.style.bg, Some(Rgb::BLACK));
+    assert_eq!(span.style.fg, Some(Rgba::new(128, 128, 128, 255)));
+    assert!(display.rows.iter().flat_map(|row| &row.spans).all(|span| {
+        span.style
+            .fg
+            .is_none_or(|foreground| foreground.alpha == 255)
+    }));
+}
+
+#[test]
+fn transparent_text_loses_ink_but_keeps_layout_and_interaction_geometry() {
+    let mut document = Document::new();
+    let hidden = document.insert_element(None, "a", ElementNs::Html, vec![]);
+    let visible = document.insert_element(None, "span", ElementNs::Html, vec![]);
+    let hidden_rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 6,
+        height: 1,
+    };
+    let visible_rect = LayoutRect {
+        col: 6,
+        row: 0,
+        width: 5,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 11,
+        height: 1,
+        boxes: vec![
+            plain_box(hidden, hidden_rect, 0),
+            plain_box(visible, visible_rect, 0),
+        ],
+        fragments: vec![
+            TextFragment {
+                node: hidden,
+                col: 0,
+                row: 0,
+                text: "secret".to_string(),
+                depth: 0,
+                style: CellStyle {
+                    fg: Some(Rgba::new(255, 255, 255, 0)),
+                    bold: true,
+                    underline: true,
+                    strike: true,
+                    reverse: true,
+                    ..Default::default()
+                },
+            },
+            TextFragment {
+                node: visible,
+                col: 6,
+                row: 0,
+                text: "after".to_string(),
+                depth: 0,
+                style: CellStyle {
+                    fg: Some(Rgba::opaque(Rgb::WHITE)),
+                    ..Default::default()
+                },
+            },
+        ],
+        links: vec![crate::layout::LinkBox {
+            node: hidden,
+            href: "https://example.com/".to_string(),
+            rects: vec![hidden_rect],
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    assert_eq!(display.text_lines()[0], "      after");
+    assert_eq!(display.hit_test(2, 0), Some(hidden));
+    assert_eq!(
+        display.link_at(2, 0).map(|link| link.href.as_str()),
+        Some("https://example.com/")
+    );
+    assert!(display.rows[0].spans.iter().all(|span| {
+        span.text != "secret"
+            && (!span.text.chars().all(char::is_whitespace)
+                || (!span.style.bold
+                    && !span.style.underline
+                    && !span.style.strike
+                    && !span.style.reverse))
+    }));
+}
+
+#[test]
+fn unreadable_author_colours_are_corrected_towards_the_theme_text() {
+    let palette = Palette {
+        text: Rgb::WHITE,
+        background: Rgb::new(0, 0, 128),
+        link: Rgb::new(255, 255, 0),
+    };
+    let corrected = legible_foreground(Rgb::BLACK, palette.background, palette);
+    assert!(corrected.contrast_ratio(palette.background) >= MIN_CONTRAST);
+    let legible = Rgb::new(255, 255, 0);
+    assert_eq!(
+        legible_foreground(legible, palette.background, palette),
+        legible
+    );
+}
+
+#[test]
+fn links_carry_their_geometry_into_the_display_list() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "a", ElementNs::Html, vec![]);
+    let rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 4,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 8,
+        height: 1,
+        links: vec![crate::layout::LinkBox {
+            node,
+            href: "https://example.com/".to_string(),
+            rects: vec![rect],
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    assert_eq!(display.links.len(), 1);
+    assert_eq!(
+        display.link_at(2, 0).map(|link| link.href.as_str()),
+        Some("https://example.com/")
+    );
+    assert!(display.link_at(6, 0).is_none());
+}
+
+#[test]
+fn plain_text_becomes_an_unstyled_display_list() {
+    let lines = vec!["first".to_string(), String::new(), "third".to_string()];
+    let display = DisplayList::from_lines(&lines);
+    assert_eq!(display.text_lines(), lines);
+    assert!(display.hits.is_empty() && display.links.is_empty());
+}

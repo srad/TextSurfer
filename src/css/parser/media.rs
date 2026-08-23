@@ -1,4 +1,4 @@
-use cssparser::{ParseError, Parser, Token};
+use cssparser::{ParseError, Parser, ParserInput, Token};
 
 use super::diagnostics::{CssDiagnosticKind, CssDiagnostics};
 
@@ -59,6 +59,14 @@ pub enum MediaFeature {
         comparison: MediaComparison,
         value: Option<u16>,
     },
+}
+
+pub fn parse_media_queries(source: &str) -> MediaQueryList {
+    let mut input = ParserInput::new(source);
+    let mut input = Parser::new(&mut input);
+    let mut diagnostics = CssDiagnostics::default();
+    parse_media_query_list(&mut input, &mut diagnostics)
+        .unwrap_or_else(|_| MediaQueryList::Any(vec![MediaQuery::Never]))
 }
 
 pub(super) fn consume_all<'i, 't>(input: &mut Parser<'i, 't>) -> Result<(), ParseError<'i, ()>> {

@@ -5,6 +5,12 @@ use cssparser::{
 
 use super::ast::Declaration;
 
+pub fn parse_declarations(source: &str) -> Vec<Declaration> {
+    let mut input = cssparser::ParserInput::new(source);
+    let mut input = Parser::new(&mut input);
+    parse_declarations_from_parser(&mut input)
+}
+
 pub(super) fn parse_declarations_from_parser<'i, 't>(
     input: &mut Parser<'i, 't>,
 ) -> Vec<Declaration> {
