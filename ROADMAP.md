@@ -20,11 +20,11 @@ written; the audit is re-run whenever a candidate crate appears.
 
 | Parser | Status | Verdict |
 |---|---|---|
-| `net/encoding.rs` — WHATWG sniffing: BOM, header, meta prescan, XML fallback, x-user-defined postprocess | custom | **Keep** — html5ever ships only the meta-`charset` substring extractor and it is `pub(crate)`; encoding_rs is decode/encode-only; no sniffer exists in the ecosystem |
+| `net/encoding/prescan.rs` — WHATWG sniffing: BOM, header, meta prescan, XML fallback, x-user-defined postprocess | custom | **Keep** — html5ever ships only the meta-`charset` substring extractor and it is `pub(crate)`; encoding_rs is decode/encode-only; no sniffer exists in the ecosystem |
 | `core/url.rs` — `url_fix` | not a parser | **No change** — delegates all real parsing to the `url` crate; scheme/host/search heuristics are address-bar UX behavior |
 | `css/parser.rs` | library adapter | **Keep** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
 | `css/parser.rs` — terminal media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
-| `css/cascade.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
+| `css/cascade/{content,counters}.rs` + `css/values.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
 | Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.13 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
@@ -70,8 +70,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **347 lib · 5 binary · 4 pipeline · 14 corpus ·
-17 golden**.
+Test counts at the last green run (2026-08-23): **348 lib · 5 binary · 4 fetch-pipeline · 14 corpus ·
+24 golden**.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -120,12 +120,16 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 ## Architecture (as-built)
 
 ```
+ main.rs — terminal adapter only: CLI · event loop · crossterm→core::event key mapping
+   ▼
  ui (ratatui widgets · Focus · keymap · mouse zones) ──┐
    Action (Load, NewTab, ActivateLink, Scroll, …)     │ UiEvent
    ▼                                                  │
  app — I/O-free composition root · TabManager · event loop · fetch workers · js pump
    │ dispatch                                         ▼
    ▼                                     script: JsEngine trait + JsHost ← per-loaded-document
+ pipeline — PageLoad stylesheet resource graph · render facade · --dump
+   │                                                  │
  net::Fetch ⇒ html::HtmlParser ⇒ core(indextree DOM)   │ noop.rs · boa.rs (feature "js", default off)
    │        │
  css: CssParser(cssparser) → Cascade(selectors) → StyleTree (+ pseudo boxes · list markers)
@@ -133,8 +137,14 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
  paint::Painter → DisplayList (styled spans · NodeId hit-tags · link rects) → ui content widget
 ```
 
-- Single crate, modules: `core`, `net`, `html`, `css`, `layout`, `paint`, `script`, `ui`, `app` + thin `main`.
+- Single crate, modules: `core`, `net`, `html`, `css`, `layout`, `paint`, `script`, `pipeline`,
+  `ui`, `app` + thin `main`.
 - Cross-module boundaries via traits; only `app`/`main` know the concrete implementations (composition root).
+- `app` is the composition root **only** — controller, `Tab`/`TabManager`, the `Navigate` adapter and
+  the start page. The rendering pipeline (`PageLoad` resource graph, the cascade→layout→paint facade,
+  `--dump`) is `pipeline`, so `main` and the golden tests never import into the composition root.
+- **Module structure:** a module is a responsibility, not a file. See the AGENTS.md "Module
+  structure" rules for when a `foo.rs` becomes a `foo/` directory and what `mod.rs` may contain.
 - `app` never imports crossterm: events come in as `core` types, results via `deliver_fetch`, time injected.
 - DOM never crosses threads. One thread owns everything except I/O (fetch worker threads only).
 - `Document` owns DOM pre-insertion validation and hides indextree; template contents are detached
@@ -162,6 +172,16 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   paint/DisplayList, chrome/App/event loop, and table layout (M1-D — audited crates do not integrate
   with a styled CSS box tree).
 - Single crate with modules (not a workspace) — fastest iteration; workspace split trivial later.
+  Re-affirmed unchanged by the 2026-08-23 structure pass.
+- **`app` is the composition root only; `pipeline` is the rendering subsystem; `main.rs` is the
+  terminal adapter only.** `PageLoad`'s stylesheet resource graph, the cascade→layout→paint facade
+  and `--dump` are product pipeline stages, not composition wiring — keeping them in `app` forced
+  `main`, the golden tests and unit tests in `css`/`layout` to import into the composition root.
+  `pipeline` sits above `paint` and below `ui`/`app`; it takes its palette by injection rather than
+  reaching up to `ui::theme`.
+- **A module is a responsibility, not a file.** Directory modules with one submodule per job, the
+  public surface in `mod.rs`, tests in a sibling `tests.rs`. Rules live in AGENTS.md "Module
+  structure"; line budgets are a prompt to look for a second responsibility, not a defect threshold.
 - Native text renderer (lynx/w3m/chawan family), not embedded-engine (carbonyl/browsh family) — our
   value is small footprint + terminal-native layout.
 - CSS box model from day one (`(rejected)`: lynx-style linear flow — user chose box model).
@@ -182,9 +202,11 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 - No CI anywhere (`(canceled)` by user). Local gates only.
 
 ### Locked — terminal CSS semantics (M1-B, prior-art aligned)
-- **UA stylesheet is hardcoded Rust** in `css/cascade.rs::ua_style`, not CSS text. The earlier
-  "ships as CSS text in `css/ua.rs`" entry described a file that never existed; corrected 2026-08-22.
-  Revisit only if the UA sheet grows past what a typed function expresses clearly.
+- **UA stylesheet is hardcoded Rust** in `css/ua.rs::ua_style`, not CSS text. Note the file history:
+  an entry claiming it "ships as CSS text in `css/ua.rs`" described a file that never existed and was
+  corrected 2026-08-22 to `css/cascade.rs::ua_style`; the 2026-08-23 structure pass then created
+  `css/ua.rs` for real, still holding hardcoded Rust. Revisit only if the UA sheet grows past what a
+  typed function expresses clearly.
 - **Colour model**: `ComputedStyle::color` is `Option<Rgba>` with byte alpha while background and
   border colours stay `Option<Rgb>`/`BorderColor`; `None` means "the theme decides", so the Norton
   palette stays the default field and author colours override only where declared. The painter
@@ -575,9 +597,9 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
   `buffer_string` compares symbols only; style assertions use the style-aware helper added in M1-B.
 - proptest laws — all eight green. Six from M1-B: viewport-width monotonicity, painted-row bounds,
   disjoint leaf glyph cells, laminar per-row box families and engine-backed deepest-hit round trip
-  (`layout/engine.rs`), plus scroll clamping as a fixed point under arbitrary key sequences
-  (`app/controller.rs`). Two more came with M1-D tables (`layout/table.rs`): generated spans never
-  overlap, and a wider table viewport never increases height. Property tests for
+  (`layout/engine/tests.rs`), plus scroll clamping as a fixed point under arbitrary key sequences
+  (`app/controller/tests/`). Two more came with M1-D tables (`layout/table/tests.rs`): generated
+  spans never overlap, and a wider table viewport never increases height. Property tests for
   `url_fix`/`EditBuffer` continue from M0.
 - FakeFetch + fake clock + fake Host; no test touches the network or the real clock.
 - `tests/support/` shared corpus helpers; inline `#[cfg(test)]` fakes where module-local.
@@ -830,3 +852,20 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   All five local gates are green at 348 library · 5 binary · 4 pipeline · 14 corpus · 24
   render-golden tests; M1-D remains open for the separately owned generated-content/display work,
   length units, presentational HTML, alignment and typography. Human terminal smoke remains pending.
+- 2026-08-23 — **Project structure pass: single-responsibility modules (user).** No dependency
+  changed and no behavior changed. Module *layering* was already sound (no cycles, no upward
+  production imports); the problem was inside the modules, where several files held four to seven
+  unrelated jobs. Decisions recorded above: `app` becomes the composition root only, the rendering
+  pipeline is promoted to a new top-level `pipeline` module, `main.rs` is the terminal adapter only,
+  and "a module is a responsibility, not a file" is now an AGENTS.md rule set rather than an
+  aspiration. Path references in this document were re-pointed: `css/cascade.rs::ua_style` →
+  `css/ua.rs::ua_style`, the `content`/`counter-*`/`list-style*` audit row → `css/cascade/{content,
+  counters}.rs` + `css/values.rs`, `net/encoding.rs` sniffing → `net/encoding/prescan.rs`, and the
+  proptest-law owners → `layout/engine/tests.rs`, `layout/table/tests.rs`, `app/controller/tests/`.
+  The 2026-08-22 updates-log entry is left as written: it is history, and the `css/ua.rs` file it
+  says never existed does exist now. The status-board test line was stale (347/17) and is corrected
+  to the 348 library · 5 binary · 4 fetch-pipeline · 14 corpus · 24 render-golden baseline captured
+  before the pass. The refactor lands as one commit per module with all five gates green after each;
+  the one deliberate test movement is `dump_lines` and its case going from the binary to `pipeline`
+  (binary 5 → 4, library +1). `layout/table.rs::layout_model` is the sole non-mechanical extraction
+  and gets its own reviewed commit.
