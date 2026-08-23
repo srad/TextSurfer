@@ -1,0 +1,206 @@
+//! The user-agent stylesheet, hardcoded as Rust rather than CSS text (locked in ROADMAP.md). A
+//! policy table keyed on element name, not cascade logic.
+
+use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId, attr_value};
+use crate::core::style::{
+    BorderSpacing, ComputedStyle, Display, ListStyleType, Palette, Rgba, WhiteSpace,
+};
+
+use super::values::parse_list_style_type;
+
+pub(super) fn ua_style(
+    document: &Document,
+    id: NodeId,
+    parent_style: Option<ComputedStyle>,
+    palette: Palette,
+) -> ComputedStyle {
+    let inherited = parent_style.unwrap_or_default();
+    let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
+        return ComputedStyle {
+            color: inherited.color,
+            bold: inherited.bold,
+            underline: inherited.underline,
+            strike: inherited.strike,
+            list_style_type: inherited.list_style_type,
+            list_style_position: inherited.list_style_position,
+            border_collapse: inherited.border_collapse,
+            border_spacing: inherited.border_spacing,
+            caption_side: inherited.caption_side,
+            ..Default::default()
+        };
+    };
+    if *ns != ElementNs::Html {
+        return ComputedStyle {
+            color: inherited.color,
+            bold: inherited.bold,
+            underline: inherited.underline,
+            strike: inherited.strike,
+            list_style_type: inherited.list_style_type,
+            list_style_position: inherited.list_style_position,
+            border_collapse: inherited.border_collapse,
+            border_spacing: inherited.border_spacing,
+            caption_side: inherited.caption_side,
+            ..Default::default()
+        };
+    }
+    let display = if matches!(
+        name.as_str(),
+        "head" | "base" | "link" | "meta" | "title" | "style" | "script" | "template"
+    ) {
+        Display::None
+    } else if matches!(
+        name.as_str(),
+        "html"
+            | "body"
+            | "main"
+            | "article"
+            | "section"
+            | "nav"
+            | "aside"
+            | "header"
+            | "footer"
+            | "address"
+            | "div"
+            | "p"
+            | "pre"
+            | "blockquote"
+            | "ul"
+            | "ol"
+            | "dl"
+            | "dt"
+            | "dd"
+            | "figure"
+            | "figcaption"
+            | "form"
+            | "fieldset"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "hr"
+    ) {
+        Display::Block
+    } else if name == "li" {
+        Display::ListItem
+    } else {
+        match name.as_str() {
+            "table" => Display::Table,
+            "thead" => Display::TableHeaderGroup,
+            "tbody" => Display::TableRowGroup,
+            "tfoot" => Display::TableFooterGroup,
+            "tr" => Display::TableRow,
+            "td" | "th" => Display::TableCell,
+            "col" => Display::TableColumn,
+            "colgroup" => Display::TableColumnGroup,
+            "caption" => Display::TableCaption,
+            _ => Display::Inline,
+        }
+    };
+    let mut style = ComputedStyle {
+        display,
+        white_space: inherited.white_space,
+        color: inherited.color,
+        bold: inherited.bold,
+        underline: inherited.underline,
+        strike: inherited.strike,
+        list_style_type: inherited.list_style_type,
+        list_style_position: inherited.list_style_position,
+        border_collapse: inherited.border_collapse,
+        border_spacing: inherited.border_spacing,
+        caption_side: inherited.caption_side,
+        ..Default::default()
+    };
+    if name == "pre" {
+        style.white_space = WhiteSpace::Pre;
+    }
+    if matches!(name.as_str(), "ul" | "menu") {
+        style.list_style_type = nested_bullet_type(document, id);
+    }
+    if name == "ol" {
+        style.list_style_type = ListStyleType::Decimal;
+    }
+    if matches!(name.as_str(), "ol" | "ul" | "menu" | "li")
+        && let Some(value) = attr_value(attrs, "type")
+        && let Some(list_type) = parse_html_list_type(value)
+    {
+        style.list_style_type = list_type;
+    }
+    if name == "table" {
+        style.border_spacing = BorderSpacing::new(1, 0);
+    }
+    if name == "a"
+        && attrs
+            .iter()
+            .any(|attr| attr.ns == AttrNs::None && attr.name == "href")
+    {
+        style.color = Some(Rgba::opaque(palette.link));
+        style.underline = true;
+    }
+    if matches!(name.as_str(), "b" | "strong" | "th") {
+        style.bold = true;
+    }
+    if matches!(name.as_str(), "u" | "ins") {
+        style.underline = true;
+    }
+    if matches!(name.as_str(), "s" | "del" | "strike") {
+        style.strike = true;
+    }
+    if matches!(
+        name.as_str(),
+        "p" | "pre" | "blockquote" | "ul" | "ol" | "table"
+    ) {
+        style.margin.bottom = 1;
+    }
+    if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+        style.margin.top = 1;
+        style.margin.bottom = 1;
+        style.bold = true;
+    }
+    if name == "blockquote" {
+        style.margin.left = 2;
+    }
+    style
+}
+
+/// Real UA sheets step the bullet through disc, circle and square as unordered lists nest.
+fn nested_bullet_type(document: &Document, id: NodeId) -> ListStyleType {
+    let mut lists = 0usize;
+    let mut current = document.parent(id);
+    while let Some(node) = current {
+        if let Some(Node::Element { name, ns, .. }) = document.node(node)
+            && *ns == ElementNs::Html
+            && matches!(name.as_str(), "ul" | "menu")
+        {
+            lists += 1;
+        }
+        current = document.parent(node);
+    }
+    match lists % 3 {
+        0 => ListStyleType::Disc,
+        1 => ListStyleType::Circle,
+        _ => ListStyleType::Square,
+    }
+}
+
+fn parse_html_list_type(value: &str) -> Option<ListStyleType> {
+    match value.trim() {
+        "1" => Some(ListStyleType::Decimal),
+        "a" => Some(ListStyleType::LowerAlpha),
+        "A" => Some(ListStyleType::UpperAlpha),
+        "i" => Some(ListStyleType::LowerRoman),
+        "I" => Some(ListStyleType::UpperRoman),
+        other => parse_list_style_type(other),
+    }
+}
+
+pub(super) fn inline_style(document: &Document, id: NodeId) -> Option<&str> {
+    let Some(Node::Element { attrs, .. }) = document.node(id) else {
+        return None;
+    };
+    attrs
+        .iter()
+        .find(|attr| attr.ns == AttrNs::None && attr.name == "style")
+        .map(|attr| attr.value.as_str())
+}

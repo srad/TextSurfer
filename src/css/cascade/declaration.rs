@@ -1,0 +1,324 @@
+use cssparser::{Parser, ParserInput, Token};
+
+use crate::core::style::{
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, Display, ListStyleType,
+    TableLayoutMode, WhiteSpace,
+};
+use crate::css::Declaration;
+use crate::css::values::{
+    assign_border_color, assign_border_colors, assign_border_side, assign_border_style,
+    assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
+    consume_block, parse_background_color, parse_border, parse_color, parse_font_weight,
+    parse_ident, parse_lengths, parse_list_style_position, parse_list_style_type,
+    parse_text_decoration, parse_width,
+};
+
+pub(super) fn apply_declaration(
+    style: &mut ComputedStyle,
+    parent_style: Option<ComputedStyle>,
+    declaration: &Declaration,
+) {
+    if let Some(keyword) = parse_ident(&declaration.value)
+        && matches!(keyword.as_str(), "initial" | "inherit" | "unset")
+    {
+        apply_css_wide(style, parent_style, &declaration.name, &keyword);
+        return;
+    }
+    match declaration.name.as_str() {
+        "display" => {
+            if let Some(display) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "none" => Some(Display::None),
+                    "block" | "flow-root" | "list-item" | "flex" | "grid" | "inline-block"
+                    | "inline-flex" | "inline-grid" => Some(Display::Block),
+                    "inline" => Some(Display::Inline),
+                    "table" => Some(Display::Table),
+                    "inline-table" => Some(Display::InlineTable),
+                    "table-header-group" => Some(Display::TableHeaderGroup),
+                    "table-row-group" => Some(Display::TableRowGroup),
+                    "table-footer-group" => Some(Display::TableFooterGroup),
+                    "table-row" => Some(Display::TableRow),
+                    "table-cell" => Some(Display::TableCell),
+                    "table-column" => Some(Display::TableColumn),
+                    "table-column-group" => Some(Display::TableColumnGroup),
+                    "table-caption" => Some(Display::TableCaption),
+                    _ => None,
+                })
+            {
+                style.display = display;
+            }
+        }
+        "white-space" => {
+            if let Some(white_space) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "normal" => Some(WhiteSpace::Normal),
+                    "nowrap" => Some(WhiteSpace::NoWrap),
+                    "pre" => Some(WhiteSpace::Pre),
+                    "pre-wrap" => Some(WhiteSpace::PreWrap),
+                    "pre-line" => Some(WhiteSpace::PreLine),
+                    "break-spaces" => Some(WhiteSpace::BreakSpaces),
+                    _ => None,
+                })
+            {
+                style.white_space = white_space;
+            }
+        }
+        "width" => {
+            if let Some(width) = parse_width(&declaration.value) {
+                style.width = width;
+            }
+        }
+        "box-sizing" => {
+            if let Some(box_sizing) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "content-box" => Some(BoxSizing::ContentBox),
+                    "border-box" => Some(BoxSizing::BorderBox),
+                    _ => None,
+                })
+            {
+                style.box_sizing = box_sizing;
+            }
+        }
+        "margin" => {
+            if let Some(values) = parse_lengths(&declaration.value) {
+                assign_edges(&mut style.margin, &values);
+            }
+        }
+        "padding" => {
+            if let Some(values) = parse_lengths(&declaration.value) {
+                assign_edges(&mut style.padding, &values);
+            }
+        }
+        "margin-top" => assign_one(&mut style.margin.top, &declaration.value),
+        "margin-right" => assign_one(&mut style.margin.right, &declaration.value),
+        "margin-bottom" => assign_one(&mut style.margin.bottom, &declaration.value),
+        "margin-left" => assign_one(&mut style.margin.left, &declaration.value),
+        "padding-top" => assign_one(&mut style.padding.top, &declaration.value),
+        "padding-right" => assign_one(&mut style.padding.right, &declaration.value),
+        "padding-bottom" => assign_one(&mut style.padding.bottom, &declaration.value),
+        "padding-left" => assign_one(&mut style.padding.left, &declaration.value),
+        "border" => {
+            if let Some(border) = parse_border(&declaration.value) {
+                style.border = border;
+            }
+        }
+        "border-top" => assign_border_side(&mut style.border.top, &declaration.value),
+        "border-right" => assign_border_side(&mut style.border.right, &declaration.value),
+        "border-bottom" => assign_border_side(&mut style.border.bottom, &declaration.value),
+        "border-left" => assign_border_side(&mut style.border.left, &declaration.value),
+        "color" => {
+            if let Some(color) = parse_color(&declaration.value) {
+                style.color = Some(color);
+            }
+        }
+        "background-color" | "background" => {
+            if let Some(color) = parse_background_color(&declaration.value) {
+                style.background = color;
+            }
+        }
+        "font-weight" => {
+            if let Some(bold) = parse_font_weight(&declaration.value) {
+                style.bold = bold;
+            }
+        }
+        "text-decoration" | "text-decoration-line" => {
+            if let Some((underline, strike)) = parse_text_decoration(&declaration.value) {
+                style.underline = underline;
+                style.strike = strike;
+            }
+        }
+        "border-style" => assign_border_styles(&mut style.border, &declaration.value),
+        "border-top-style" => assign_border_style(&mut style.border.top, &declaration.value),
+        "border-right-style" => assign_border_style(&mut style.border.right, &declaration.value),
+        "border-bottom-style" => assign_border_style(&mut style.border.bottom, &declaration.value),
+        "border-left-style" => assign_border_style(&mut style.border.left, &declaration.value),
+        "border-width" => assign_border_widths(&mut style.border, &declaration.value),
+        "border-top-width" => assign_border_width(&mut style.border.top, &declaration.value),
+        "border-right-width" => assign_border_width(&mut style.border.right, &declaration.value),
+        "border-bottom-width" => assign_border_width(&mut style.border.bottom, &declaration.value),
+        "border-left-width" => assign_border_width(&mut style.border.left, &declaration.value),
+        "border-color" => assign_border_colors(&mut style.border, &declaration.value),
+        "border-top-color" => assign_border_color(&mut style.border.top, &declaration.value),
+        "border-right-color" => assign_border_color(&mut style.border.right, &declaration.value),
+        "border-bottom-color" => assign_border_color(&mut style.border.bottom, &declaration.value),
+        "border-left-color" => assign_border_color(&mut style.border.left, &declaration.value),
+        "table-layout" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "auto" => Some(TableLayoutMode::Auto),
+                    "fixed" => Some(TableLayoutMode::Fixed),
+                    _ => None,
+                })
+            {
+                style.table_layout = value;
+            }
+        }
+        "border-collapse" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "separate" => Some(BorderCollapse::Separate),
+                    "collapse" => Some(BorderCollapse::Collapse),
+                    _ => None,
+                })
+            {
+                style.border_collapse = value;
+            }
+        }
+        "border-spacing" => {
+            if let Some(values) = parse_lengths(&declaration.value)
+                && let [horizontal] | [horizontal, _] = values.as_slice()
+            {
+                style.border_spacing =
+                    BorderSpacing::new(*horizontal, values.get(1).copied().unwrap_or(*horizontal));
+            }
+        }
+        "caption-side" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "top" => Some(CaptionSide::Top),
+                    "bottom" => Some(CaptionSide::Bottom),
+                    _ => None,
+                })
+            {
+                style.caption_side = value;
+            }
+        }
+        "list-style-type" => {
+            if let Some(value) = parse_ident(&declaration.value)
+                .as_deref()
+                .and_then(parse_list_style_type)
+            {
+                style.list_style_type = value;
+            }
+        }
+        "list-style-position" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| parse_list_style_position(&value))
+            {
+                style.list_style_position = value;
+            }
+        }
+        "list-style" => apply_list_style_shorthand(style, &declaration.value),
+        _ => {}
+    }
+}
+
+fn apply_css_wide(
+    style: &mut ComputedStyle,
+    parent_style: Option<ComputedStyle>,
+    property: &str,
+    keyword: &str,
+) {
+    let initial = ComputedStyle::default();
+    let inherited = parent_style.unwrap_or_default();
+    let source = if keyword == "inherit" || (keyword == "unset" && is_inherited(property)) {
+        inherited
+    } else {
+        initial
+    };
+    match property {
+        "display" => style.display = source.display,
+        "white-space" => style.white_space = source.white_space,
+        "color" => style.color = source.color,
+        "background-color" | "background" => style.background = source.background,
+        "font-weight" => style.bold = source.bold,
+        "text-decoration" | "text-decoration-line" => {
+            style.underline = source.underline;
+            style.strike = source.strike;
+        }
+        "width" => style.width = source.width,
+        "box-sizing" => style.box_sizing = source.box_sizing,
+        "margin" => style.margin = source.margin,
+        "padding" => style.padding = source.padding,
+        "margin-top" => style.margin.top = source.margin.top,
+        "margin-right" => style.margin.right = source.margin.right,
+        "margin-bottom" => style.margin.bottom = source.margin.bottom,
+        "margin-left" => style.margin.left = source.margin.left,
+        "padding-top" => style.padding.top = source.padding.top,
+        "padding-right" => style.padding.right = source.padding.right,
+        "padding-bottom" => style.padding.bottom = source.padding.bottom,
+        "padding-left" => style.padding.left = source.padding.left,
+        "border" | "border-style" | "border-width" | "border-color" => style.border = source.border,
+        "border-top" | "border-top-style" | "border-top-width" | "border-top-color" => {
+            style.border.top = source.border.top
+        }
+        "border-right" | "border-right-style" | "border-right-width" | "border-right-color" => {
+            style.border.right = source.border.right
+        }
+        "border-bottom" | "border-bottom-style" | "border-bottom-width" | "border-bottom-color" => {
+            style.border.bottom = source.border.bottom
+        }
+        "border-left" | "border-left-style" | "border-left-width" | "border-left-color" => {
+            style.border.left = source.border.left
+        }
+        "table-layout" => style.table_layout = source.table_layout,
+        "border-collapse" => style.border_collapse = source.border_collapse,
+        "border-spacing" => style.border_spacing = source.border_spacing,
+        "caption-side" => style.caption_side = source.caption_side,
+        "list-style-type" => style.list_style_type = source.list_style_type,
+        "list-style-position" => style.list_style_position = source.list_style_position,
+        "list-style" => {
+            style.list_style_type = source.list_style_type;
+            style.list_style_position = source.list_style_position;
+        }
+        _ => {}
+    }
+}
+
+fn is_inherited(property: &str) -> bool {
+    matches!(
+        property,
+        "white-space"
+            | "color"
+            | "font-weight"
+            | "border-collapse"
+            | "border-spacing"
+            | "caption-side"
+            | "list-style"
+            | "list-style-type"
+            | "list-style-position"
+    )
+}
+
+/// `list-style` sets type, position and image; `none` may stand for either type or image, and an
+/// image we cannot render leaves the type alone.
+fn apply_list_style_shorthand(style: &mut ComputedStyle, source: &str) {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut list_type = None;
+    let mut position = None;
+    let mut saw_none = false;
+    while !parser.is_exhausted() {
+        let Ok(token) = parser.next().cloned() else {
+            return;
+        };
+        match token {
+            Token::Ident(value) => {
+                if value.eq_ignore_ascii_case("none") {
+                    saw_none = true;
+                } else if let Some(value) = parse_list_style_position(&value) {
+                    position = Some(value);
+                } else if let Some(value) = parse_list_style_type(&value) {
+                    list_type = Some(value);
+                } else {
+                    return;
+                }
+            }
+            Token::UnquotedUrl(_) => {}
+            Token::Function(name) if name.eq_ignore_ascii_case("url") => {
+                if parser.parse_nested_block(consume_block).is_err() {
+                    return;
+                }
+            }
+            _ => return,
+        }
+    }
+    if let Some(value) = list_type {
+        style.list_style_type = value;
+    } else if saw_none {
+        style.list_style_type = ListStyleType::None;
+    }
+    if let Some(value) = position {
+        style.list_style_position = value;
+    }
+}
