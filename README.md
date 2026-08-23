@@ -36,8 +36,9 @@ Ready                              https://example.com
 
 ## Features
 
-**Current (M0, M1-R and M1.5 complete; M1-A through M1-C done, awaiting the human terminal smoke;
-M1-D in progress — table layout and generated content/list markers done)**
+**Current (M0, M1-R and M1.5 complete; M1-A done; M1-B implementation landed with audit
+regressions open; M1-C done, awaiting the human terminal smoke; M1-D in progress with table and
+generated-content regressions open)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -59,32 +60,37 @@ M1-D in progress — table layout and generated content/list markers done)**
 - Hierarchical rendering path: cssparser + selectors cascade inline, embedded, linked and recursively
   imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
   scripting, color scheme and viewport dimensions; Taffy sizes nested and anonymous block flow,
-  while an isolated table formatter resolves anonymous table boxes, auto/fixed tracks, spans,
-  captions and nested block/inline tables; textwrap and Unicode-aware fragments reflow six
-  whitespace modes, and sparse paint emits clipped terminal-cell lines and merged borders
-- Generated content and real list markers: `::before`, `::after` and `::marker` match, `content`
+  while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
+  and nested-table support; textwrap and Unicode-aware fragments reflow six whitespace modes, and
+  sparse paint emits clipped terminal-cell lines and merged borders. The roadmap tracks audit
+  regressions in nested-table order/inline placement, cell line breaking and caption styling
+- Generated content and list-marker support: `::before`, `::after` and `::marker` match, `content`
   supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped
   stack. Ordered lists number, nested lists number independently, and `list-style-type` covers
   decimal, roman, alphabetic and the disc/circle/square bullets that step with nesting depth.
   Outside markers hang in a field shared and right-aligned across sibling items, so `9.` and `10.`
   meet one text column and wrapped lines align under the item text; `<ol start>`, `<ol reversed>`,
-  `<li value>` and `ol`/`ul` `type` are honoured
+  `<li value>` and `ol`/`ul` `type` are honoured. Audit regressions remain for authored
+  `display:list-item`, CSS-wide side-table values and `content: normal` markers
 - Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
   the terminal as coloured, bold, underlined and struck spans — with a contrast pass that keeps
   unreadable author colours legible over the theme's field — plus link and hit geometry carried
-  through the display list for keyboard and mouse targeting
+  through the display list for keyboard and mouse targeting. Transparent and partial-alpha
+  foreground handling is a tracked audit regression
 - Dynamic selectors: `:link`, `:any-link`, `:hover`, `:focus`, `:active`, `:checked`, `:enabled`
-  and `:disabled` parse and match against injected state; `:visited` never matches, so page styling
-  cannot observe history
+  and `:disabled` parse against injected state; `:visited` never matches, so page styling cannot
+  observe history. Host-language-correct form states and distinct `:focus-visible`/`:focus-within`
+  behavior remain M2/M3 work
 - `--dump` renders a page to stdout and exits through the same stylesheet loader and painter the TUI
   uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
-- WPT html5lib conformance corpus vendored as test fixtures — 1,922 cases, zero network in tests
+- WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
+  in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): CSS length units and the
-terminal cell metric — lengths currently ignore their unit, so `20px` of padding costs twenty
-columns — then presentational HTML and `text-align`, then scaled headings drawn from half-block
-glyphs; that finishes M1-D. After it: links/forms/search (M2), mouse (M3), and the JavaScript
-seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): close the reproduced
+M1-B/M1-D regressions, then CSS length units and the terminal cell metric — lengths currently ignore
+their unit, so `20px` of padding costs twenty columns — followed by presentational HTML, `text-align`
+and scaled headings. After M1-D: links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa
+integration (M4–M5).
 
 ## Architecture
 
@@ -179,8 +185,10 @@ the real clock.
 Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
-style/layout/paint ✅ · M1-C external CSS ✅ · M1-D tables ✅ and generated content/markers ✅,
-with length units, legacy HTML styling and terminal typography still open · M2 tabs/keyboard/forms ·
+style/layout/paint implemented with audit regressions open · M1-C external CSS implemented, awaiting
+the human terminal smoke · M1-D tables and generated content/markers implemented with audit
+regressions open, with length units, legacy HTML styling and terminal typography also open · M2
+tabs/keyboard/forms ·
 M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries

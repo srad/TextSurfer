@@ -106,7 +106,7 @@ impl App {
             } else if let Some(load) = tab.load.as_mut() {
                 if index == active {
                     if let Some(page) = load.resize(viewport) {
-                        apply_rendered_page(tab, page, width);
+                        apply_rendered_page(tab, page, width, rows);
                     }
                 } else {
                     load.set_viewport(viewport);
@@ -130,6 +130,7 @@ impl App {
             let _ = self.deliver_fetch(payload);
         }
         let width = self.geometry.content_cols();
+        let rows = self.geometry.content_rows();
         let active = self.tabs.active_mut();
         let page = active
             .load
@@ -138,7 +139,7 @@ impl App {
         if let Some(page) = page {
             let css_warnings = page.css_warnings;
             let parse_errors = page.parse_errors;
-            apply_rendered_page(active, page, width);
+            apply_rendered_page(active, page, width, rows);
             update_load_message(active, parse_errors, css_warnings);
             self.touch();
         }
@@ -154,6 +155,7 @@ impl App {
             rows: self.geometry.content_rows().min(usize::from(u16::MAX)) as u16,
         };
         let width = self.geometry.content_cols();
+        let rows = self.geometry.content_rows();
         let mut commands = Vec::new();
         let mut cancel = false;
         let mut visible_change = resource_id == ResourceId::DOCUMENT;
@@ -176,7 +178,7 @@ impl App {
                 if let Some(page) = page {
                     let css_warnings = page.css_warnings;
                     let parse_errors = page.parse_errors;
-                    apply_rendered_page(tab, page, width);
+                    apply_rendered_page(tab, page, width, rows);
                     update_load_message(tab, parse_errors, css_warnings);
                     visible_change = true;
                 } else if index != active_index {
@@ -217,7 +219,7 @@ impl App {
                                 tab.load = Some(load);
                                 if let Some(page) = page {
                                     let css_warnings = page.css_warnings;
-                                    apply_rendered_page(tab, page, width);
+                                    apply_rendered_page(tab, page, width, rows);
                                     update_load_message(tab, parse_errors, css_warnings);
                                 } else {
                                     tab.render_dirty = index != active_index;
@@ -634,6 +636,7 @@ impl App {
 
     fn activate_current(&mut self) {
         let width = self.geometry.content_cols();
+        let rows = self.geometry.content_rows();
         let now = self.now;
         let tab = self.tabs.active_mut();
         let page = match tab.load.as_mut() {
@@ -644,7 +647,7 @@ impl App {
         if let Some(page) = page {
             let css_warnings = page.css_warnings;
             let parse_errors = page.parse_errors;
-            apply_rendered_page(tab, page, width);
+            apply_rendered_page(tab, page, width, rows);
             update_load_message(tab, parse_errors, css_warnings);
         }
         tab.render_dirty = false;
@@ -694,12 +697,13 @@ fn content_viewport(geometry: ChromeGeometry) -> Size {
     }
 }
 
-fn apply_rendered_page(tab: &mut super::tab::Tab, page: RenderedPage, width: usize) {
+fn apply_rendered_page(tab: &mut super::tab::Tab, page: RenderedPage, width: usize, rows: usize) {
     tab.painted = page.painted;
     tab.layout_width = width;
     tab.document = Some(page.document);
     tab.styles = Some(page.styles);
     tab.render_dirty = false;
+    tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
 }
 
 fn update_load_message(tab: &mut super::tab::Tab, parse_errors: usize, css_warnings: usize) {
@@ -751,6 +755,7 @@ fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::page_load::STYLESHEET_DEADLINE;
     use crate::app::startpage::start_page;
     use crate::core::event::KeyModifiers;
     use crate::net::{FetchError, FetchResponse};
@@ -834,6 +839,43 @@ mod tests {
 
         fn poll_result(&self) -> Option<FetchPayload> {
             self.pending.lock().unwrap().pop()
+        }
+    }
+
+    fn scrolled_page_waiting_for_late_stylesheet() -> (App, FetchPayload) {
+        let fake = Arc::new(FakeNet::default());
+        let mut app = App::with_net(fake.clone());
+        app.on_resize(Size { cols: 40, rows: 8 });
+        app.submit_url("https://example.com/page");
+        let document = fake.pending.lock().unwrap().pop().unwrap();
+        let paragraphs = "<p>row</p>".repeat(50);
+        assert!(app.deliver_fetch(FetchPayload {
+            result: Ok(FetchResponse {
+                final_url: Url::parse("https://example.com/page").unwrap(),
+                body: format!(
+                    "<!doctype html><html><head><link rel=stylesheet href=late.css></head><body>{paragraphs}</body></html>"
+                )
+                .into_bytes(),
+                content_type: Some("text/html; charset=utf-8".to_string()),
+            }),
+            ..document
+        }));
+        let stylesheet = fake.pending.lock().unwrap().pop().unwrap();
+        app.step(STYLESHEET_DEADLINE);
+        app.handle_key(press(Key::End));
+        assert!(app.tabs.active().scroll > 0);
+        (app, stylesheet)
+    }
+
+    fn hide_all_paragraphs(payload: FetchPayload) -> FetchPayload {
+        let final_url = payload.result.as_ref().unwrap().final_url.clone();
+        FetchPayload {
+            result: Ok(FetchResponse {
+                final_url,
+                body: b"p { display: none }".to_vec(),
+                content_type: Some("text/css".to_string()),
+            }),
+            ..payload
         }
     }
 
@@ -1038,6 +1080,28 @@ mod tests {
                 .any(|line| line.contains("background complete"))
         );
         assert!(app.message().contains("accepted gen"));
+    }
+
+    #[test]
+    fn late_stylesheet_repaint_clamps_active_tab_scroll() {
+        let (mut app, stylesheet) = scrolled_page_waiting_for_late_stylesheet();
+        assert!(app.deliver_fetch(hide_all_paragraphs(stylesheet)));
+        assert_eq!(app.tabs.active().painted.len(), 0);
+        assert_eq!(app.tabs.active().scroll, 0);
+    }
+
+    #[test]
+    fn late_stylesheet_repaint_clamps_on_background_tab_activation() {
+        let (mut app, stylesheet) = scrolled_page_waiting_for_late_stylesheet();
+        let painted_rows = app.tabs.active().painted.len();
+        let scroll = app.tabs.active().scroll;
+        app.new_tab();
+        assert!(app.deliver_fetch(hide_all_paragraphs(stylesheet)));
+        assert_eq!(app.tabs.tabs()[0].painted.len(), painted_rows);
+        assert_eq!(app.tabs.tabs()[0].scroll, scroll);
+        app.apply(Action::PrevTab);
+        assert_eq!(app.tabs.active().painted.len(), 0);
+        assert_eq!(app.tabs.active().scroll, 0);
     }
 
     #[test]

@@ -61,20 +61,39 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1-A — Parse pipeline | net + encoding + html5ever→arena DOM, `<base>`, scheme routing, tree-dump snapshot | (done — user smoke pending) |
 | M1-R — Stabilization | DOM invariants, fetch routing, resource limits, resize/scroll, terminal lifecycle, trustworthy gates | (complete) |
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
-| M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
+| M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (in progress — image/color audit regressions open) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content + markers done) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — table/generated-content audit regressions open) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **341 lib · 5 binary · 4 pipeline · 14 corpus ·
+Test counts at the last green run (2026-08-23): **343 lib · 5 binary · 4 pipeline · 14 corpus ·
 16 golden**.
-Cross-cutting: test infrastructure (done: contract suites, snapshots, proptest, fakes) · gates (done:
-local only, no CI) · coverage floor (open: optional local, 80% overall / 90% css·layout·paint) ·
-external conformance corpus (M1-A done at 95.16% raw / 100% with xfail; test262 at M5).
+Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
+contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
+floor (open: optional local, 80% overall / 90% css·layout·paint) ·
+external conformance corpus (M1-A tree output at 95.16% raw / 100% with xfail; test262 at M5).
+
+### Whole-crate audit risk register (2026-08-23)
+
+Confirmed regressions are acceptance items in their owning milestones above. The following static
+candidates were not promoted to confirmed bugs without an executable product reproduction:
+
+| Owner | Unconfirmed risk or test gap | Required disposition |
+|---|---|---|
+| M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
+| M1-D | Anonymous-table fixup may split consecutive invalid children into separate cells; `colgroup` constraints, inherited table properties, nested clipped-stroke edges and non-inherited background ownership on pseudo boxes lack adversarial coverage | Challenge each through the public render harness while closing the reopened table/generated-content items |
+| M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2 |
+| M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
+| M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row | Put explicit resource ceilings and sparse-vs-dense evidence behind the perf gate |
+| Test infrastructure | `tree_dump` is recursive on untrusted depth; UI clipping walks scalar values rather than grapheme clusters | Add bounded-depth and emoji/ZWJ cases; these do not currently establish a product crash |
+
+Two candidates were closed during the audit: normal-flow `white-space: nowrap` clips rather than
+wraps in the public dump harness, and `PageLoad`'s monotonic resource IDs mean the pool's silent
+duplicate policy has no demonstrated current data loss (the API/diagnostic gap remains in M2).
 
 ## Gates (local only — CI deliberately refused)
 
@@ -253,7 +272,7 @@ reviewed individually; all gates green.
 
 ## Open milestones
 
-### M1-B — Style, layout, paint (done — user smoke pending)
+### M1-B — Style, layout, paint (in progress — audit regressions open)
 
 Landed: cssparser 0.37 + selectors 0.40 adapters with specificity and structural matching; first
 `Cascade` (UA + embedded author + inline `style`, `!important`, source order); type-only `@media`
@@ -265,14 +284,18 @@ collapse, padding, one-cell borders, fixed widths and content-box/border-box; si
 
 Remaining:
 
-- [x] **Styled paint seam.** `ComputedStyle` gained `color`/`background`/bold/underline/strike/reverse
+- [ ] **Styled paint seam.** `ComputedStyle` gained `color`/`background`/bold/underline/strike/reverse
       (`Option<Rgb>`, `None` = theme); `InlinePiece`, `TextFragment` and `LayoutBox` carry the
       resolved `CellStyle` from the inline ancestor chain; `DisplayList` is styled spans + hit tags +
       link rects; paint order is backgrounds bottom-up → borders → clipped text; `legible_foreground`
       contrast-corrects author foregrounds against the effective background. *Proven by*
       `author_colors_weight_and_decoration_reach_the_computed_style`,
       `backgrounds_paint_under_text_in_depth_order`,
-      `unreadable_author_colours_are_corrected_towards_the_theme_text`. (done)
+      `unreadable_author_colours_are_corrected_towards_the_theme_text`. Audit reopened it:
+      `color: transparent` becomes `None`, which the UI renders as theme foreground, and every
+      nonzero alpha is discarded as if opaque. Preserve alpha through the style seam or composite
+      it against the effective background. *Proof required:* transparent text paints no visible
+      glyph and a semi-transparent foreground resolves against nested backgrounds. (in progress)
 - [x] **Dynamic pseudo-classes parse.** `DynamicPseudoClass` (`:link`, `:any-link`, `:visited`,
       `:hover`, `:focus`, `:active`, `:checked`, `:enabled`, `:disabled`) replaces the uninhabited
       enum and is evaluated against an injected `DynamicState`; `:link` uses `is_link()`, `:visited`
@@ -290,8 +313,11 @@ Remaining:
 - [x] **Pager keys.** PageUp/PageDown move a full page; Space/`b` page down/up in content focus;
       the M0 keymap test was extended, not replaced. *Proven by*
       `paging_keys_move_a_screen_at_a_time_not_a_line`. (done)
-- [x] **`<img>` and `<hr>`.** `<img>` renders `[alt]` (or `[img]`); `<hr>` fills the content width.
-      *Proven by* `images_render_their_alt_text_and_rules_span_the_content_width`. (done)
+- [ ] **`<img>` and `<hr>`.** `<img>` renders `[alt]` when nonempty, nothing for the deliberate
+      empty fallback `alt=""`, and `[img]` only when `alt` is absent; `<hr>` fills the content width.
+      The landed test covers nonempty and missing `alt`, but the audit reproduced `alt=""` as
+      `[img]`. *Proof required:* extend `images_render_their_alt_text_and_rules_span_the_content_width`
+      with all three states. (in progress)
 - [x] **`--dump`.** Non-interactive `fetch → parse → cascade → layout → paint → stdout` at `--cols`
       (default 80), no terminal; the shared render path moved into `app::render`, so the TUI and the
       dump cannot diverge. *Proven by* `dump_mode_prints_the_same_page_the_painter_produced`. (done)
@@ -302,10 +328,9 @@ Remaining:
       fixed point) are green beside the original two. (done)
 - Conformance note: css-syntax + WPT-selectors corpora are inherited from cssparser/selectors. No
   external corpus exists for terminal-grid layout; our gate stays corpus goldens + proptest laws.
-- **Acceptance:** every box above is checked with its proof green and all five gates pass
-  (281 lib · 4 binary · 3 pipeline · 14 corpus · 10 golden tests). Remaining for milestone close:
-  the human eyeball smoke in a real terminal — `--dump` already renders example.com, Wikipedia and
-  DuckDuckGo Lite over the real network without panicking.
+- **Acceptance:** every box above is checked with its proof green and all five gates pass. The
+  image-fallback and color-alpha regressions must close before the remaining human eyeball smoke in
+  a real terminal; the prior 281-lib/10-golden close count is historical, not current acceptance.
 
 ### M1-C — External stylesheets (done — user smoke pending)
 
@@ -336,16 +361,21 @@ both viewport dimensions without restoring the blank loading state.
       budget, and cascade results are identical to the naive path on the fixture corpus.
 - [x] **`@media` beyond type-only**: `scripting` (maps to the session JS flag),
       `prefers-color-scheme` (maps to the theme), `width`/`height` (map to the content viewport).
-- **Acceptance:** out-of-order, stale-generation, redirect/base, import-cycle, budget and
-  cascade-order fixtures green; bucketed and naive cascades agree; manual Wikipedia smoke renders
-  with external author styles.
+- [x] **Late-repaint scroll clamp.** `apply_rendered_page` clamps `Tab.scroll` after every rendered
+      display-list replacement, including immediate late CSS and deferred background-tab
+      activation. *Proven by* `late_stylesheet_repaint_clamps_active_tab_scroll` and
+      `late_stylesheet_repaint_clamps_on_background_tab_activation`. (done)
+- **Acceptance:** out-of-order, stale-generation, redirect/base, import-cycle, budget,
+  cascade-order and late-repaint clamp fixtures green; bucketed and naive cascades agree; manual
+  Wikipedia smoke renders with external author styles.
 
 ### M1-D — Layout completeness (in progress)
 
 Sequenced after M1-C and before M2: a terminal browser is judged on whether real pages are readable,
 and tables are what separate w3m from lynx. Flex/grid stay in M6.
 
-- [x] **Table layout** *(done)* — `display: table*` stops degrading to block. Normalize the
+- [ ] **Table layout** *(in progress — audit regressions open)* — `display: table*` stops degrading
+      to block. Normalize the
       styled box tree with CSS anonymous-table fixup, then use an in-house formatter beside Taffy's
       block geometry. Support auto and fixed column width resolution, `colspan`/`rowspan`, nested
       block and inline tables, top/bottom captions, separate and collapsed borders, per-edge border
@@ -356,10 +386,15 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       may grow the table without recursive percentage reevaluation. Resource limits degrade an
       oversized table to normal block flow while preserving its content. In-house per the audit
       above; Taffy's `item_is_table` is used at its block-layout boundary.
-      *Proof:* unit/contract tests for cascade, fixup, spans, width and border conflicts; property laws
-      for occupancy, glyph disjointness, hit boxes and width monotonicity; fixture goldens for simple,
-      spanned/collapsed, nested/captioned and fixed-overflow tables.
-- [x] **Generated content and markers** *(done)* — `::before`/`::after`/`::marker` parse and match,
+      The audit reproduced four contract failures: normal Latin words break at arbitrary graphemes
+      inside cells; `white-space: nowrap` preserves a source newline instead of collapsing it;
+      nested block/inline tables are emitted after all surrounding text (the accepted golden itself
+      shows `Before after` above the supposed inline table); and caption border/padding styles are
+      discarded. *Proof required:* focused regressions for shared line-break/white-space behavior,
+      DOM-order-preserving nested tables with true inline outer display, and styled caption boxes,
+      beside the existing occupancy, glyph, hit-box, width and fixture proofs.
+- [ ] **Generated content and markers** *(in progress — audit regressions open)* —
+      `::before`/`::after`/`::marker` parse and match,
       `content` supports strings, `counter()`, `counters()`, `attr()` and `none`/`normal`, CSS
       counters (`counter-reset`/`counter-increment`/`counter-set`) run over a depth-scoped stack,
       and `list-style-type`/`list-style-position`/`list-style` drive markers. `Display::ListItem`
@@ -371,22 +406,37 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       replaced by them. Headings lost their `#` prefixes and gained UA bold; UA bullets step
       disc→circle→square with nesting depth. Generated fragments carry the originating element's
       `NodeId`, so link rects, hit-testing and search keep working through them.
-      *Proven by* twelve cascade tests (independent nesting, sibling-scope isolation,
+      The audit found three cascade failures: authored `display: list-item` still passes the old
+      degradation test as `block`; a later CSS-wide `content: initial` or `counter-reset: initial`
+      does not clear the earlier side-table value; and `li::marker { content: normal }` suppresses
+      the default marker instead of deferring to `list-style-type`. *Proof required:* replace the
+      stale degradation assertion and add cascade/layout cases for CSS-wide side-table winners and
+      marker `normal`, in addition to the existing twelve cascade tests (independent nesting,
+      sibling-scope isolation,
       `counters()` joining, `display: none` suppression, invalid `content` dropping only its own
       declaration, `h1, .note::before` no longer losing the `h1` half, implicit-vs-authored counter
       merging), six layout tests (shared marker field, hanging indent, inside markers, suppressed
       markers, markers and generated content inside table cells, link rects spanning generated
       content) and the `lists`/`generated` fixture goldens.
+- [ ] **Outer/inner display modes.** `inline-block` is intentionally degraded to block and
+      `display: contents` is not parsed, so both force visible line breaks in simple dump fixtures.
+      Give `inline-block` an atomic inline box, remove the principal box for `contents` while
+      retaining semantics/inheritance, and cover misparented internal table roles with the required
+      anonymous wrappers. Flex/grid remain M6. *Proof:* inline sequence fixtures preserve source
+      order and text flow; anonymous table fixup follows the box-tree parent requirements.
 - [ ] **Length units and the cell metric** — `parse_length_token` ignores the unit and the axis, so
       `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell: `padding: 20px` eats a quarter of an
       80-column viewport and `width: 960px` builds a 960-cell box. `parse_media_length` has the
       matching flaw on the query side (`(min-width: 640px)` can never match, `40em` is
       `MediaQuery::Never`), so both must change together or responsive sites flip to a layout
       nobody chose. Adds a cell metric (~8px × ~16px), the absolute/relative unit table anchored to
-      a 16px root font size, axis-aware rounding, and MQ4 range syntax. Rewrites every fixture and
+      a 16px root font size, axis-aware rounding, and MQ4 range syntax. Intrinsic sizing must change
+      in both engines: block `min_content_width` and table `cell_metrics.minimum` currently return
+      the widest grapheme rather than the widest unbreakable segment. Rewrites every fixture and
       golden that currently writes `px` meaning cells. *Proof:* unit-conversion tests per unit and
-      axis; a responsive fixture picks the same breakpoint a browser would; existing goldens
-      re-baselined deliberately, not silently.
+      axis; block and table min-content cases use whole unbreakable words; a responsive fixture
+      picks the same breakpoint a browser would; existing goldens re-baselined deliberately, not
+      silently.
 - [ ] **Presentational HTML** — map `align`, `bgcolor`, `width`, `cellspacing`, `cellpadding`,
       `border`, `rules`, `frame`, `valign`/`vertical-align`, `<center>` and `<font color>` into the
       cascade at UA-origin specificity, plus `text-align` (left/right/center/justify→left).
@@ -430,8 +480,11 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       applies to fresh navigations.
 - [ ] **Render robustness** — cap DOM depth for layout (Taffy block layout recurses; a deeply nested
       hostile page can exhaust the stack) and replace the eight Taffy `expect()` calls in the render
-      path with a degraded box tree plus a status-bar message. *Proof:* a 100k-deep synthetic
-      document renders a truncation notice instead of aborting.
+      path with a degraded box tree plus a status-bar message. Treat fetch-pool disconnection as a
+      controlled error instead of `None`, make duplicate resource submission observable instead of
+      silently dropped, and ensure quit never waits on parked fetchers. *Proof:* a 100k-deep
+      synthetic document renders a truncation notice instead of aborting; worker failure, duplicate
+      scheduling and quit-under-stall have deterministic tests.
 - [x] **Designed start page** *(done)* — `about:blank` is a viewport-aware ANSI-style scene with an
       exact 78×18 default canvas. Unicode half blocks provide two independently colored vertical
       pixels per terminal cell for the TextSurfer logo, surfer, sun, beach and palm; repeated
@@ -445,7 +498,10 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       `resize_refits_the_start_page_to_the_content_viewport`. (done)
 - [ ] Basic forms: text/search/hidden/submit, textarea, select, checkbox, radio; GET and
       `application/x-www-form-urlencoded` POST via `url::form_urlencoded`; unsupported
-      methods/encodings render a controlled error. `:checked`/`:enabled`/`:disabled` become live.
+      methods/encodings render a controlled error. `:checked`/`:enabled`/`:disabled` become live and
+      host-language-correct: the current attribute-only matcher lets `<div checked>` match
+      `:checked` and hide from a dump fixture. Static initial state and user-toggled state share one
+      form model.
 - **Acceptance:** scripted-drive checklist of every keybinding incl. the rebinds; per-tab state
   isolation tests; chrome items (titles, error pages, start page, search, help overlay)
   snapshot-tested; the robustness and cache items proven by the tests named above; manual DuckDuckGo
@@ -459,6 +515,9 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
 - [ ] Menu-bar mouse: title clicks open/drive dropdowns, item clicks dispatch, hover tracking.
 - [ ] Link hover highlight (re-paint on hover-target change only) + status bar URL preview; `:hover`
       and `:focus` become live inputs to the dynamic-state evaluation added in M1-B.
+- [ ] Keep `:focus`, `:focus-visible` and `:focus-within` distinct. The parser currently maps all
+      three to the exact-focus state; ancestor propagation and the keyboard focus-indicator policy
+      need separate selector tests before focus styling becomes live.
 - [ ] Hit-test resolution contract: targets resolved by NodeId against the live document at dispatch.
 - [ ] Theme extension: hover/selected/search-match states with their own accents. Snapshot goldens.
 - **Acceptance:** scripted zone tests + goldens with hover states; manual mouse walkthrough.
@@ -467,7 +526,10 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
 
 - [ ] `JsEngine` + `js` feature wiring in the composition root; runtime `--js=off` wins over feature.
 - [ ] `MutateOp` funnel + invalidation-once rule; host subset: document, location, console→status
-      buffer, alert→dialog line; no dispatch except `onclick` handlers.
+      buffer, alert→dialog line; no dispatch except `onclick` handlers. Harden the DOM boundary at
+      this first non-html5ever caller: repeated template-content creation must not orphan the prior
+      fragment or overwrite its mapping, and mutation failures must not reach the existing panic
+      paths.
 - [ ] Noop contract suite covers the inert set; app behavior byte-identical compiled-off vs on-but-off.
 - **Acceptance:** `--js=off` and no-js builds pass identical integration suites.
 
@@ -490,7 +552,9 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       M1-B stays the fallback when no protocol is available.
 - [ ] **Perf gate**: largest corpus page layout+paint < 200 ms debug. Includes memoizing
       `format_inline`, which is currently recomputed on every Taffy measure call, again for intrinsic
-      width, and again when emitting fragments.
+      width, and again when emitting fragments; it also decides whether `DisplayList` can stay dense
+      by row, since the painter currently allocates one `PaintedRow` for the entire document height
+      even when most rows have no cells.
 - [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
       config file · `data:` URL scheme · optional Readability-style reader view.
 - Non-goals beyond this list stay non-goals.
@@ -509,8 +573,13 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
   overlap, and a wider table viewport never increases height. Property tests for
   `url_fix`/`EditBuffer` continue from M0.
 - FakeFetch + fake clock + fake Host; no test touches the network or the real clock.
-- `tests/common/` shared fakes; inline `#[cfg(test)]` fakes where module-local.
+- `tests/support/` shared corpus helpers; inline `#[cfg(test)]` fakes where module-local.
 - `--dump` (M1-B) is the scriptable end-to-end harness: fixture in, golden text out.
+- [ ] Corpus-harness audit follow-up: `DatCase.error_count` is parsed but never compared with
+      `ParseOutcome.parse_errors`, so the published 95.16% is tree-output conformance only; compare
+      error counts or explicitly justify the exclusion. The attribute-order test named for UTF-16
+      covers BMP names only while `tree_dump` uses Rust scalar-value sorting; add an astral-vs-BMP
+      case against the pinned reference serializer.
 
 ### External conformance corpus (M1-A / M5)
 
@@ -704,3 +773,30 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   fixtures and Wikipedia over the real network without a panic. The Wikipedia render also confirmed
   the length-unit defect from the audit above — `padding-left: 20px` indents twenty terminal cells —
   which is why that item is sequenced next.
+- 2026-08-23 — **Whole-crate audit closed; affected milestones reopened before more M1-D work.**
+  Every first-party Rust target, test/support helper, fixture, snapshot, manifest and user-facing
+  status claim was inspected; vendored corpus bytes and transitive source were intentionally
+  excluded. Baseline and all five local gates were green at `ba76d50`; no source, dependency,
+  snapshot or generated-corpus change was made. Local `--dump` fixtures, existing tests/goldens and
+  a public-API harness confirmed the findings now written into their owning tasks:
+  - M1-B: empty `alt=""` renders `[img]`; transparent foreground falls back to visible theme text
+    and partial alpha is discarded. M1-C: a late stylesheet can shrink a 100-row page to zero while
+    leaving scroll at 98. M1-D tables: Latin words split mid-word, `nowrap` preserves newlines,
+    nested/inline tables lose source order and inline placement, and caption box styles disappear.
+  - M1-D generated/display: the green degradation test still maps authored `list-item` to block;
+    CSS-wide `content`/counter winners do not clear earlier side-table values; marker `normal`
+    suppresses defaults; `inline-block` degrades to block and `display: contents` is unsupported.
+  - M2/M3 follow-ups: an arbitrary `<div checked>` matches `:checked`; `:focus-visible` and
+    `:focus-within` are conflated with exact focus. Cross-cutting harness gaps: corpus error counts
+    are parsed but ignored, and UTF-16 attribute ordering lacks an astral test.
+  - Static risks were assigned without overstating them as product reproductions: duplicate pool
+    submissions are silently dropped, repeated template-content creation can orphan the old
+    fragment, and painter rows are dense across document height. The current ureq 3.4.0 docs still
+    confirm default 4xx/5xx-as-error behavior, so M2's existing keep-the-404-body task remains the
+    correct owner. CSS/HTML expectations were checked against the latest published W3C/WHATWG
+    Display, Tables, Text, Lists, Generated Content, Color, Selectors and `img` requirements.
+- 2026-08-23 — **M1-C late-repaint scroll clamping restored.** Every `RenderedPage` application now
+  clamps the tab scroll against the current content rows. Controller regressions reproduce the old
+  `scroll=98`-against-zero failure for both an active late stylesheet and a stylesheet delivered to
+  a background tab before activation. All five local gates are green at 343 library tests; M1-C is
+  done again with only the human terminal smoke pending.
