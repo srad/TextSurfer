@@ -59,7 +59,9 @@ fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
         reverse,
     } = span.style;
     let mut style = Style::default()
-        .fg(fg.map_or(theme.text, |color| Color::Rgb(color.r, color.g, color.b)))
+        .fg(fg.map_or(theme.text, |color| {
+            Color::Rgb(color.rgb.r, color.rgb.g, color.rgb.b)
+        }))
         .bg(bg.map_or(theme.bg, |color| Color::Rgb(color.r, color.g, color.b)));
     if bold {
         style = style.add_modifier(Modifier::BOLD);
@@ -136,7 +138,7 @@ mod tests {
                 col: 0,
                 text: "link".to_string(),
                 style: CellStyle {
-                    fg: Some(Rgb::new(255, 255, 0)),
+                    fg: Some(Rgb::new(255, 255, 0).into()),
                     underline: true,
                     ..Default::default()
                 },

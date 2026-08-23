@@ -230,6 +230,35 @@ impl Rgb {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Rgba {
+    pub rgb: Rgb,
+    pub alpha: u8,
+}
+
+impl Rgba {
+    pub const fn new(r: u8, g: u8, b: u8, alpha: u8) -> Self {
+        Self {
+            rgb: Rgb::new(r, g, b),
+            alpha,
+        }
+    }
+
+    pub const fn opaque(rgb: Rgb) -> Self {
+        Self { rgb, alpha: 255 }
+    }
+
+    pub fn composite_over(self, background: Rgb) -> Rgb {
+        background.blend(self.rgb, f32::from(self.alpha) / 255.0)
+    }
+}
+
+impl From<Rgb> for Rgba {
+    fn from(value: Rgb) -> Self {
+        Self::opaque(value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     pub text: Rgb,
@@ -253,7 +282,7 @@ impl Default for Palette {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CellStyle {
-    pub fg: Option<Rgb>,
+    pub fg: Option<Rgba>,
     pub bg: Option<Rgb>,
     pub bold: bool,
     pub underline: bool,
@@ -414,7 +443,7 @@ pub struct ComputedStyle {
     pub caption_side: CaptionSide,
     pub list_style_type: ListStyleType,
     pub list_style_position: ListStylePosition,
-    pub color: Option<Rgb>,
+    pub color: Option<Rgba>,
     pub background: Option<Rgb>,
     pub bold: bool,
     pub underline: bool,
@@ -510,13 +539,13 @@ mod tests {
     #[test]
     fn cell_style_projects_the_visual_half_of_a_computed_style() {
         let style = ComputedStyle {
-            color: Some(Rgb::WHITE),
+            color: Some(Rgba::opaque(Rgb::WHITE)),
             bold: true,
             underline: true,
             ..Default::default()
         };
         let cell = style.cell_style();
-        assert_eq!(cell.fg, Some(Rgb::WHITE));
+        assert_eq!(cell.fg, Some(Rgba::opaque(Rgb::WHITE)));
         assert_eq!(cell.bg, None);
         assert!(cell.bold && cell.underline && !cell.strike && !cell.reverse);
     }

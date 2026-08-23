@@ -200,7 +200,7 @@ fn painted_row(top: &[u8], bottom: &[u8], glyphs: &[Option<WaveGlyph>]) -> Paint
             ),
         };
         let style = CellStyle {
-            fg: Some(foreground),
+            fg: Some(foreground.into()),
             bg: Some(background),
             ..Default::default()
         };
@@ -299,7 +299,7 @@ mod tests {
         assert!(
             styles
                 .iter()
-                .any(|style| style.fg == Some(Rgb::new(255, 255, 85)))
+                .any(|style| style.fg == Some(Rgb::new(255, 255, 85).into()))
         );
         assert!(
             styles

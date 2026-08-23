@@ -4,7 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::NodeId;
-use crate::core::style::{BorderColor, BorderSide, CellStyle, Palette, Rgb};
+use crate::core::style::{BorderColor, BorderSide, CellStyle, Palette, Rgb, Rgba};
 use crate::layout::{BoxTree, LayoutRect};
 
 const MIN_CONTRAST: f32 = 3.0;
@@ -242,25 +242,36 @@ impl RowBuffer {
             if cell.is_empty() {
                 continue;
             }
+            let mut text = cell.clone();
             let mut style = self.styles[index];
             if let Some(foreground) = style.fg {
-                style.fg = Some(legible_foreground(
-                    foreground,
-                    style.bg.unwrap_or(palette.background),
-                    palette,
-                ));
+                let background = style.bg.unwrap_or(palette.background);
+                if foreground.alpha == 0 {
+                    text = " ".repeat(UnicodeWidthStr::width(text.as_str()));
+                    style.fg = None;
+                    style.bold = false;
+                    style.underline = false;
+                    style.strike = false;
+                    style.reverse = false;
+                } else {
+                    style.fg = Some(Rgba::opaque(legible_foreground(
+                        foreground.composite_over(background),
+                        background,
+                        palette,
+                    )));
+                }
             }
-            let blank = cell == " " && style == CellStyle::default();
+            let blank = text.chars().all(char::is_whitespace) && style == CellStyle::default();
             match spans.last_mut() {
                 Some(span)
                     if span.style == style
                         && span.col + UnicodeWidthStr::width(span.text.as_str()) == index =>
                 {
-                    span.text.push_str(cell);
+                    span.text.push_str(&text);
                 }
                 _ => spans.push(PaintedSpan {
                     col: index,
-                    text: cell.clone(),
+                    text,
                     style,
                 }),
             }
@@ -429,7 +440,7 @@ fn place_stroke(
     style.fg = match side.color {
         BorderColor::CurrentColor => stroke.style.fg,
         BorderColor::Transparent => None,
-        BorderColor::Rgb(color) => Some(color),
+        BorderColor::Rgb(color) => Some(Rgba::opaque(color)),
     };
     match cells.get_mut(&(row, col)) {
         Some(cell) if cell.group == stroke.merge_group => {
@@ -756,7 +767,7 @@ mod tests {
                 text: "hi".to_string(),
                 depth: 1,
                 style: CellStyle {
-                    fg: Some(Rgb::WHITE),
+                    fg: Some(Rgba::opaque(Rgb::WHITE)),
                     ..Default::default()
                 },
             }],
@@ -771,7 +782,143 @@ mod tests {
             Some(Rgb::new(20, 20, 20)),
             "the deeper background wins under the text"
         );
-        assert_eq!(spans[1].style.fg, Some(Rgb::WHITE));
+        assert_eq!(spans[1].style.fg, Some(Rgba::opaque(Rgb::WHITE)));
+    }
+
+    #[test]
+    fn partial_foreground_alpha_resolves_against_the_deepest_background() {
+        let mut document = Document::new();
+        let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+        let inner = document.insert_element(Some(outer), "span", ElementNs::Html, vec![]);
+        let outer_rect = LayoutRect {
+            col: 0,
+            row: 0,
+            width: 8,
+            height: 1,
+        };
+        let inner_rect = LayoutRect {
+            col: 1,
+            row: 0,
+            width: 6,
+            height: 1,
+        };
+        let tree = BoxTree {
+            width: 8,
+            height: 1,
+            fills: vec![
+                BackgroundFill {
+                    rect: outer_rect,
+                    color: Rgb::new(0, 0, 128),
+                    depth: 0,
+                },
+                BackgroundFill {
+                    rect: inner_rect,
+                    color: Rgb::BLACK,
+                    depth: 1,
+                },
+            ],
+            fragments: vec![TextFragment {
+                node: inner,
+                col: 2,
+                row: 0,
+                text: "half".to_string(),
+                depth: 1,
+                style: CellStyle {
+                    fg: Some(Rgba::new(255, 255, 255, 128)),
+                    ..Default::default()
+                },
+            }],
+            ..Default::default()
+        };
+        let display = painted(&tree);
+        let span = display.rows[0]
+            .spans
+            .iter()
+            .find(|span| span.text == "half")
+            .expect("the alpha-coloured text is painted");
+        assert_eq!(span.style.bg, Some(Rgb::BLACK));
+        assert_eq!(span.style.fg, Some(Rgba::new(128, 128, 128, 255)));
+        assert!(display.rows.iter().flat_map(|row| &row.spans).all(|span| {
+            span.style
+                .fg
+                .is_none_or(|foreground| foreground.alpha == 255)
+        }));
+    }
+
+    #[test]
+    fn transparent_text_loses_ink_but_keeps_layout_and_interaction_geometry() {
+        let mut document = Document::new();
+        let hidden = document.insert_element(None, "a", ElementNs::Html, vec![]);
+        let visible = document.insert_element(None, "span", ElementNs::Html, vec![]);
+        let hidden_rect = LayoutRect {
+            col: 0,
+            row: 0,
+            width: 6,
+            height: 1,
+        };
+        let visible_rect = LayoutRect {
+            col: 6,
+            row: 0,
+            width: 5,
+            height: 1,
+        };
+        let tree = BoxTree {
+            width: 11,
+            height: 1,
+            boxes: vec![
+                plain_box(hidden, hidden_rect, 0),
+                plain_box(visible, visible_rect, 0),
+            ],
+            fragments: vec![
+                TextFragment {
+                    node: hidden,
+                    col: 0,
+                    row: 0,
+                    text: "secret".to_string(),
+                    depth: 0,
+                    style: CellStyle {
+                        fg: Some(Rgba::new(255, 255, 255, 0)),
+                        bold: true,
+                        underline: true,
+                        strike: true,
+                        reverse: true,
+                        ..Default::default()
+                    },
+                },
+                TextFragment {
+                    node: visible,
+                    col: 6,
+                    row: 0,
+                    text: "after".to_string(),
+                    depth: 0,
+                    style: CellStyle {
+                        fg: Some(Rgba::opaque(Rgb::WHITE)),
+                        ..Default::default()
+                    },
+                },
+            ],
+            links: vec![crate::layout::LinkBox {
+                node: hidden,
+                href: "https://example.com/".to_string(),
+                rects: vec![hidden_rect],
+            }],
+            ..Default::default()
+        };
+        let display = painted(&tree);
+        assert_eq!(display.text_lines()[0], "      after");
+        assert_eq!(display.hit_test(2, 0), Some(hidden));
+        assert_eq!(
+            display.link_at(2, 0).map(|link| link.href.as_str()),
+            Some("https://example.com/")
+        );
+        assert!(display.rows[0].spans.iter().all(|span| {
+            span.text != "secret"
+                && (!span.text.chars().all(char::is_whitespace)
+                    || (!span.style.bold
+                        && !span.style.underline
+                        && !span.style.strike
+                        && !span.style.reverse))
+        }));
     }
 
     #[test]

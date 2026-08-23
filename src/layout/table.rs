@@ -1024,19 +1024,13 @@ impl<'a> TableFormatter<'a> {
                         push_break(&mut runs, node, style.cell_style());
                         continue;
                     }
-                    if *ns == ElementNs::Html && name == "img" {
-                        let alt = attrs
-                            .iter()
-                            .find(|attr| attr.ns == AttrNs::None && attr.name == "alt")
-                            .map(|attr| attr.value.trim())
-                            .unwrap_or_default();
+                    if *ns == ElementNs::Html
+                        && name == "img"
+                        && let Some(text) = super::image_fallback(attrs)
+                    {
                         runs.push(RawRun {
                             node,
-                            text: if alt.is_empty() {
-                                "[img]".to_string()
-                            } else {
-                                format!("[{alt}]")
-                            },
+                            text,
                             white_space: style.white_space,
                             style: style.cell_style(),
                             forced: false,
@@ -1768,6 +1762,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn image_alt_fallbacks_match_inside_table_cells() {
+        let output = formatted(
+            "<table id=table><tr><td>A<img alt=''>B<img alt='   '>C<img alt='cat'><img></td></tr></table>",
+            40,
+        );
+        let mut fragments: Vec<_> = output.fragments.iter().collect();
+        fragments.sort_by_key(|fragment| (fragment.row, fragment.col));
+        let text = fragments
+            .into_iter()
+            .map(|fragment| fragment.text.as_str())
+            .collect::<String>();
+        assert_eq!(text, "ABC[cat][img]");
     }
 
     #[test]

@@ -10,8 +10,8 @@ use crate::core::geom::Size;
 use crate::core::style::{
     BorderCollapse, BorderColor, BorderEdges, BorderLineStyle, BorderSide, BorderSpacing,
     BoxSizing, CaptionSide, ComputedStyle, CssPercentage, CssWidth, Display, EdgeSizes,
-    ListStylePosition, ListStyleType, Marker, Palette, PseudoBox, PseudoElement, Rgb, StyleTree,
-    TableLayoutMode, WhiteSpace,
+    ListStylePosition, ListStyleType, Marker, Palette, PseudoBox, PseudoElement, Rgb, Rgba,
+    StyleTree, TableLayoutMode, WhiteSpace,
 };
 use crate::css::parser::{
     ColorScheme, CssRule, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
@@ -1115,7 +1115,7 @@ fn ua_style(
             .iter()
             .any(|attr| attr.ns == AttrNs::None && attr.name == "href")
     {
-        style.color = Some(palette.link);
+        style.color = Some(Rgba::opaque(palette.link));
         style.underline = true;
     }
     if matches!(name.as_str(), "b" | "strong" | "th") {
@@ -1280,11 +1280,11 @@ fn apply_declaration(
         "border-left" => assign_border_side(&mut style.border.left, &declaration.value),
         "color" => {
             if let Some(color) = parse_color(&declaration.value) {
-                style.color = color;
+                style.color = Some(color);
             }
         }
         "background-color" | "background" => {
-            if let Some(color) = parse_color(&declaration.value) {
+            if let Some(color) = parse_background_color(&declaration.value) {
                 style.background = color;
             }
         }
@@ -1452,33 +1452,45 @@ fn is_inherited(property: &str) -> bool {
     )
 }
 
-fn parse_color(source: &str) -> Option<Option<Rgb>> {
-    if parse_ident(source).as_deref() == Some("transparent") {
-        return Some(None);
-    }
+fn parse_color(source: &str) -> Option<Rgba> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let color = CssColor::parse(&mut parser).ok()?;
     parser.expect_exhausted().ok()?;
-    css_color_to_rgb(color).map(Some)
+    css_color_to_rgba(color)
+}
+
+fn parse_background_color(source: &str) -> Option<Option<Rgb>> {
+    let color = parse_color(source)?;
+    Some((color.alpha > 0).then_some(color.rgb))
+}
+
+fn css_color_to_rgba(color: CssColor) -> Option<Rgba> {
+    let ((r, g, b), alpha) = match color {
+        CssColor::Rgba(rgba) => ((rgba.red, rgba.green, rgba.blue), rgba.alpha),
+        CssColor::Hsl(hsl) => (
+            float_rgb(hsl_to_rgb(
+                hsl.hue.unwrap_or_default() / 360.0,
+                hsl.saturation.unwrap_or_default(),
+                hsl.lightness.unwrap_or_default(),
+            )),
+            hsl.alpha.unwrap_or(1.0),
+        ),
+        CssColor::Hwb(hwb) => (
+            float_rgb(hwb_to_rgb(
+                hwb.hue.unwrap_or_default() / 360.0,
+                hwb.whiteness.unwrap_or_default(),
+                hwb.blackness.unwrap_or_default(),
+            )),
+            hwb.alpha.unwrap_or(1.0),
+        ),
+        _ => return None,
+    };
+    Some(Rgba::new(r, g, b, clamp_unit_f32(alpha)))
 }
 
 fn css_color_to_rgb(color: CssColor) -> Option<Rgb> {
-    let (r, g, b) = match color {
-        CssColor::Rgba(rgba) => (rgba.red, rgba.green, rgba.blue),
-        CssColor::Hsl(hsl) => float_rgb(hsl_to_rgb(
-            hsl.hue.unwrap_or_default() / 360.0,
-            hsl.saturation.unwrap_or_default(),
-            hsl.lightness.unwrap_or_default(),
-        )),
-        CssColor::Hwb(hwb) => float_rgb(hwb_to_rgb(
-            hwb.hue.unwrap_or_default() / 360.0,
-            hwb.whiteness.unwrap_or_default(),
-            hwb.blackness.unwrap_or_default(),
-        )),
-        _ => return None,
-    };
-    Some(Rgb::new(r, g, b))
+    css_color_to_rgba(color).map(|color| color.rgb)
 }
 
 fn float_rgb(components: (f32, f32, f32)) -> (u8, u8, u8) {
@@ -1936,10 +1948,56 @@ mod tests {
         );
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         let paragraph = styles.get(p);
-        assert_eq!(paragraph.color, Some(Rgb::new(255, 0, 0)));
+        assert_eq!(paragraph.color, Some(Rgba::new(255, 0, 0, 255)));
         assert_eq!(paragraph.background, Some(Rgb::new(0, 128, 0)));
         assert!(paragraph.bold && paragraph.underline && paragraph.strike);
-        assert_eq!(styles.get(em).color, Some(Rgb::new(0, 0, 255)));
+        assert_eq!(styles.get(em).color, Some(Rgba::new(0, 0, 255, 255)));
+    }
+
+    #[test]
+    fn foreground_alpha_survives_supported_color_forms_and_inheritance() {
+        let mut document = Document::new();
+        let parent = document.insert_element(
+            None,
+            "div",
+            ElementNs::Html,
+            vec![Attr::plain("style", "color: rgba(255, 255, 255, 0.5)")],
+        );
+        let inherited = document.insert_element(Some(parent), "span", ElementNs::Html, vec![]);
+        let hsl = document.insert_element(
+            Some(parent),
+            "span",
+            ElementNs::Html,
+            vec![Attr::plain("style", "color: hsla(0, 100%, 50%, 0.25)")],
+        );
+        let hwb = document.insert_element(
+            Some(parent),
+            "span",
+            ElementNs::Html,
+            vec![Attr::plain("style", "color: hwb(120 0% 0% / 75%)")],
+        );
+        let transparent = document.insert_element(
+            Some(parent),
+            "span",
+            ElementNs::Html,
+            vec![Attr::plain("style", "color: transparent")],
+        );
+        let initial = document.insert_element(
+            Some(parent),
+            "span",
+            ElementNs::Html,
+            vec![Attr::plain("style", "color: initial")],
+        );
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        assert_eq!(
+            styles.get(parent).color,
+            Some(Rgba::new(255, 255, 255, 128))
+        );
+        assert_eq!(styles.get(inherited).color, styles.get(parent).color);
+        assert_eq!(styles.get(hsl).color, Some(Rgba::new(255, 0, 0, 64)));
+        assert_eq!(styles.get(hwb).color, Some(Rgba::new(0, 255, 0, 191)));
+        assert_eq!(styles.get(transparent).color, Some(Rgba::new(0, 0, 0, 0)));
+        assert_eq!(styles.get(initial).color, None);
     }
 
     #[test]
@@ -1960,7 +2018,7 @@ mod tests {
             "p { color: #00ff00 } span { color: oklch(0.5 0.1 200); background: not-a-color }",
         );
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-        assert_eq!(styles.get(span).color, Some(Rgb::new(0, 255, 0)));
+        assert_eq!(styles.get(span).color, Some(Rgba::new(0, 255, 0, 255)));
         assert_eq!(styles.get(span).background, None);
     }
 
@@ -1971,7 +2029,7 @@ mod tests {
         let p = document.insert_element(Some(div), "p", ElementNs::Html, vec![]);
         let sheet = CssparserParser.parse("div { color: #123456; background-color: #654321 }");
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-        assert_eq!(styles.get(p).color, Some(Rgb::new(0x12, 0x34, 0x56)));
+        assert_eq!(styles.get(p).color, Some(Rgba::new(0x12, 0x34, 0x56, 255)));
         assert_eq!(styles.get(p).background, None);
     }
 
@@ -1994,7 +2052,7 @@ mod tests {
         };
         let styles =
             BasicCascade.apply(&[], &document, MediaContext::screen().with_palette(palette));
-        assert_eq!(styles.get(link).color, Some(Rgb::new(255, 255, 0)));
+        assert_eq!(styles.get(link).color, Some(Rgba::new(255, 255, 0, 255)));
         assert!(styles.get(link).underline);
         assert_eq!(
             styles.get(anchor).color,
@@ -2020,7 +2078,7 @@ mod tests {
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         assert_eq!(
             styles.get(link).color,
-            Some(Rgb::new(0, 255, 0)),
+            Some(Rgba::new(0, 255, 0, 255)),
             "a:link must beat the UA link colour by source order"
         );
     }
@@ -2400,7 +2458,7 @@ mod tests {
         let heading = order
             .iter()
             .copied()
-            .find(|id| styles.get(*id).color == Some(Rgb::new(255, 0, 0)));
+            .find(|id| styles.get(*id).color == Some(Rgba::new(255, 0, 0, 255)));
         assert!(heading.is_some(), "the h1 half of the list still matches");
     }
 
@@ -2413,7 +2471,7 @@ mod tests {
             .iter()
             .find_map(|id| styles.pseudo(*id, PseudoElement::Before))
             .expect("generated content");
-        assert_eq!(pseudo.style.color, Some(Rgb::new(0, 255, 0)));
+        assert_eq!(pseudo.style.color, Some(Rgba::new(0, 255, 0, 255)));
     }
 
     #[test]

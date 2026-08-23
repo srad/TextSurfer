@@ -61,7 +61,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1-A — Parse pipeline | net + encoding + html5ever→arena DOM, `<base>`, scheme routing, tree-dump snapshot | (done — user smoke pending) |
 | M1-R — Stabilization | DOM invariants, fetch routing, resource limits, resize/scroll, terminal lifecycle, trustworthy gates | (complete) |
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
-| M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (in progress — image/color audit regressions open) |
+| M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
 | M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — table/generated-content audit regressions open) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
@@ -70,8 +70,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **343 lib · 5 binary · 4 pipeline · 14 corpus ·
-16 golden**.
+Test counts at the last green run (2026-08-23): **347 lib · 5 binary · 4 pipeline · 14 corpus ·
+17 golden**.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -185,10 +185,12 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 - **UA stylesheet is hardcoded Rust** in `css/cascade.rs::ua_style`, not CSS text. The earlier
   "ships as CSS text in `css/ua.rs`" entry described a file that never existed; corrected 2026-08-22.
   Revisit only if the UA sheet grows past what a typed function expresses clearly.
-- **Colour model**: `ComputedStyle` colours are `Option<Rgb>`; `None` means "the theme decides", so
-  the Norton palette stays the default field and author colours override only where declared.
-  Author foregrounds are **contrast-corrected** against the effective background (chawan's rule) —
-  faithfulness never outranks legibility.
+- **Colour model**: `ComputedStyle::color` is `Option<Rgba>` with byte alpha while background and
+  border colours stay `Option<Rgb>`/`BorderColor`; `None` means "the theme decides", so the Norton
+  palette stays the default field and author colours override only where declared. The painter
+  composites partial foreground alpha against the effective cell background, suppresses fully
+  transparent glyphs without changing their geometry, then **contrast-corrects** the resolved
+  foreground (chawan's rule) — faithfulness never outranks legibility.
 - **Borders are binary**: any non-zero border width paints one box-drawing frame. Replaces the
   earlier "borders ≥2 cells doubled" phrasing, which nothing implemented and which contradicts the
   prior-art model.
@@ -272,7 +274,7 @@ reviewed individually; all gates green.
 
 ## Open milestones
 
-### M1-B — Style, layout, paint (in progress — audit regressions open)
+### M1-B — Style, layout, paint (done — user smoke pending)
 
 Landed: cssparser 0.37 + selectors 0.40 adapters with specificity and structural matching; first
 `Cascade` (UA + embedded author + inline `style`, `!important`, source order); type-only `@media`
@@ -282,20 +284,24 @@ position→static, percentage heights→auto); Taffy 0.13 block geometry with an
 collapse, padding, one-cell borders, fixed widths and content-box/border-box; six inheriting
 `white-space` modes over node-owned textwrap fragments; sparse paint with border glyphs.
 
-Remaining:
+Items:
 
-- [ ] **Styled paint seam.** `ComputedStyle` gained `color`/`background`/bold/underline/strike/reverse
-      (`Option<Rgb>`, `None` = theme); `InlinePiece`, `TextFragment` and `LayoutBox` carry the
+- [x] **Styled paint seam.** `ComputedStyle` gained `color`/`background`/bold/underline/strike/reverse
+      (`color: Option<Rgba>`, `background: Option<Rgb>`, `None` = theme); `InlinePiece`,
+      `TextFragment` and `LayoutBox` carry the
       resolved `CellStyle` from the inline ancestor chain; `DisplayList` is styled spans + hit tags +
       link rects; paint order is backgrounds bottom-up → borders → clipped text; `legible_foreground`
       contrast-corrects author foregrounds against the effective background. *Proven by*
       `author_colors_weight_and_decoration_reach_the_computed_style`,
       `backgrounds_paint_under_text_in_depth_order`,
-      `unreadable_author_colours_are_corrected_towards_the_theme_text`. Audit reopened it:
-      `color: transparent` becomes `None`, which the UI renders as theme foreground, and every
-      nonzero alpha is discarded as if opaque. Preserve alpha through the style seam or composite
-      it against the effective background. *Proof required:* transparent text paints no visible
-      glyph and a semi-transparent foreground resolves against nested backgrounds. (in progress)
+      `unreadable_author_colours_are_corrected_towards_the_theme_text`. The audit repair retains byte
+      alpha through the style seam; at paint time, transparent text becomes same-width blank cells
+      and partial alpha composites against the deepest painted background before contrast
+      correction. Geometry, hit regions and link rectangles do not change. *Proven by*
+      `foreground_alpha_survives_supported_color_forms_and_inheritance`,
+      `partial_foreground_alpha_resolves_against_the_deepest_background`,
+      `transparent_text_loses_ink_but_keeps_layout_and_interaction_geometry` and
+      `foreground_alpha_survives_the_complete_render_path`. (done)
 - [x] **Dynamic pseudo-classes parse.** `DynamicPseudoClass` (`:link`, `:any-link`, `:visited`,
       `:hover`, `:focus`, `:active`, `:checked`, `:enabled`, `:disabled`) replaces the uninhabited
       enum and is evaluated against an injected `DynamicState`; `:link` uses `is_link()`, `:visited`
@@ -313,11 +319,11 @@ Remaining:
 - [x] **Pager keys.** PageUp/PageDown move a full page; Space/`b` page down/up in content focus;
       the M0 keymap test was extended, not replaced. *Proven by*
       `paging_keys_move_a_screen_at_a_time_not_a_line`. (done)
-- [ ] **`<img>` and `<hr>`.** `<img>` renders `[alt]` when nonempty, nothing for the deliberate
-      empty fallback `alt=""`, and `[img]` only when `alt` is absent; `<hr>` fills the content width.
-      The landed test covers nonempty and missing `alt`, but the audit reproduced `alt=""` as
-      `[img]`. *Proof required:* extend `images_render_their_alt_text_and_rules_span_the_content_width`
-      with all three states. (in progress)
+- [x] **`<img>` and `<hr>`.** `<img>` renders `[alt]` when nonempty, nothing for the deliberate
+      empty or whitespace-only fallback, and `[img]` only when `alt` is absent; `<hr>` fills the
+      content width. One layout-private resolver is shared by normal flow and table cells. *Proven
+      by* `images_render_their_alt_text_and_rules_span_the_content_width` and
+      `image_alt_fallbacks_match_inside_table_cells`. (done)
 - [x] **`--dump`.** Non-interactive `fetch → parse → cascade → layout → paint → stdout` at `--cols`
       (default 80), no terminal; the shared render path moved into `app::render`, so the TUI and the
       dump cannot diverge. *Proven by* `dump_mode_prints_the_same_page_the_painter_produced`. (done)
@@ -328,9 +334,9 @@ Remaining:
       fixed point) are green beside the original two. (done)
 - Conformance note: css-syntax + WPT-selectors corpora are inherited from cssparser/selectors. No
   external corpus exists for terminal-grid layout; our gate stays corpus goldens + proptest laws.
-- **Acceptance:** every box above is checked with its proof green and all five gates pass. The
-  image-fallback and color-alpha regressions must close before the remaining human eyeball smoke in
-  a real terminal; the prior 281-lib/10-golden close count is historical, not current acceptance.
+- **Acceptance:** every box above is checked with its proof green and all five gates pass at 347
+  library and 17 render-golden tests. The remaining human eyeball smoke in a real terminal is
+  pending; the prior 281-lib/10-golden close count is historical.
 
 ### M1-C — External stylesheets (done — user smoke pending)
 
@@ -800,3 +806,15 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   `scroll=98`-against-zero failure for both an active late stylesheet and a stylesheet delivered to
   a background tab before activation. All five local gates are green at 343 library tests; M1-C is
   done again with only the human terminal smoke pending.
+- 2026-08-23 — **M1-B audit repair started.** The foreground colour contract now retains byte alpha
+  from cssparser-color 0.5.0 through cascade and layout, resolves it against the effective painted
+  background, and suppresses transparent ink without changing layout or interaction geometry.
+  Background and border alpha keep their existing terminal degradation; the separate image repair
+  centralizes nonempty, empty and missing `alt` behavior across normal and table layout.
+- 2026-08-23 — **M1-B audit regressions closed.** No dependency changed: cssparser-color 0.5.0
+  remains current. RGBA/HSL/HWB foreground alpha survives cascade and inheritance, transparent ink
+  becomes same-width blank cells while link/hit geometry remains live, and partial foregrounds
+  composite over the deepest background before contrast correction. Normal and table layout now
+  share the nonempty/empty/missing image fallback. All five local gates are green at 347 library ·
+  5 binary · 4 pipeline · 14 corpus · 17 render-golden tests; M1-B is done again with only the human
+  terminal smoke pending.

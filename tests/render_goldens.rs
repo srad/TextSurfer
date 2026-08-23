@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use textsurfer::app::render::render_html;
-use textsurfer::core::style::{Palette, Rgb};
+use textsurfer::core::style::{Palette, Rgb, Rgba};
 use textsurfer::paint::DisplayList;
 
 const WIDTH: usize = 40;
@@ -142,7 +142,11 @@ fn link_styling_and_geometry_survive_into_the_display_list() {
         .iter()
         .find(|span| span.col == rect.col)
         .expect("a span starts where the link starts");
-    assert_eq!(styled.style.fg, Some(accent), "UA link colour is painted");
+    assert_eq!(
+        styled.style.fg,
+        Some(accent.into()),
+        "UA link colour is painted"
+    );
     assert!(styled.style.underline);
 }
 
@@ -179,7 +183,39 @@ fn unreadable_author_colours_are_corrected_before_painting() {
         .expect("the dark paragraph is painted");
     let foreground = dark.style.fg.expect("author colour applied");
     assert!(
-        foreground.contrast_ratio(palette().background) >= 3.0,
+        foreground.rgb.contrast_ratio(palette().background) >= 3.0,
         "author colour {foreground:?} must be corrected against the field"
     );
+}
+
+#[test]
+fn foreground_alpha_survives_the_complete_render_path() {
+    let painted = render_html(
+        "<div style='background:#000080'><p style='margin:0;background:#000'>
+           <span style='color:rgba(255,255,255,0.5)'>half</span><a href='https://example.com/'
+           style='color:transparent'>secret</a><span>after</span></p></div>",
+        textsurfer::core::geom::Size { cols: 30, rows: 4 },
+        palette(),
+        false,
+    )
+    .painted;
+    let line = painted.text_lines().join("\n");
+    assert!(line.contains("half"));
+    assert!(line.contains("after"));
+    assert!(!line.contains("secret"));
+    let half = painted
+        .rows
+        .iter()
+        .flat_map(|row| row.spans.iter())
+        .find(|span| span.text == "half")
+        .expect("partial foreground reaches the display list");
+    assert_eq!(half.style.bg, Some(Rgb::BLACK));
+    assert_eq!(half.style.fg, Some(Rgba::new(128, 128, 128, 255)));
+    let link = painted.links.first().expect("the transparent link remains");
+    let rect = link
+        .rects
+        .first()
+        .expect("the transparent link has geometry");
+    assert_eq!(rect.width, 6);
+    assert_eq!(painted.link_at(rect.col + 2, rect.row), Some(link));
 }

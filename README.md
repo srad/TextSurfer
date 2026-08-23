@@ -36,9 +36,9 @@ Ready                              https://example.com
 
 ## Features
 
-**Current (M0, M1-R and M1.5 complete; M1-A done; M1-B implementation landed with audit
-regressions open; M1-C done, awaiting the human terminal smoke; M1-D in progress with table and
-generated-content regressions open)**
+**Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
+M1-C done, awaiting the human terminal smoke; M1-D in progress with table and generated-content
+regressions open)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -75,8 +75,11 @@ generated-content regressions open)**
 - Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
   the terminal as coloured, bold, underlined and struck spans — with a contrast pass that keeps
   unreadable author colours legible over the theme's field — plus link and hit geometry carried
-  through the display list for keyboard and mouse targeting. Transparent and partial-alpha
-  foreground handling is a tracked audit regression
+  through the display list for keyboard and mouse targeting. Partial-alpha foregrounds composite
+  over the effective cell background; transparent text loses its ink while retaining layout, link
+  and hit geometry
+- `<img>` renders nonempty alternative text as `[alt]`, deliberately empty or whitespace-only
+  alternatives as nothing, and `[img]` when `alt` is absent; `<hr>` spans the content width
 - Dynamic selectors: `:link`, `:any-link`, `:hover`, `:focus`, `:active`, `:checked`, `:enabled`
   and `:disabled` parse against injected state; `:visited` never matches, so page styling cannot
   observe history. Host-language-correct form states and distinct `:focus-visible`/`:focus-within`
@@ -86,8 +89,8 @@ generated-content regressions open)**
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): close the reproduced
-M1-B/M1-D regressions, then CSS length units and the terminal cell metric — lengths currently ignore
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): close the reproduced M1-D
+regressions, then CSS length units and the terminal cell metric — lengths currently ignore
 their unit, so `20px` of padding costs twenty columns — followed by presentational HTML, `text-align`
 and scaled headings. After M1-D: links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa
 integration (M4–M5).

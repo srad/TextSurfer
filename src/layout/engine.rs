@@ -579,14 +579,16 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                                 table: None,
                             });
                         } else if *ns == ElementNs::Html && name == "img" {
-                            buffer.push(InlinePiece {
-                                node,
-                                text: image_placeholder(attrs),
-                                white_space: context.white_space,
-                                depth: context.depth,
-                                style: style.cell_style(),
-                                table: None,
-                            });
+                            if let Some(text) = super::image_fallback(attrs) {
+                                buffer.push(InlinePiece {
+                                    node,
+                                    text,
+                                    white_space: context.white_space,
+                                    depth: context.depth,
+                                    style: style.cell_style(),
+                                    table: None,
+                                });
+                            }
                         } else {
                             append_edge(node, style, true, context, &mut buffer);
                             events.push(FlowEvent::RightEdge(node, style, context));
@@ -634,19 +636,6 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
         tasks.extend(nested_tasks.into_iter().rev());
     }
     flow
-}
-
-fn image_placeholder(attrs: &[crate::core::dom::Attr]) -> String {
-    let alt = attrs
-        .iter()
-        .find(|attr| attr.ns == AttrNs::None && attr.name == "alt")
-        .map(|attr| attr.value.trim())
-        .unwrap_or_default();
-    if alt.is_empty() {
-        "[img]".to_string()
-    } else {
-        format!("[{alt}]")
-    }
 }
 
 fn flush_inline(
@@ -1562,23 +1551,43 @@ mod tests {
     fn images_render_their_alt_text_and_rules_span_the_content_width() {
         let mut document = Document::new();
         let body = document.insert_element(None, "body", ElementNs::Html, vec![]);
-        let p = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
+        let described = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
         document.insert_element(
-            Some(p),
+            Some(described),
             "img",
             ElementNs::Html,
             vec![crate::core::dom::Attr::plain("alt", "a cat")],
         );
+        let empty = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
+        document.insert_text(Some(empty), "before");
+        document.insert_element(
+            Some(empty),
+            "img",
+            ElementNs::Html,
+            vec![crate::core::dom::Attr::plain("alt", "")],
+        );
+        document.insert_text(Some(empty), "after");
+        let whitespace = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
+        document.insert_text(Some(whitespace), "left");
+        document.insert_element(
+            Some(whitespace),
+            "img",
+            ElementNs::Html,
+            vec![crate::core::dom::Attr::plain("alt", "   ")],
+        );
+        document.insert_text(Some(whitespace), "right");
         document.insert_element(Some(body), "hr", ElementNs::Html, vec![]);
         let bare = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
         document.insert_element(Some(bare), "img", ElementNs::Html, vec![]);
         let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
-        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 10, rows: 5 });
+        let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 12, rows: 5 });
         let lines = BasicPainter.paint(&tree, Palette::default()).text_lines();
         assert!(lines.iter().any(|line| line == "[a cat]"));
-        assert!(lines.iter().any(|line| line == "[img]"));
+        assert!(lines.iter().any(|line| line == "beforeafter"));
+        assert!(lines.iter().any(|line| line == "leftright"));
+        assert_eq!(lines.iter().filter(|line| *line == "[img]").count(), 1);
         assert!(
-            lines.iter().any(|line| line == "──────────"),
+            lines.iter().any(|line| line == "────────────"),
             "an <hr> must draw a rule across the content width, not a single glyph: {lines:?}"
         );
     }
@@ -1625,7 +1634,7 @@ mod tests {
             .expect("bold fragment");
         assert_eq!(
             plain.style.fg,
-            Some(crate::core::style::Rgb::new(17, 34, 51))
+            Some(crate::core::style::Rgba::new(17, 34, 51, 255))
         );
         assert!(!plain.style.bold);
         assert!(loud.style.bold, "inline weight must reach the fragment");
