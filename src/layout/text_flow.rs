@@ -424,11 +424,79 @@ pub(super) fn intrinsic_width<A: Atom>(pieces: &[Piece<A>]) -> usize {
 }
 
 pub(super) fn min_content_width<A: Atom>(pieces: &[Piece<A>]) -> usize {
-    flatten_glyphs(pieces)
-        .iter()
-        .map(|glyph| glyph.width)
-        .max()
-        .unwrap_or(0)
+    let glyphs = flatten_glyphs(pieces);
+    let mode = glyphs.first().map(|glyph| glyph.white_space);
+    if glyphs.iter().all(|glyph| Some(glyph.white_space) == mode)
+        && matches!(mode, Some(WhiteSpace::NoWrap | WhiteSpace::Pre))
+    {
+        return intrinsic_width(pieces);
+    }
+
+    let mut widest = 0usize;
+    let mut current = 0usize;
+    let mut pending_collapsed_space = false;
+    for glyph in &glyphs {
+        if glyph.atom.is_some() {
+            finish_min_segment(&mut widest, &mut current);
+            widest = widest.max(glyph.width);
+            pending_collapsed_space = false;
+            continue;
+        }
+        let whitespace = glyph.text.chars().all(char::is_whitespace);
+        let collapses = matches!(
+            glyph.white_space,
+            WhiteSpace::Normal | WhiteSpace::NoWrap | WhiteSpace::PreLine
+        );
+        if whitespace {
+            if glyph.text == "\n"
+                && matches!(
+                    glyph.white_space,
+                    WhiteSpace::Pre
+                        | WhiteSpace::PreWrap
+                        | WhiteSpace::PreLine
+                        | WhiteSpace::BreakSpaces
+                )
+            {
+                finish_min_segment(&mut widest, &mut current);
+                pending_collapsed_space = false;
+            } else if collapses {
+                if glyph.white_space == WhiteSpace::NoWrap && current > 0 {
+                    pending_collapsed_space = true;
+                } else {
+                    finish_min_segment(&mut widest, &mut current);
+                }
+            } else if glyph.white_space == WhiteSpace::Pre {
+                if glyph.text == "\t" {
+                    current = current.saturating_add(8 - current % 8);
+                } else {
+                    current = current.saturating_add(glyph.width);
+                }
+            } else if glyph.text == "\t" {
+                current = current.saturating_add(1);
+                finish_min_segment(&mut widest, &mut current);
+                widest = widest.max(1);
+            } else {
+                current = current.saturating_add(glyph.width);
+                finish_min_segment(&mut widest, &mut current);
+            }
+            continue;
+        }
+        if pending_collapsed_space {
+            current = current.saturating_add(1);
+            pending_collapsed_space = false;
+        }
+        current = current.saturating_add(glyph.width);
+        if glyph.white_space != WhiteSpace::NoWrap && breaks_between_letters(&glyph.text) {
+            finish_min_segment(&mut widest, &mut current);
+        }
+    }
+    finish_min_segment(&mut widest, &mut current);
+    widest
+}
+
+fn finish_min_segment(widest: &mut usize, current: &mut usize) {
+    *widest = (*widest).max(*current);
+    *current = 0;
 }
 
 pub(super) fn line_height<A: Atom>(line: &[Glyph], pieces: &[Piece<A>]) -> usize {

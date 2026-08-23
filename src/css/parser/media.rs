@@ -1,5 +1,8 @@
 use cssparser::{ParseError, Parser, ParserInput, Token};
 
+use crate::core::style::CssLength;
+use crate::css::values::parse_signed_length_token;
+
 use super::diagnostics::{CssDiagnosticKind, CssDiagnostics};
 
 pub(super) const MAX_MEDIA_NESTING: usize = 64;
@@ -48,6 +51,27 @@ pub enum MediaComparison {
     Equal,
     Minimum,
     Maximum,
+    Greater,
+    Less,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MediaBound {
+    pub value: CssLength,
+    pub inclusive: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DimensionCondition {
+    Boolean,
+    Compare {
+        comparison: MediaComparison,
+        value: CssLength,
+    },
+    Between {
+        lower: MediaBound,
+        upper: MediaBound,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,8 +80,7 @@ pub enum MediaFeature {
     PrefersColorScheme(Option<ColorScheme>),
     Dimension {
         axis: MediaAxis,
-        comparison: MediaComparison,
-        value: Option<u16>,
+        condition: DimensionCondition,
     },
 }
 
@@ -155,26 +178,66 @@ fn parse_media_feature_block<'i, 't>(
 fn parse_media_feature<'i, 't>(
     input: &mut Parser<'i, 't>,
 ) -> Result<MediaFeature, ParseError<'i, ()>> {
-    let name = input.expect_ident_cloned()?.to_ascii_lowercase();
-    if input.is_exhausted() {
-        return match name.as_str() {
-            "scripting" => Ok(MediaFeature::Scripting(None)),
-            "prefers-color-scheme" => Ok(MediaFeature::PrefersColorScheme(None)),
-            "width" => Ok(MediaFeature::Dimension {
-                axis: MediaAxis::Width,
-                comparison: MediaComparison::Equal,
-                value: None,
-            }),
-            "height" => Ok(MediaFeature::Dimension {
-                axis: MediaAxis::Height,
-                comparison: MediaComparison::Equal,
-                value: None,
-            }),
-            _ => Err(input.new_custom_error(())),
-        };
+    if let Ok(name) = input.try_parse(Parser::expect_ident_cloned) {
+        let name = name.to_ascii_lowercase();
+        if input.is_exhausted() {
+            return match name.as_str() {
+                "scripting" => Ok(MediaFeature::Scripting(None)),
+                "prefers-color-scheme" => Ok(MediaFeature::PrefersColorScheme(None)),
+                "width" | "height" => Ok(MediaFeature::Dimension {
+                    axis: range_media_axis(&name).expect("dimension name checked"),
+                    condition: DimensionCondition::Boolean,
+                }),
+                _ => Err(input.new_custom_error(())),
+            };
+        }
+        if input.try_parse(Parser::expect_colon).is_ok() {
+            return parse_colon_media_feature(input, &name);
+        }
+        let axis = range_media_axis(&name).ok_or_else(|| input.new_custom_error(()))?;
+        let comparison = parse_media_comparison(input)?;
+        let value = parse_media_length(input)?;
+        input.expect_exhausted()?;
+        return Ok(MediaFeature::Dimension {
+            axis,
+            condition: DimensionCondition::Compare { comparison, value },
+        });
     }
-    input.expect_colon()?;
-    let feature = match name.as_str() {
+
+    let first_value = parse_media_length(input)?;
+    let first_comparison = parse_media_comparison(input)?;
+    let name = input.expect_ident_cloned()?.to_ascii_lowercase();
+    let axis = range_media_axis(&name).ok_or_else(|| input.new_custom_error(()))?;
+    if input.is_exhausted() {
+        return Ok(MediaFeature::Dimension {
+            axis,
+            condition: DimensionCondition::Compare {
+                comparison: invert_media_comparison(first_comparison),
+                value: first_value,
+            },
+        });
+    }
+    let second_comparison = parse_media_comparison(input)?;
+    let second_value = parse_media_length(input)?;
+    input.expect_exhausted()?;
+    let (lower, upper) = media_range(
+        first_value,
+        first_comparison,
+        second_comparison,
+        second_value,
+    )
+    .ok_or_else(|| input.new_custom_error(()))?;
+    Ok(MediaFeature::Dimension {
+        axis,
+        condition: DimensionCondition::Between { lower, upper },
+    })
+}
+
+fn parse_colon_media_feature<'i, 't>(
+    input: &mut Parser<'i, 't>,
+    name: &str,
+) -> Result<MediaFeature, ParseError<'i, ()>> {
+    let feature = match name {
         "scripting" => {
             let value = match input.expect_ident_cloned()?.to_ascii_lowercase().as_str() {
                 "none" => ScriptingValue::None,
@@ -193,11 +256,7 @@ fn parse_media_feature<'i, 't>(
             MediaFeature::PrefersColorScheme(Some(value))
         }
         "width" | "min-width" | "max-width" | "height" | "min-height" | "max-height" => {
-            let axis = if name.ends_with("width") {
-                MediaAxis::Width
-            } else {
-                MediaAxis::Height
-            };
+            let axis = legacy_media_axis(name).expect("dimension name checked");
             let comparison = if name.starts_with("min-") {
                 MediaComparison::Minimum
             } else if name.starts_with("max-") {
@@ -207,8 +266,10 @@ fn parse_media_feature<'i, 't>(
             };
             MediaFeature::Dimension {
                 axis,
-                comparison,
-                value: Some(parse_media_length(input)?),
+                condition: DimensionCondition::Compare {
+                    comparison,
+                    value: parse_media_length(input)?,
+                },
             }
         }
         _ => return Err(input.new_custom_error(())),
@@ -217,17 +278,83 @@ fn parse_media_feature<'i, 't>(
     Ok(feature)
 }
 
-fn parse_media_length<'i, 't>(input: &mut Parser<'i, 't>) -> Result<u16, ParseError<'i, ()>> {
-    let value = match input.next()? {
-        Token::Number { value, .. } if *value == 0.0 => 0.0,
-        Token::Dimension { value, unit, .. }
-            if value.is_finite()
-                && *value >= 0.0
-                && (unit.eq_ignore_ascii_case("px") || unit.eq_ignore_ascii_case("ch")) =>
-        {
-            *value
-        }
-        _ => return Err(input.new_custom_error(())),
+fn legacy_media_axis(name: &str) -> Option<MediaAxis> {
+    if name.ends_with("width") {
+        Some(MediaAxis::Width)
+    } else if name.ends_with("height") {
+        Some(MediaAxis::Height)
+    } else {
+        None
+    }
+}
+
+fn range_media_axis(name: &str) -> Option<MediaAxis> {
+    match name {
+        "width" => Some(MediaAxis::Width),
+        "height" => Some(MediaAxis::Height),
+        _ => None,
+    }
+}
+
+fn parse_media_length<'i, 't>(input: &mut Parser<'i, 't>) -> Result<CssLength, ParseError<'i, ()>> {
+    parse_signed_length_token(input).ok_or_else(|| input.new_custom_error(()))
+}
+
+fn parse_media_comparison<'i, 't>(
+    input: &mut Parser<'i, 't>,
+) -> Result<MediaComparison, ParseError<'i, ()>> {
+    match input.next()? {
+        Token::Delim('=') => Ok(MediaComparison::Equal),
+        Token::Delim('<') => Ok(
+            if input.try_parse(|input| input.expect_delim('=')).is_ok() {
+                MediaComparison::Maximum
+            } else {
+                MediaComparison::Less
+            },
+        ),
+        Token::Delim('>') => Ok(
+            if input.try_parse(|input| input.expect_delim('=')).is_ok() {
+                MediaComparison::Minimum
+            } else {
+                MediaComparison::Greater
+            },
+        ),
+        _ => Err(input.new_custom_error(())),
+    }
+}
+
+fn invert_media_comparison(comparison: MediaComparison) -> MediaComparison {
+    match comparison {
+        MediaComparison::Equal => MediaComparison::Equal,
+        MediaComparison::Minimum => MediaComparison::Maximum,
+        MediaComparison::Maximum => MediaComparison::Minimum,
+        MediaComparison::Greater => MediaComparison::Less,
+        MediaComparison::Less => MediaComparison::Greater,
+    }
+}
+
+fn media_range(
+    first_value: CssLength,
+    first_comparison: MediaComparison,
+    second_comparison: MediaComparison,
+    second_value: CssLength,
+) -> Option<(MediaBound, MediaBound)> {
+    let bound = |value, comparison| MediaBound {
+        value,
+        inclusive: matches!(
+            comparison,
+            MediaComparison::Minimum | MediaComparison::Maximum
+        ),
     };
-    Ok(value.round().clamp(0.0, u16::MAX as f32) as u16)
+    match (first_comparison, second_comparison) {
+        (
+            first @ (MediaComparison::Less | MediaComparison::Maximum),
+            second @ (MediaComparison::Less | MediaComparison::Maximum),
+        ) => Some((bound(first_value, first), bound(second_value, second))),
+        (
+            first @ (MediaComparison::Greater | MediaComparison::Minimum),
+            second @ (MediaComparison::Greater | MediaComparison::Minimum),
+        ) => Some((bound(second_value, second), bound(first_value, first))),
+        _ => None,
+    }
 }

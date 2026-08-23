@@ -1,6 +1,7 @@
 use super::diagnostics::MAX_RETAINED_DIAGNOSTICS;
 use super::media::MAX_MEDIA_NESTING;
 use super::*;
+use crate::core::style::{CssLength, CssLengthUnit};
 
 #[test]
 fn parses_selector_rules_and_declarations() {
@@ -62,8 +63,10 @@ fn css_parser_contract(parser: &dyn CssParser) {
                 media_type: None,
                 features: vec![MediaFeature::Dimension {
                     axis: MediaAxis::Width,
-                    comparison: MediaComparison::Equal,
-                    value: Some(1),
+                    condition: DimensionCondition::Compare {
+                        comparison: MediaComparison::Equal,
+                        value: CssLength::new(1.0, CssLengthUnit::Px).unwrap(),
+                    },
                 }],
             },
             MediaQuery::Never,
@@ -154,8 +157,7 @@ fn invalid_media_members_never_become_an_active_empty_list() {
             media_type: Some("print".to_string()),
             features: vec![MediaFeature::Dimension {
                 axis: MediaAxis::Width,
-                comparison: MediaComparison::Equal,
-                value: None,
+                condition: DimensionCondition::Boolean,
             }],
         }])
     );
@@ -249,7 +251,7 @@ fn leading_imports_are_retained_and_late_nested_and_qualified_forms_are_rejected
 }
 
 #[test]
-fn media_features_parse_with_ranges_and_fail_closed_for_unsupported_syntax() {
+fn media_features_parse_with_legacy_and_mq4_ranges() {
     let queries = parse_media_queries(
         "not (scripting: enabled), only screen and (prefers-color-scheme: dark) and \
          (min-width: 79.6px) and (max-height: 30ch), (width > 10px)",
@@ -265,7 +267,42 @@ fn media_features_parse_with_ranges_and_fail_closed_for_unsupported_syntax() {
         queries[1],
         MediaQuery::Condition { negated: false, .. }
     ));
-    assert_eq!(queries[2], MediaQuery::Never);
+    assert!(matches!(
+        queries[2],
+        MediaQuery::Condition {
+            features: ref values,
+            ..
+        } if matches!(
+            values.as_slice(),
+            [MediaFeature::Dimension {
+                condition: DimensionCondition::Compare {
+                    comparison: MediaComparison::Greater,
+                    ..
+                },
+                ..
+            }]
+        )
+    ));
+}
+
+#[test]
+fn mq4_dimension_ranges_parse_in_both_directions_and_chain() {
+    let queries = parse_media_queries(
+        "(width >= 640px), (640px <= width), (400px < width <= 80ch), (width = 40em)",
+    );
+    let MediaQueryList::Any(queries) = queries else {
+        panic!("expected media members");
+    };
+    assert_eq!(queries.len(), 4);
+    assert!(
+        queries
+            .iter()
+            .all(|query| !matches!(query, MediaQuery::Never))
+    );
+    assert_eq!(
+        parse_media_queries("(device-width > 1px), (min-width > 1px)"),
+        MediaQueryList::Any(vec![MediaQuery::Never, MediaQuery::Never])
+    );
 }
 
 #[test]

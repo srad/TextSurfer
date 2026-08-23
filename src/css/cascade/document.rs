@@ -72,7 +72,7 @@ pub(super) fn cascade_document(
             .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
         let mut authored_counters = AuthoredCounterOps::default();
         for (_, _, _, declaration) in declarations {
-            apply_declaration(&mut style, parent_style, &declaration);
+            apply_declaration(&mut style, parent_style, &declaration, media);
             authored_counters.apply(&declaration);
         }
         if matches!(
@@ -227,7 +227,7 @@ fn cascade_pseudo(
     let mut style = inherited;
     let mut content = None;
     for (_, _, _, declaration) in declarations {
-        apply_declaration(&mut style, Some(inherited), &declaration);
+        apply_declaration(&mut style, Some(inherited), &declaration, media);
         if declaration.name == "content"
             && let Some(spec) = parse_content(&declaration.value)
         {

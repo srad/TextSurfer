@@ -16,8 +16,8 @@ pub use ast::{CssRule, Declaration, ImportRule, MediaRule, StyleRule, StyleSheet
 pub use declarations::parse_declarations;
 pub use diagnostics::{CssDiagnostic, CssDiagnosticKind, CssDiagnostics, CssSourcePosition};
 pub use media::{
-    ColorScheme, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
-    ScriptingValue, parse_media_queries,
+    ColorScheme, DimensionCondition, MediaAxis, MediaBound, MediaComparison, MediaFeature,
+    MediaQuery, MediaQueryList, ScriptingValue, parse_media_queries,
 };
 
 pub trait CssParser: Send + Sync {

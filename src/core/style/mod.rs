@@ -1,5 +1,6 @@
 mod box_model;
 mod color;
+mod length;
 mod list;
 mod table;
 
@@ -15,6 +16,7 @@ pub use box_model::{
     EdgeSizes,
 };
 pub use color::{CellStyle, Palette, Rgb, Rgba};
+pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
 pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
 

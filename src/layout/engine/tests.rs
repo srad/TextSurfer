@@ -31,7 +31,7 @@ fn nested_document(text: &str, depth: usize) -> (Document, StyleTree) {
             Some(parent),
             "div",
             ElementNs::Html,
-            vec![crate::core::dom::Attr::plain("style", "padding-left: 1px")],
+            vec![crate::core::dom::Attr::plain("style", "padding-left: 1ch")],
         );
     }
     let p = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
@@ -203,6 +203,52 @@ fn long_words_break_to_terminal_width_even_when_author_css_requests_normal_wrapp
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
     assert_eq!(fragment_text(&tree), vec!["abcd", "efgh", "ijk"]);
+}
+
+#[test]
+fn block_min_content_width_is_the_widest_unbreakable_word() {
+    let (document, styles) = paragraph("small elephant ox");
+    let flow = build_flow_tree(&document, &styles, 40);
+    let inline = flow.iter().find(|box_| !box_.inline.is_empty()).unwrap();
+    assert_eq!(min_content_width(&inline.inline), "elephant".len());
+}
+
+#[test]
+fn mixed_preformatted_whitespace_stays_in_its_unbreakable_segment() {
+    let mut document = Document::new();
+    let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+    document.insert_text(Some(p), "aa");
+    let pre = document.insert_element(
+        Some(p),
+        "span",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain("style", "white-space: pre")],
+    );
+    document.insert_text(Some(pre), " \t ");
+    document.insert_text(Some(p), "bb");
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let flow = build_flow_tree(&document, &styles, 40);
+    let inline = flow.iter().find(|box_| !box_.inline.is_empty()).unwrap();
+    assert_eq!(min_content_width(&inline.inline), 11);
+}
+
+#[test]
+fn a_wrapping_tab_breaks_after_its_first_expanded_space() {
+    let mut document = Document::new();
+    let p = document.insert_element(
+        None,
+        "p",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain(
+            "style",
+            "white-space: pre-wrap",
+        )],
+    );
+    document.insert_text(Some(p), "aa\tbb");
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let flow = build_flow_tree(&document, &styles, 40);
+    let inline = flow.iter().find(|box_| !box_.inline.is_empty()).unwrap();
+    assert_eq!(min_content_width(&inline.inline), 3);
 }
 
 #[test]
@@ -413,7 +459,7 @@ fn box_sizing_changes_fixed_width_border_geometry() {
         ElementNs::Html,
         vec![crate::core::dom::Attr::plain(
             "style",
-            "width: 6px; padding: 1px; border: solid; box-sizing: content-box",
+            "width: 6ch; padding: 1rem 1ch; border: solid; box-sizing: content-box",
         )],
     );
     document.insert_text(Some(content), "x");
@@ -423,7 +469,7 @@ fn box_sizing_changes_fixed_width_border_geometry() {
         ElementNs::Html,
         vec![crate::core::dom::Attr::plain(
             "style",
-            "width: 6px; padding: 1px; border: solid; box-sizing: border-box",
+            "width: 6ch; padding: 1rem 1ch; border: solid; box-sizing: border-box",
         )],
     );
     document.insert_text(Some(border), "x");

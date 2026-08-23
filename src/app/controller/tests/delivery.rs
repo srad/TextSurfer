@@ -268,7 +268,7 @@ fn valid_imports_are_scheduled_and_late_imports_warn() {
                 final_url: Url::parse("https://example.com/").unwrap(),
                 body: br#"<!doctype html><html><head>
                 <style>@import url(one.css); p { display: block }</style>
-                <style>@media (width: 1px) { p { display: none } } @import url(two.css);</style>
+                <style>@media (width: 1ch) { p { display: none } } @import url(two.css);</style>
                 </head><body><p>shown</p></body></html>"#
                     .to_vec(),
                 content_type: Some("text/html; charset=utf-8".to_string()),

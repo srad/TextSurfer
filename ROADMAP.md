@@ -63,7 +63,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables and generated content done; length units next) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content and length units done; outer/inner display modes next) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
@@ -490,12 +490,12 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       retaining semantics/inheritance, and cover misparented internal table roles with the required
       anonymous wrappers. Flex/grid remain M6. *Proof:* inline sequence fixtures preserve source
       order and text flow; anonymous table fixup follows the box-tree parent requirements.
-- [ ] **Length units and the cell metric** — `parse_length_token` ignores the unit and the axis, so
+- [x] **Length units and the cell metric** *(done)* — `parse_length_token` previously ignored the unit and the axis, so
       `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell: `padding: 20px` eats a quarter of an
-      80-column viewport and `width: 960px` builds a 960-cell box. `parse_media_length` has the
+      80-column viewport and `width: 960px` built a 960-cell box. `parse_media_length` had the
       matching flaw on the query side (`(min-width: 640px)` can never match, `40em` is
       `MediaQuery::Never`), so both must change together or responsive sites flip to a layout
-      nobody chose. Adds a cell metric (~8px × ~16px), the absolute/relative unit table anchored to
+      nobody chose. The implementation adds a cell metric (~8px × ~16px), the absolute/relative unit table anchored to
       a 16px root font size, axis-aware rounding, and MQ4 range syntax. Intrinsic sizing must change
       in both engines: block `min_content_width` and table `cell_metrics.minimum` currently return
       the widest grapheme rather than the widest unbreakable segment. Rewrites every fixture and
@@ -503,6 +503,13 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       axis; block and table min-content cases use whole unbreakable words; a responsive fixture
       picks the same breakpoint a browser would; existing goldens re-baselined deliberately, not
       silently.
+      The implementation contract is a nominal 8×16 CSS-pixel cell and 16px root font. Absolute
+      units are `px`/`in`/`cm`/`mm`/`Q`/`pt`/`pc`; font-relative units are `em`/`rem` at 16px and
+      `ex`/`ch` at 8px until typography supplies real metrics; viewport-relative units are
+      `vw`/`vh`/`vmin`/`vmax`. Layout values round to the nearest axis-sized cell with positive
+      halves upward and clamp after conversion; media queries compare unrounded CSS pixels. MQ4
+      feature-first, value-first and chained ranges join the legacy colon/min/max forms. Borders
+      remain binary, and the VGA feature pins this shared default to its actual 8×16 glyph grid.
 - [ ] **Presentational HTML** — map `align`, `bgcolor`, `width`, `cellspacing`, `cellpadding`,
       `border`, `rules`, `frame`, `valign`/`vertical-align`, `<center>` and `<font color>` into the
       cascade at UA-origin specificity, plus `text-align` (left/right/center/justify→left).
@@ -983,3 +990,19 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   deliberately 1 MB stack; it was confirmed to reproduce the overflow before the fix. **Process
   lesson: a green suite does not establish that the binary starts** — assert launch-path limits
   explicitly rather than inheriting the harness's more generous environment.
+- 2026-08-24 — **M1-D length units started after a green six-gate baseline.** The item contract now
+  fixes the previously unspecified unit subset, 8×16 cell metric, 16px root-font approximation,
+  nearest-cell layout rounding, exact CSS-pixel media comparisons and MQ4 range forms before code
+  depends on them. The VGA backend's real 8×16 font constants will be checked against the shared
+  default. `cssparser 0.37.0`, Taffy 0.13.0 and textwrap 0.16.2 remain the latest published
+  versions; no dependency change is planned. Baseline: 353 library · 4 binary · 4 fetch-pipeline ·
+  14 corpus · 25 render-golden tests, plus 412 library tests with `--features vga`.
+- 2026-08-24 — **M1-D length units and the cell metric completed.** A shared `CssLength` and
+  injected 8×16 `CellMetric` now resolve supported absolute, font-relative and viewport-relative
+  units per axis while media dimensions compare unrounded CSS pixels. Legacy media dimensions and
+  MQ4 feature-first, value-first and chained ranges share the same conversion path. Block and table
+  min-content sizing now use the widest unbreakable segment, cell-intent fixtures use `ch`/`rem`,
+  and the 79/80-column responsive fixture pins the 640px boundary. The `vga` feature asserts that
+  the shared default matches its real `CELL_W`/`CELL_H` constants. No dependency changed. All six
+  local gates are green: 362 library · 4 binary · 4 fetch-pipeline · 14 corpus · 26 render-golden
+  tests, plus 422 library tests with `--features vga`; no `.snap.new` file was produced.

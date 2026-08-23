@@ -74,7 +74,7 @@ fn image_alt_fallbacks_match_inside_table_cells() {
 #[test]
 fn fixed_layout_clips_wide_graphemes_at_the_cell_inner_edge() {
     let output = formatted(
-        "<style id=css>#table { table-layout: fixed; width: 5px } td { border: solid }</style>
+        "<style id=css>#table { table-layout: fixed; width: 5ch } td { border: solid }</style>
          <table id=table><tr><td>ab界z</td><td>x</td></tr></table>",
         30,
     );
@@ -89,6 +89,16 @@ fn fixed_layout_clips_wide_graphemes_at_the_cell_inner_edge() {
             .iter()
             .all(|fragment| !fragment.text.contains('…'))
     );
+}
+
+#[test]
+fn table_min_content_width_is_the_widest_unbreakable_word() {
+    let output = formatted(
+        "<style id=css>#table { border-spacing: 0 } td { padding: 0 }</style>
+         <table id=table><tr><td>small elephant ox</td></tr></table>",
+        1,
+    );
+    assert_eq!(output.width, "elephant".len());
 }
 
 #[test]

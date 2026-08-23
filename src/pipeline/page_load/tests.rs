@@ -213,7 +213,7 @@ fn deadline_and_late_repaint_are_exact_and_coalesced() {
 #[test]
 fn newly_applicable_pending_sheet_repaints_without_blank_loading_state() {
     let mut load = load(
-        "<!doctype html><link rel=stylesheet media='(min-width: 100px)' href='wide.css'>
+        "<!doctype html><link rel=stylesheet media='(min-width: 100ch)' href='wide.css'>
              <p>visible</p>",
     );
     let command = load.take_commands().pop().unwrap();

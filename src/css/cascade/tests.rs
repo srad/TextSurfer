@@ -32,7 +32,7 @@ fn ua_and_author_rules_form_a_computed_style_tree() {
         ElementNs::Html,
         vec![Attr::plain("style", "display: inline")],
     );
-    let sheet = CssparserParser.parse("main > p.note { display: none; margin: 2px 3px }");
+    let sheet = CssparserParser.parse("main > p.note { display: none; margin: 2rem 3ch }");
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
     assert_eq!(styles.get(main).display, Display::Block);
     assert_eq!(styles.get(p).display, Display::None);
@@ -63,7 +63,7 @@ fn table_roles_and_properties_reach_the_computed_style() {
     let cell = document.insert_element(Some(row), "td", ElementNs::Html, vec![]);
     let caption = document.insert_element(Some(table), "caption", ElementNs::Html, vec![]);
     let sheet = CssparserParser.parse(
-        "table { table-layout: fixed; border-collapse: collapse; border-spacing: 3px 2px;
+        "table { table-layout: fixed; border-collapse: collapse; border-spacing: 3ch 2rem;
                   width: 50%; border: 2px dashed red; caption-side: bottom }
          td { border-left: 0 hidden blue; border-top-color: currentcolor }",
     );
@@ -115,7 +115,7 @@ fn table_properties_inherit_without_css_wide_keywords() {
         vec![Attr::plain("id", "caption")],
     );
     let sheet = CssparserParser.parse(
-        "#parent { border-collapse: collapse; border-spacing: 3px 2px; caption-side: bottom }
+        "#parent { border-collapse: collapse; border-spacing: 3ch 2rem; caption-side: bottom }
          #table { display: table } #caption { display: table-caption }",
     );
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
@@ -395,7 +395,7 @@ fn white_space_modes_inherit_and_css_wide_keywords_resolve() {
         ElementNs::Html,
         vec![Attr::plain("style", "white-space: unset")],
     );
-    let sheet = CssparserParser.parse("div { width: 20px } span { box-sizing: border-box }");
+    let sheet = CssparserParser.parse("div { width: 20ch } span { box-sizing: border-box }");
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
     assert_eq!(styles.get(parent).white_space, WhiteSpace::PreWrap);
     assert_eq!(styles.get(inherited).white_space, WhiteSpace::PreWrap);
@@ -415,8 +415,8 @@ fn lengths_are_strict_and_bounded_without_partial_overrides() {
         ElementNs::Html,
         vec![Attr::plain(
             "style",
-            "margin: 2px; margin: 3px bogus; padding: 1px 2px 3px 4px 5px; \
-             padding-left: 999999px; width: 12px; width: -1px",
+            "margin: 2rem 2ch; margin: 3px bogus; padding: 1px 2px 3px 4px 5px; \
+             padding-left: 999999ch; width: 12ch; width: -1px",
         )],
     );
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
@@ -432,6 +432,46 @@ fn lengths_are_strict_and_bounded_without_partial_overrides() {
     assert_eq!(styles.get(p).padding.top, 0);
     assert_eq!(styles.get(p).padding.left, 65_535);
     assert_eq!(styles.get(p).width, CssWidth::Cells(12));
+}
+
+#[test]
+fn lengths_resolve_through_the_terminal_cell_metric_on_each_axis() {
+    let mut document = Document::new();
+    let p = document.insert_element(
+        None,
+        "p",
+        ElementNs::Html,
+        vec![Attr::plain(
+            "style",
+            "width: 96px; margin: 16px 8px; padding: 1rem 1ch; border-spacing: 16px 8px",
+        )],
+    );
+    let styles = BasicCascade.apply(
+        &[],
+        &document,
+        MediaContext::screen().with_viewport(Size { cols: 80, rows: 24 }),
+    );
+    let style = styles.get(p);
+    assert_eq!(style.width, CssWidth::Cells(12));
+    assert_eq!(
+        style.margin,
+        EdgeSizes {
+            top: 1,
+            right: 1,
+            bottom: 1,
+            left: 1
+        }
+    );
+    assert_eq!(
+        style.padding,
+        EdgeSizes {
+            top: 1,
+            right: 1,
+            bottom: 1,
+            left: 1
+        }
+    );
+    assert_eq!(style.border_spacing, BorderSpacing::new(2, 1));
 }
 
 #[test]
@@ -461,7 +501,7 @@ fn bucketed_and_naive_cascades_agree_for_complex_selector_lists() {
          article > p { display: block }
          [data-x] { text-decoration: underline }
          :is(.a, .b) { background-color: blue }
-         p:not(.skip) { width: 12px }",
+         p:not(.skip) { width: 12ch }",
     );
     let media = MediaContext::screen();
     assert_eq!(
@@ -517,7 +557,7 @@ fn media_features_use_the_injected_terminal_context() {
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
     let sheet = CssparserParser.parse(
         "@media screen and (scripting: none) and (prefers-color-scheme: dark)
-                and (min-width: 80px) and (max-height: 24px) {
+                and (min-width: 80ch) and (max-height: 24rem) {
             p { display: none }
          }",
     );
@@ -533,6 +573,30 @@ fn media_features_use_the_injected_terminal_context() {
         Display::None
     );
     let narrow = matching.with_viewport(Size { cols: 79, rows: 24 });
+    assert_ne!(
+        BasicCascade
+            .apply(&[sheet], &document, narrow)
+            .get(p)
+            .display,
+        Display::None
+    );
+}
+
+#[test]
+fn media_dimensions_compare_in_css_pixels_including_mq4_ranges() {
+    let mut document = Document::new();
+    let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+    let sheet = CssparserParser
+        .parse("@media (width >= 640px) and (600px < width <= 640px) { p { display: none } }");
+    let wide = MediaContext::screen().with_viewport(Size { cols: 80, rows: 24 });
+    assert_eq!(
+        BasicCascade
+            .apply(std::slice::from_ref(&sheet), &document, wide)
+            .get(p)
+            .display,
+        Display::None
+    );
+    let narrow = wide.with_viewport(Size { cols: 79, rows: 24 });
     assert_ne!(
         BasicCascade
             .apply(&[sheet], &document, narrow)

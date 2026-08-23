@@ -1,8 +1,9 @@
 use cssparser::{Parser, ParserInput, Token};
 
+use super::MediaContext;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, Display, ListStyleType,
-    TableLayoutMode, WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, Display, LengthAxis,
+    ListStyleType, TableLayoutMode, WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
@@ -17,6 +18,7 @@ pub(super) fn apply_declaration(
     style: &mut ComputedStyle,
     parent_style: Option<ComputedStyle>,
     declaration: &Declaration,
+    media: MediaContext,
 ) {
     if let Some(keyword) = parse_ident(&declaration.value)
         && matches!(keyword.as_str(), "initial" | "inherit" | "unset")
@@ -65,7 +67,8 @@ pub(super) fn apply_declaration(
             }
         }
         "width" => {
-            if let Some(width) = parse_width(&declaration.value) {
+            if let Some(width) = parse_width(&declaration.value, media.cell_metric, media.viewport)
+            {
                 style.width = width;
             }
         }
@@ -82,22 +85,80 @@ pub(super) fn apply_declaration(
         }
         "margin" => {
             if let Some(values) = parse_lengths(&declaration.value) {
-                assign_edges(&mut style.margin, &values);
+                assign_edges(
+                    &mut style.margin,
+                    &values,
+                    media.cell_metric,
+                    media.viewport,
+                );
             }
         }
         "padding" => {
             if let Some(values) = parse_lengths(&declaration.value) {
-                assign_edges(&mut style.padding, &values);
+                assign_edges(
+                    &mut style.padding,
+                    &values,
+                    media.cell_metric,
+                    media.viewport,
+                );
             }
         }
-        "margin-top" => assign_one(&mut style.margin.top, &declaration.value),
-        "margin-right" => assign_one(&mut style.margin.right, &declaration.value),
-        "margin-bottom" => assign_one(&mut style.margin.bottom, &declaration.value),
-        "margin-left" => assign_one(&mut style.margin.left, &declaration.value),
-        "padding-top" => assign_one(&mut style.padding.top, &declaration.value),
-        "padding-right" => assign_one(&mut style.padding.right, &declaration.value),
-        "padding-bottom" => assign_one(&mut style.padding.bottom, &declaration.value),
-        "padding-left" => assign_one(&mut style.padding.left, &declaration.value),
+        "margin-top" => assign_one(
+            &mut style.margin.top,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "margin-right" => assign_one(
+            &mut style.margin.right,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "margin-bottom" => assign_one(
+            &mut style.margin.bottom,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "margin-left" => assign_one(
+            &mut style.margin.left,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "padding-top" => assign_one(
+            &mut style.padding.top,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "padding-right" => assign_one(
+            &mut style.padding.right,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "padding-bottom" => assign_one(
+            &mut style.padding.bottom,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media.cell_metric,
+            media.viewport,
+        ),
+        "padding-left" => assign_one(
+            &mut style.padding.left,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media.cell_metric,
+            media.viewport,
+        ),
         "border" => {
             if let Some(border) = parse_border(&declaration.value) {
                 style.border = border;
@@ -169,8 +230,18 @@ pub(super) fn apply_declaration(
             if let Some(values) = parse_lengths(&declaration.value)
                 && let [horizontal] | [horizontal, _] = values.as_slice()
             {
-                style.border_spacing =
-                    BorderSpacing::new(*horizontal, values.get(1).copied().unwrap_or(*horizontal));
+                style.border_spacing = BorderSpacing::new(
+                    media.cell_metric.resolve_cells(
+                        *horizontal,
+                        LengthAxis::Horizontal,
+                        media.viewport,
+                    ),
+                    media.cell_metric.resolve_cells(
+                        values.get(1).copied().unwrap_or(*horizontal),
+                        LengthAxis::Vertical,
+                        media.viewport,
+                    ),
+                );
             }
         }
         "caption-side" => {

@@ -30,3 +30,53 @@ fn cell_style_projects_the_visual_half_of_a_computed_style() {
     assert_eq!(cell.bg, None);
     assert!(cell.bold && cell.underline && !cell.strike && !cell.reverse);
 }
+
+#[test]
+fn css_lengths_resolve_against_the_nominal_cell_and_viewport() {
+    let metric = CellMetric::DEFAULT;
+    let viewport = crate::core::geom::Size { cols: 80, rows: 24 };
+    let cells = |value, unit, axis| {
+        metric.resolve_cells(CssLength::new(value, unit).unwrap(), axis, viewport)
+    };
+    assert_eq!(cells(8.0, CssLengthUnit::Px, LengthAxis::Horizontal), 1);
+    assert_eq!(cells(16.0, CssLengthUnit::Px, LengthAxis::Vertical), 1);
+    assert_eq!(cells(1.0, CssLengthUnit::In, LengthAxis::Horizontal), 12);
+    assert_eq!(cells(2.54, CssLengthUnit::Cm, LengthAxis::Horizontal), 12);
+    assert_eq!(cells(25.4, CssLengthUnit::Mm, LengthAxis::Horizontal), 12);
+    assert_eq!(cells(101.6, CssLengthUnit::Q, LengthAxis::Horizontal), 12);
+    assert_eq!(cells(72.0, CssLengthUnit::Pt, LengthAxis::Horizontal), 12);
+    assert_eq!(cells(6.0, CssLengthUnit::Pc, LengthAxis::Horizontal), 12);
+    assert_eq!(cells(1.0, CssLengthUnit::Em, LengthAxis::Horizontal), 2);
+    assert_eq!(cells(1.0, CssLengthUnit::Rem, LengthAxis::Vertical), 1);
+    assert_eq!(cells(2.0, CssLengthUnit::Ex, LengthAxis::Horizontal), 2);
+    assert_eq!(cells(1.0, CssLengthUnit::Ch, LengthAxis::Horizontal), 1);
+    assert_eq!(cells(50.0, CssLengthUnit::Vw, LengthAxis::Horizontal), 40);
+    assert_eq!(cells(50.0, CssLengthUnit::Vh, LengthAxis::Vertical), 12);
+    assert_eq!(
+        cells(100.0, CssLengthUnit::Vmin, LengthAxis::Horizontal),
+        48
+    );
+    assert_eq!(cells(100.0, CssLengthUnit::Vmax, LengthAxis::Vertical), 40);
+}
+
+#[test]
+fn css_length_cell_rounding_is_half_up_and_capped_at_u16_max() {
+    let metric = CellMetric::DEFAULT;
+    let viewport = crate::core::geom::Size { cols: 80, rows: 24 };
+    assert_eq!(
+        metric.resolve_cells(
+            CssLength::new(4.0, CssLengthUnit::Px).unwrap(),
+            LengthAxis::Horizontal,
+            viewport,
+        ),
+        1
+    );
+    assert_eq!(
+        metric.resolve_cells(
+            CssLength::new(1_000_000.0, CssLengthUnit::Px).unwrap(),
+            LengthAxis::Horizontal,
+            viewport,
+        ),
+        u16::MAX as usize
+    );
+}

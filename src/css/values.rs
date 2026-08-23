@@ -5,9 +5,10 @@ use cssparser::color::clamp_unit_f32;
 use cssparser::{Parser, ParserInput, Token};
 use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
 
+use crate::core::geom::Size;
 use crate::core::style::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, CssPercentage, CssWidth, EdgeSizes,
-    ListStylePosition, ListStyleType, Rgb, Rgba,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, CellMetric, CssLength, CssLengthUnit,
+    CssPercentage, CssWidth, EdgeSizes, LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
 };
 
 pub(super) fn parse_color(source: &str) -> Option<Rgba> {
@@ -168,10 +169,12 @@ pub(super) fn parse_border(source: &str) -> Option<BorderEdges> {
                     return None;
                 }
             }
-            Token::Number { value, .. } | Token::Dimension { value, .. }
-                if !saw_width && value.is_finite() && *value >= 0.0 =>
-            {
-                side.width = usize::from(*value > 0.0);
+            token if !saw_width => {
+                let width = length_from_token(token)?;
+                if width.value() < 0.0 {
+                    return None;
+                }
+                side.width = usize::from(width.value() > 0.0);
                 saw_width = true;
             }
             _ => return None,
@@ -229,12 +232,13 @@ fn parse_border_widths(source: &str) -> Option<Vec<usize>> {
     while !parser.is_exhausted() && values.len() < 4 {
         let value = match parser.next().ok()? {
             Token::Ident(value) => parse_border_width_ident(value)?,
-            Token::Number { value, .. } | Token::Dimension { value, .. }
-                if value.is_finite() && *value >= 0.0 =>
-            {
-                usize::from(*value > 0.0)
+            token => {
+                let width = length_from_token(token)?;
+                if width.value() < 0.0 {
+                    return None;
+                }
+                usize::from(width.value() > 0.0)
             }
-            _ => return None,
         };
         values.push(value);
     }
@@ -316,51 +320,43 @@ pub(super) fn assign_border_color(target: &mut BorderSide, value: &str) {
     }
 }
 
-pub(super) fn assign_one(target: &mut usize, value: &str) {
+pub(super) fn assign_one(
+    target: &mut usize,
+    value: &str,
+    axis: LengthAxis,
+    metric: CellMetric,
+    viewport: Size,
+) {
     if let Some(value) = parse_length(value) {
-        *target = value;
+        *target = metric.resolve_cells(value, axis, viewport);
     }
 }
 
-pub(super) fn assign_edges(edges: &mut EdgeSizes, values: &[usize]) {
-    match values {
-        [all] => {
-            *edges = EdgeSizes {
-                top: *all,
-                right: *all,
-                bottom: *all,
-                left: *all,
-            }
-        }
-        [vertical, horizontal] => {
-            *edges = EdgeSizes {
-                top: *vertical,
-                right: *horizontal,
-                bottom: *vertical,
-                left: *horizontal,
-            };
-        }
-        [top, horizontal, bottom] => {
-            *edges = EdgeSizes {
-                top: *top,
-                right: *horizontal,
-                bottom: *bottom,
-                left: *horizontal,
-            };
-        }
-        [top, right, bottom, left] => {
-            *edges = EdgeSizes {
-                top: *top,
-                right: *right,
-                bottom: *bottom,
-                left: *left,
-            };
-        }
-        [] | [_, _, _, _, _, ..] => {}
+pub(super) fn assign_edges(
+    edges: &mut EdgeSizes,
+    values: &[CssLength],
+    metric: CellMetric,
+    viewport: Size,
+) {
+    let values = expanded_edges(values).map(|values| {
+        [
+            metric.resolve_cells(values[0], LengthAxis::Vertical, viewport),
+            metric.resolve_cells(values[1], LengthAxis::Horizontal, viewport),
+            metric.resolve_cells(values[2], LengthAxis::Vertical, viewport),
+            metric.resolve_cells(values[3], LengthAxis::Horizontal, viewport),
+        ]
+    });
+    if let Some([top, right, bottom, left]) = values.as_ref() {
+        *edges = EdgeSizes {
+            top: *top,
+            right: *right,
+            bottom: *bottom,
+            left: *left,
+        };
     }
 }
 
-pub(super) fn parse_width(source: &str) -> Option<CssWidth> {
+pub(super) fn parse_width(source: &str, metric: CellMetric, viewport: Size) -> Option<CssWidth> {
     if parse_ident(source).as_deref() == Some("auto") {
         return Some(CssWidth::Auto);
     }
@@ -379,10 +375,11 @@ pub(super) fn parse_width(source: &str) -> Option<CssWidth> {
             (unit_value * 10_000.0).round().min(u32::MAX as f32) as u32,
         )));
     }
-    parse_length(source).map(CssWidth::Cells)
+    parse_length(source)
+        .map(|value| CssWidth::Cells(metric.resolve_cells(value, LengthAxis::Horizontal, viewport)))
 }
 
-fn parse_length(source: &str) -> Option<usize> {
+fn parse_length(source: &str) -> Option<CssLength> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let value = parse_length_token(&mut parser)?;
@@ -390,7 +387,7 @@ fn parse_length(source: &str) -> Option<usize> {
     Some(value)
 }
 
-pub(super) fn parse_lengths(source: &str) -> Option<Vec<usize>> {
+pub(super) fn parse_lengths(source: &str) -> Option<Vec<CssLength>> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let mut values = Vec::new();
@@ -403,11 +400,40 @@ pub(super) fn parse_lengths(source: &str) -> Option<Vec<usize>> {
     (!values.is_empty()).then_some(values)
 }
 
-fn parse_length_token(parser: &mut Parser<'_, '_>) -> Option<usize> {
-    let value = match parser.next().ok()? {
-        Token::Number { value, .. } if *value == 0.0 => *value,
-        Token::Dimension { value, .. } if value.is_finite() && *value >= 0.0 => *value,
-        _ => return None,
-    };
-    Some(value.round().min(65_535.0) as usize)
+pub(super) fn parse_length_token(parser: &mut Parser<'_, '_>) -> Option<CssLength> {
+    let length = length_from_token(parser.next().ok()?)?;
+    (length.value() >= 0.0).then_some(length)
+}
+
+pub(super) fn parse_signed_length_token(parser: &mut Parser<'_, '_>) -> Option<CssLength> {
+    length_from_token(parser.next().ok()?)
+}
+
+fn length_from_token(token: &Token<'_>) -> Option<CssLength> {
+    match token {
+        Token::Number { value, .. } if *value == 0.0 => Some(CssLength::zero()),
+        Token::Dimension { value, unit, .. } => CssLength::new(*value, parse_length_unit(unit)?),
+        _ => None,
+    }
+}
+
+fn parse_length_unit(unit: &str) -> Option<CssLengthUnit> {
+    match unit.to_ascii_lowercase().as_str() {
+        "px" => Some(CssLengthUnit::Px),
+        "in" => Some(CssLengthUnit::In),
+        "cm" => Some(CssLengthUnit::Cm),
+        "mm" => Some(CssLengthUnit::Mm),
+        "q" => Some(CssLengthUnit::Q),
+        "pt" => Some(CssLengthUnit::Pt),
+        "pc" => Some(CssLengthUnit::Pc),
+        "em" => Some(CssLengthUnit::Em),
+        "rem" => Some(CssLengthUnit::Rem),
+        "ex" => Some(CssLengthUnit::Ex),
+        "ch" => Some(CssLengthUnit::Ch),
+        "vw" => Some(CssLengthUnit::Vw),
+        "vh" => Some(CssLengthUnit::Vh),
+        "vmin" => Some(CssLengthUnit::Vmin),
+        "vmax" => Some(CssLengthUnit::Vmax),
+        _ => None,
+    }
 }

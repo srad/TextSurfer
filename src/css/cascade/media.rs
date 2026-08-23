@@ -1,9 +1,9 @@
 use crate::core::geom::Size;
-use crate::core::style::Palette;
+use crate::core::style::{CellMetric, LengthAxis, Palette};
 use crate::css::StyleSheet;
 use crate::css::parser::{
-    ColorScheme, CssRule, MediaAxis, MediaComparison, MediaFeature, MediaQuery, MediaQueryList,
-    ScriptingValue, StyleRule,
+    ColorScheme, CssRule, DimensionCondition, MediaAxis, MediaBound, MediaComparison, MediaFeature,
+    MediaQuery, MediaQueryList, ScriptingValue, StyleRule,
 };
 use crate::css::selectors::DynamicState;
 
@@ -21,6 +21,7 @@ pub struct MediaContext {
     pub scripting: bool,
     pub color_scheme: ColorScheme,
     pub viewport: Size,
+    pub cell_metric: CellMetric,
 }
 
 impl MediaContext {
@@ -32,6 +33,7 @@ impl MediaContext {
             scripting: false,
             color_scheme: ColorScheme::Dark,
             viewport: Size { cols: 80, rows: 24 },
+            cell_metric: CellMetric::DEFAULT,
         }
     }
 
@@ -43,6 +45,7 @@ impl MediaContext {
             scripting: false,
             color_scheme: ColorScheme::Dark,
             viewport: Size { cols: 80, rows: 24 },
+            cell_metric: CellMetric::DEFAULT,
         }
     }
 
@@ -67,6 +70,13 @@ impl MediaContext {
 
     pub fn with_viewport(self, viewport: Size) -> Self {
         Self { viewport, ..self }
+    }
+
+    pub fn with_cell_metric(self, cell_metric: CellMetric) -> Self {
+        Self {
+            cell_metric,
+            ..self
+        }
     }
 }
 
@@ -141,23 +151,54 @@ fn media_feature_matches(feature: MediaFeature, media: MediaContext) -> bool {
         MediaFeature::Scripting(Some(ScriptingValue::Enabled)) => media.scripting,
         MediaFeature::PrefersColorScheme(None) => true,
         MediaFeature::PrefersColorScheme(Some(scheme)) => media.color_scheme == scheme,
-        MediaFeature::Dimension {
-            axis,
-            comparison,
-            value,
-        } => {
-            let actual = match axis {
-                MediaAxis::Width => media.viewport.cols,
-                MediaAxis::Height => media.viewport.rows,
+        MediaFeature::Dimension { axis, condition } => {
+            let length_axis = match axis {
+                MediaAxis::Width => LengthAxis::Horizontal,
+                MediaAxis::Height => LengthAxis::Vertical,
             };
-            match value {
-                None => actual != 0,
-                Some(expected) => match comparison {
-                    MediaComparison::Equal => actual == expected,
-                    MediaComparison::Minimum => actual >= expected,
-                    MediaComparison::Maximum => actual <= expected,
-                },
+            let actual = media
+                .cell_metric
+                .viewport_css_pixels(length_axis, media.viewport);
+            match condition {
+                DimensionCondition::Boolean => actual != 0.0,
+                DimensionCondition::Compare { comparison, value } => compare_dimension(
+                    actual,
+                    comparison,
+                    media.cell_metric.css_pixels(value, media.viewport),
+                ),
+                DimensionCondition::Between { lower, upper } => {
+                    matches_lower_bound(actual, lower, media)
+                        && matches_upper_bound(actual, upper, media)
+                }
             }
         }
+    }
+}
+
+fn compare_dimension(actual: f64, comparison: MediaComparison, expected: f64) -> bool {
+    match comparison {
+        MediaComparison::Equal => actual == expected,
+        MediaComparison::Minimum => actual >= expected,
+        MediaComparison::Maximum => actual <= expected,
+        MediaComparison::Greater => actual > expected,
+        MediaComparison::Less => actual < expected,
+    }
+}
+
+fn matches_lower_bound(actual: f64, bound: MediaBound, media: MediaContext) -> bool {
+    let expected = media.cell_metric.css_pixels(bound.value, media.viewport);
+    if bound.inclusive {
+        actual >= expected
+    } else {
+        actual > expected
+    }
+}
+
+fn matches_upper_bound(actual: f64, bound: MediaBound, media: MediaContext) -> bool {
+    let expected = media.cell_metric.css_pixels(bound.value, media.viewport);
+    if bound.inclusive {
+        actual <= expected
+    } else {
+        actual < expected
     }
 }

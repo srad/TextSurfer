@@ -58,6 +58,17 @@ fn nonempty_lines(page: &RenderedPage) -> Vec<String> {
 }
 
 #[test]
+fn responsive_css_pixel_breakpoint_uses_the_terminal_cell_metric() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join("responsive_units.html");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("fixture {}: {error}", path.display()));
+    assert_eq!(nonempty_lines(&render_source(&source, 79)), ["NARROW"]);
+    assert_eq!(nonempty_lines(&render_source(&source, 80)), ["WIDE"]);
+}
+
+#[test]
 fn margins_and_padding_golden() {
     insta::assert_snapshot!(golden("margins.html"));
 }
@@ -120,21 +131,21 @@ fn fixed_table_overflow_golden() {
 #[test]
 fn table_cells_share_normal_word_and_white_space_behavior() {
     let wrapping = render_source(
-        "<style>table { border-spacing: 0; table-layout: fixed; width: 6px; margin: 0 }
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 6ch; margin: 0 }
          td { padding: 0 }</style><table><tr><td>alpha beta</td></tr></table>",
         20,
     );
     assert_eq!(nonempty_lines(&wrapping), ["alpha", "beta"]);
 
     let accented = render_source(
-        "<style>table { border-spacing: 0; table-layout: fixed; width: 6px; margin: 0 }
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 6ch; margin: 0 }
          td { padding: 0 }</style><table><tr><td>Grüße Grüße</td></tr></table>",
         20,
     );
     assert_eq!(nonempty_lines(&accented), ["Grüße", "Grüße"]);
 
     let wide = render_source(
-        "<style>table { border-spacing: 0; table-layout: fixed; width: 6px; margin: 0 }
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 6ch; margin: 0 }
          td { padding: 0 }</style><table><tr><td>日本語のテキスト</td></tr></table>",
         20,
     );
@@ -143,7 +154,7 @@ fn table_cells_share_normal_word_and_white_space_behavior() {
     assert_eq!(wide_lines.concat(), "日本語のテキスト");
 
     let nowrap = render_source(
-        "<style>table { border-spacing: 0; table-layout: fixed; width: 20px; margin: 0 }
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 20ch; margin: 0 }
          td { padding: 0; white-space: nowrap }</style><table><tr><td>left
          right<br>end</td></tr></table>",
         24,
@@ -174,7 +185,7 @@ fn nested_tables_preserve_source_order_and_inline_outer_display() {
 fn captions_apply_box_geometry_paint_and_hit_regions() {
     let page = render_source(
         "<style>table { border-spacing: 0; margin: 0 } td { padding: 0 }
-         caption { border: solid; padding: 1px; background: #008000 }
+         caption { border: solid; padding: 1rem 1ch; background: #008000 }
          .bottom { caption-side: bottom }</style>
          <table><caption id=top>Top</caption><tr><td>x</td></tr>
          <caption id=bottom class=bottom>Bottom</caption></table>",
@@ -217,7 +228,7 @@ fn captions_apply_box_geometry_paint_and_hit_regions() {
     );
 
     let empty = render_source(
-        "<style>table { border-spacing: 0; margin: 0 } caption { border: solid; padding: 1px }
+        "<style>table { border-spacing: 0; margin: 0 } caption { border: solid; padding: 1rem 1ch }
          td { padding: 0 }</style><table><caption id=empty></caption><tr><td>x</td></tr></table>",
         20,
     );
@@ -234,7 +245,7 @@ fn captions_apply_box_geometry_paint_and_hit_regions() {
 #[test]
 fn anonymous_table_fixup_groups_only_consecutive_non_cells() {
     let page = render_source(
-        "<div style='display:table;border-spacing:1px 0'>
+        "<div style='display:table;border-spacing:1ch 0'>
            <span style='display:table-cell'>A</span><span>X</span><span>Y</span><span style='display:table-cell'>B</span>
          </div>",
         30,
@@ -269,12 +280,12 @@ fn column_group_widths_contribute_in_auto_and_fixed_layout() {
 
     let auto = separation(
         "<style>table { border-spacing: 0; margin: 0 } td { padding: 0 }
-         colgroup { width: 6px }</style>
+         colgroup { width: 6ch }</style>
          <table><colgroup><col><col></colgroup><tr><td>A</td><td>B</td></tr></table>",
     );
     let fixed = separation(
-        "<style>table { border-spacing: 0; table-layout: fixed; width: 4px; margin: 0 }
-         td { padding: 0 } colgroup { width: 6px }</style>
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 4ch; margin: 0 }
+         td { padding: 0 } colgroup { width: 6ch }</style>
          <table><colgroup><col><col></colgroup><tr><td>A</td><td>B</td></tr></table>",
     );
     assert!(auto >= 6);
@@ -284,7 +295,7 @@ fn column_group_widths_contribute_in_auto_and_fixed_layout() {
 #[test]
 fn table_properties_inherit_through_the_public_render_path() {
     let page = render_source(
-        "<div style='border-collapse:collapse;border-spacing:3px 2px;caption-side:bottom'>
+        "<div style='border-collapse:collapse;border-spacing:3ch 2rem;caption-side:bottom'>
            <div id=table style='display:table'>
              <span id=caption style='display:table-caption'>Caption</span>
              <span style='display:table-row'><span style='display:table-cell'>Cell</span></span>
@@ -310,8 +321,8 @@ fn table_properties_inherit_through_the_public_render_path() {
 fn clipped_nested_tables_do_not_relocate_their_far_border() {
     let page = render_source(
         "<style>table { border-spacing: 0; margin: 0 } td { padding: 0; border: none }
-         .outer { table-layout: fixed; width: 8px }
-         .inner { width: 20px; border: solid }</style>
+         .outer { table-layout: fixed; width: 8ch }
+         .inner { width: 20ch; border: solid }</style>
          <table class=outer><tr><td><table class=inner><tr><td>x</td></tr></table></td></tr></table>",
         30,
     );

@@ -1,9 +1,17 @@
 use sha2::{Digest, Sha256};
 
+use crate::core::style::CellMetric;
+
 use super::{
-    CELL_H, CP437_8X16, CP437_8X16_SHA256, CP437_TO_UNICODE, Glyph, GlyphWidth, REPLACEMENT,
-    UNICODE_TO_CP437, cp437_index, glyph,
+    CELL_H, CELL_W, CP437_8X16, CP437_8X16_SHA256, CP437_TO_UNICODE, Glyph, GlyphWidth,
+    REPLACEMENT, UNICODE_TO_CP437, cp437_index, glyph,
 };
+
+#[test]
+fn css_default_cell_metric_matches_the_vga_font_cell() {
+    assert_eq!(usize::from(CellMetric::DEFAULT.column_px()), CELL_W);
+    assert_eq!(usize::from(CellMetric::DEFAULT.row_px()), CELL_H);
+}
 
 /// Render a glyph as text rows so failures show the shape, not a bitmask.
 fn render(glyph: Glyph) -> Vec<String> {

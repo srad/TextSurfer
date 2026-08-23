@@ -38,7 +38,7 @@ Ready                              https://example.com
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
 M1-C done, awaiting the human terminal smoke; M1-D in progress — tables and generated content done,
-length units next)**
+length units done, outer/inner display modes next)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -59,7 +59,9 @@ length units next)**
   resize/mouse geometry
 - Hierarchical rendering path: cssparser + selectors cascade inline, embedded, linked and recursively
   imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
-  scripting, color scheme and viewport dimensions; Taffy sizes nested and anonymous block flow,
+  scripting, color scheme and CSS-pixel viewport dimensions, including MQ4 ranges. CSS absolute,
+  font-relative and viewport-relative lengths resolve through a shared 8×16 cell metric; Taffy
+  sizes nested and anonymous block flow,
   while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
   and nested-table support; textwrap and Unicode-aware fragments reflow six whitespace modes, and
   sparse paint emits clipped terminal-cell lines and merged borders. Table cells share the normal
@@ -100,11 +102,9 @@ length units next)**
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): CSS length units and the
-terminal cell metric — lengths currently ignore their unit, so `20px` of padding costs twenty
-columns — followed by outer/inner display modes, presentational HTML, `text-align` and scaled
-headings. After M1-D: links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa
-integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): outer/inner display modes,
+followed by presentational HTML, `text-align` and scaled headings. After M1-D: links/forms/search
+(M2), mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 
@@ -203,7 +203,8 @@ Status, decisions, acceptance criteria and the updates log live in
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
 style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
 awaiting the human terminal smoke · M1-D tables and generated content/markers implemented, with
-length units, outer/inner display modes, legacy HTML styling and terminal typography still open ·
+length units implemented and outer/inner display modes, legacy HTML styling and terminal
+typography still open ·
 M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
