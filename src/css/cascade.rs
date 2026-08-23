@@ -1831,10 +1831,10 @@ fn parse_length_token(parser: &mut Parser<'_, '_>) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::render::embedded_style_sheets;
     use crate::core::dom::{Attr, ElementNs, SharedDocument};
     use crate::css::{CssParser, CssparserParser};
     use crate::html::{Html5everParser, HtmlParser};
+    use crate::pipeline::render::embedded_style_sheets;
 
     #[test]
     fn ua_and_author_rules_form_a_computed_style_tree() {

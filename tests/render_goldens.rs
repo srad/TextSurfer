@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use textsurfer::app::render::{RenderedPage, render_html};
 use textsurfer::core::style::{BorderCollapse, BorderSpacing, CaptionSide, Palette, Rgb, Rgba};
 use textsurfer::paint::DisplayList;
+use textsurfer::pipeline::render::{RenderedPage, render_html};
 
 const WIDTH: usize = 40;
 

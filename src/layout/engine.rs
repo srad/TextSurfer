@@ -1439,9 +1439,14 @@ mod tests {
     /// Lays `source` out at `cols` and returns the painted rows, so marker geometry can be
     /// asserted as the columns a reader actually sees.
     fn rendered_rows(source: &str, cols: u16) -> Vec<String> {
-        crate::app::render::render_html(source, Size { cols, rows: 24 }, Palette::DEFAULT, false)
-            .painted
-            .text_lines()
+        crate::pipeline::render::render_html(
+            source,
+            Size { cols, rows: 24 },
+            Palette::DEFAULT,
+            false,
+        )
+        .painted
+        .text_lines()
     }
 
     #[test]
@@ -1498,7 +1503,7 @@ mod tests {
         let outcome = crate::html::Html5everParser::new(false)
             .parse_document("<style>a::after { content: ' (link)' }</style><a href='/x'>go</a>");
         let document = outcome.document.borrow();
-        let sheets = crate::app::render::embedded_style_sheets(&document);
+        let sheets = crate::pipeline::render::embedded_style_sheets(&document);
         let styles = BasicCascade.apply(&sheets, &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 24 });
         let link = tree.links.first().expect("the anchor is a link");

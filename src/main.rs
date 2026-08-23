@@ -5,20 +5,13 @@ use std::time::{Duration, Instant};
 use clap::{Parser, ValueEnum};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use url::Url;
 
 use textsurfer::app::App;
 use textsurfer::app::net::{Navigate, PoolNet};
-use textsurfer::app::page_load::{PageLoad, PageLoadOptions, STYLESHEET_DEADLINE};
-use textsurfer::app::render::{ResponseKind, response_kind};
 use textsurfer::core::event::{Key, KeyEvent, KeyModifiers as AppKeyModifiers};
 use textsurfer::core::geom::Size;
-use textsurfer::core::url::url_fix;
-use textsurfer::css::ColorScheme;
-use textsurfer::net::{
-    FetchPayload, FetchPool, FetchRequest, FileFetch, ResourceId, SchemeFetch, UreqFetch,
-    charset_from_content_type, decode, decode_text,
-};
+use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
+use textsurfer::pipeline::dump::dump_lines;
 use textsurfer::ui::chrome;
 use textsurfer::ui::theme::NORTON;
 
@@ -90,99 +83,12 @@ fn main() -> io::Result<()> {
 }
 
 fn dump(fetch: Arc<dyn textsurfer::net::Fetch>, url: &str, cols: u16, rows: u16) -> io::Result<()> {
-    let lines = dump_lines(fetch, url, cols, rows)?;
+    let lines = dump_lines(fetch, url, Size { cols, rows }, NORTON.palette())?;
     let mut out = io::stdout().lock();
     for line in lines {
         writeln!(out, "{}", line.trim_end())?;
     }
     Ok(())
-}
-
-fn dump_lines(
-    fetch: Arc<dyn textsurfer::net::Fetch>,
-    url: &str,
-    cols: u16,
-    rows: u16,
-) -> io::Result<Vec<String>> {
-    let fixed = url_fix(url);
-    let parsed = Url::parse(&fixed)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-    let pool = FetchPool::spawn(fetch, 4);
-    pool.submit(0, 0, ResourceId::DOCUMENT, FetchRequest { url: parsed });
-    let response = loop {
-        if let Some(payload) = pool.try_recv() {
-            break payload
-                .result
-                .map_err(|error| io::Error::other(error.to_string()))?;
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    };
-    let charset = response
-        .content_type
-        .as_deref()
-        .and_then(charset_from_content_type);
-    let viewport = Size {
-        cols: cols.max(1),
-        rows: rows.max(1),
-    };
-    let mut detach_pool = false;
-    let lines = match response_kind(response.content_type.as_deref()) {
-        ResponseKind::Html => {
-            let decoded = decode(&response.body, charset.as_deref());
-            let mut load = PageLoad::new(
-                &decoded.text,
-                response.final_url,
-                decoded.encoding,
-                PageLoadOptions {
-                    viewport,
-                    palette: NORTON.palette(),
-                    scripting: false,
-                    color_scheme: ColorScheme::Dark,
-                    started: Duration::ZERO,
-                },
-            );
-            let started = Instant::now();
-            loop {
-                for command in load.take_commands() {
-                    pool.submit(0, 0, command.resource_id, FetchRequest { url: command.url });
-                }
-                if load.take_cancel_requested() {
-                    pool.cancel(0, 0);
-                }
-                if load.applicable_is_settled() || started.elapsed() >= STYLESHEET_DEADLINE {
-                    detach_pool = !load.is_settled();
-                    pool.cancel(0, 0);
-                    break;
-                }
-                if let Some(FetchPayload {
-                    resource_id,
-                    result,
-                    ..
-                }) = pool.try_recv()
-                {
-                    let _ = load.deliver(resource_id, result);
-                } else {
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-            }
-            load.force_render().painted.text_lines()
-        }
-        ResponseKind::PlainText => decode_text(&response.body, charset.as_deref())
-            .text
-            .lines()
-            .map(str::to_string)
-            .collect(),
-        ResponseKind::Unsupported(kind) => {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!("unsupported content type: {kind}"),
-            ));
-        }
-    };
-    if detach_pool {
-        pool.shutdown_without_waiting();
-    }
-    Ok(lines)
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
@@ -249,29 +155,6 @@ fn from_terminal_key(key: event::KeyEvent) -> Option<KeyEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use textsurfer::net::{Fetch, FetchError, FetchResponse};
-
-    struct ExternalDumpFetch;
-
-    impl Fetch for ExternalDumpFetch {
-        fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
-            let (body, content_type) = if request.url.path().ends_with("site.css") {
-                (b"#navigation { display:none }".to_vec(), "text/css")
-            } else {
-                (
-                    b"<!doctype html><link rel=stylesheet href='/site.css'>\
-                      <nav id=navigation>sidebar</nav><main>article</main>"
-                        .to_vec(),
-                    "text/html; charset=utf-8",
-                )
-            };
-            Ok(FetchResponse {
-                final_url: request.url.clone(),
-                body,
-                content_type: Some(content_type.to_string()),
-            })
-        }
-    }
 
     fn terminal_key(kind: KeyEventKind) -> event::KeyEvent {
         event::KeyEvent::new_with_kind(KeyCode::Char('g'), KeyModifiers::NONE, kind)
@@ -315,18 +198,5 @@ mod tests {
         let cli = Cli::try_parse_from(["textsurfer", "--dump", "--rows", "31"]).unwrap();
         assert_eq!(cli.rows, 31);
         assert!(Cli::try_parse_from(["textsurfer", "--unknown"]).is_err());
-    }
-
-    #[test]
-    fn dump_uses_the_external_stylesheet_load_driver() {
-        let lines = dump_lines(
-            Arc::new(ExternalDumpFetch),
-            "https://example.com/article",
-            80,
-            24,
-        )
-        .unwrap();
-        assert!(lines.iter().any(|line| line.contains("article")));
-        assert!(!lines.iter().any(|line| line.contains("sidebar")));
     }
 }

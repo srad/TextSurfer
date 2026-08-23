@@ -18,10 +18,10 @@ use crate::ui::widgets::status::StatusView;
 use crate::ui::widgets::tabs::TabChip;
 
 use super::net::{Navigate, NoopNet, Route, route};
-use super::page_load::{PageLoad, PageLoadOptions};
-use super::render::{RenderedPage, ResponseKind, paint_document, response_kind};
 use super::startpage::{content_for, start_page_for};
 use super::tabs::TabManager;
+use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
+use crate::pipeline::render::{RenderedPage, ResponseKind, paint_document, response_kind};
 use crate::ui::theme::NORTON;
 use crate::ui::widgets::menu::MENUS;
 
@@ -755,10 +755,10 @@ fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::page_load::STYLESHEET_DEADLINE;
     use crate::app::startpage::start_page;
     use crate::core::event::KeyModifiers;
     use crate::net::{FetchError, FetchResponse};
+    use crate::pipeline::page_load::STYLESHEET_DEADLINE;
     use proptest::prelude::*;
     use std::sync::Mutex;
     use url::Url;

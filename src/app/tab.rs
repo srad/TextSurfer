@@ -2,7 +2,7 @@ use crate::core::dom::SharedDocument;
 use crate::core::style::StyleTree;
 use crate::paint::DisplayList;
 
-use super::page_load::PageLoad;
+use crate::pipeline::page_load::PageLoad;
 
 pub struct Tab {
     pub id: u64,
