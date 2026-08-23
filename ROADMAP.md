@@ -63,15 +63,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — generated-content/display audit regressions open) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables and generated content done; length units next) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **349 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
-24 golden**.
+Test counts at the last green run (2026-08-23): **353 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
+25 golden**.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -85,7 +85,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 | Owner | Unconfirmed risk or test gap | Required disposition |
 |---|---|---|
 | M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
-| M1-D | Non-inherited background ownership on pseudo boxes lacks adversarial coverage | Challenge it through the public render harness while closing the reopened generated-content item |
+| ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
 | M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2 |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
 | M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row | Put explicit resource ceilings and sparse-vs-dense evidence behind the perf gate |
@@ -423,7 +423,7 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       nested strokes cannot relocate a far edge. Full misparented-role wrapper construction remains
       explicitly owned by **Outer/inner display modes** below. Public render regressions sit beside
       the occupancy, glyph, hit-box, width, depth-limit and fixture proofs.
-- [ ] **Generated content and markers** *(in progress — audit regressions open)* —
+- [x] **Generated content and markers** *(done)* —
       `::before`/`::after`/`::marker` parse and match,
       `content` supports strings, `counter()`, `counters()`, `attr()` and `none`/`normal`, CSS
       counters (`counter-reset`/`counter-increment`/`counter-set`) run over a depth-scoped stack,
@@ -436,13 +436,20 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       replaced by them. Headings lost their `#` prefixes and gained UA bold; UA bullets step
       disc→circle→square with nesting depth. Generated fragments carry the originating element's
       `NodeId`, so link rects, hit-testing and search keep working through them.
-      The audit found three cascade failures: authored `display: list-item` still passes the old
-      degradation test as `block`; a later CSS-wide `content: initial` or `counter-reset: initial`
-      does not clear the earlier side-table value; and `li::marker { content: normal }` suppresses
-      the default marker instead of deferring to `list-style-type`. *Proof required:* replace the
-      stale degradation assertion and add cascade/layout cases for CSS-wide side-table winners and
-      marker `normal`, in addition to the existing twelve cascade tests (independent nesting,
-      sibling-scope isolation,
+      The three audit cascade failures are closed, each in the value parser that owned it:
+      `display: list-item` computes `Display::ListItem` instead of being bundled with the modes that
+      genuinely degrade to block; `content` and `counter-*` treat the CSS-wide keywords as "names
+      nothing" rather than "invalid", so a later `initial` clears the earlier side-table value
+      instead of letting it stand — while an empty counter list still merges with the implicit
+      `list-item` operation, so `counter-increment: initial` does not stop a list numbering; and
+      `content: normal` is distinct from `content: none`, deferring to the UA marker on `::marker`
+      while still producing no box on `::before`/`::after`. *Proven by* the replaced degradation
+      assertion plus `an_authored_display_list_item_is_a_real_list_item_not_a_block`,
+      `a_css_wide_content_keyword_clears_an_earlier_winning_declaration`,
+      `a_css_wide_counter_keyword_clears_the_reset_without_stopping_the_list` and
+      `marker_content_normal_defers_to_the_default_while_none_suppresses_it` — each verified to fail
+      against the unfixed source — in addition to the existing twelve cascade tests (independent
+      nesting, sibling-scope isolation,
       `counters()` joining, `display: none` suppression, invalid `content` dropping only its own
       declaration, `h1, .note::before` no longer losing the `h1` half, implicit-vs-authored counter
       merging), six layout tests (shared marker field, hanging indent, inside markers, suppressed
@@ -899,3 +906,27 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   unchanged. The user approved one local commit for the uncommitted
   continuation, superseding its earlier per-module commit outline. No source or dependency changed
   in this documentation follow-up.
+- 2026-08-23 — **M1-D generated-content audit regressions closed.** No dependency changed:
+  cssparser 0.37.0 and selectors 0.40.0 remain current, and no new helper was needed —
+  `css/values.rs::is_css_wide_keyword` already existed and already covered the exact set
+  (`initial | inherit | unset | revert | none`) that must clear a side table. Each of the three
+  failures turned out to belong to one value parser rather than to the cascade loop, which is why
+  the fixes are three small edits: `display: list-item` was bundled into the arm mapping the modes
+  that genuinely degrade to block; `parse_content` and `parse_counter_values` reported the CSS-wide
+  keywords as *invalid* rather than as "names nothing", and an invalid declaration leaves the
+  earlier winner standing — the opposite of what a later declaration should do; and `content:
+  normal` was collapsed onto `content: none`, so an author asking for the UA marker got no marker.
+  Two deliberate approximations are recorded in the code: `inherit` on `content`/`counter-*`
+  resolves as if it were `initial`, since parent counter values are not modelled, and an empty
+  counter list still merges with the implicit `list-item` operation, so `counter-increment: initial`
+  does not stop a list numbering. `counter-reset: none` was already correct and is untouched.
+  Each new test was run against the unfixed source and observed to fail. The M1-D risk-register row
+  on pseudo-box background ownership is closed as **disproved**, not deferred: a pseudo box does
+  inherit the non-inherited `background`, but generated content is inline-level and the outside
+  marker's field is reserved inside the item's own box, so it can only ever repaint what the
+  originating element already painted — verified through the public render harness, including a
+  pseudo declaring `background: initial`. All five local gates are green in both the default and
+  `js` configurations at 353 library · 4 binary · 4 fetch-pipeline · 14 corpus · 25 render-golden
+  tests; no fixture or golden moved, and no `.snap.new` was written. M1-D stays open for length
+  units (next), outer/inner display modes, presentational HTML and terminal typography; the human
+  terminal smoke remains pending.

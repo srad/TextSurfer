@@ -238,8 +238,10 @@ fn cascade_pseudo(
     let text = match content {
         Some(ContentSpec::None) => return None,
         Some(ContentSpec::Pieces(pieces)) => resolve_content(&pieces, document, id, counters),
-        None => fallback?,
+        Some(ContentSpec::Normal) | None => fallback?,
     };
+    // An empty string would be an empty inline box in CSS. Generated content is inline-level here
+    // and inline borders are a non-goal, so such a box can never paint a cell: drop it.
     if text.is_empty() {
         return None;
     }

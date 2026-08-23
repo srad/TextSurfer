@@ -447,3 +447,37 @@ fn foreground_alpha_survives_the_complete_render_path() {
     assert_eq!(rect.width, 6);
     assert_eq!(painted.link_at(rect.col + 2, rect.row), Some(link));
 }
+
+/// `background` is not an inherited property, yet a pseudo box starts from the originating
+/// element's computed style, background included. That cannot show: generated content is
+/// inline-level and the outside marker hangs in a field reserved inside the item's own box, so a
+/// pseudo box only ever paints over the background its originating element already painted. This
+/// pins that — including the adversarial case where the pseudo declares `background: initial`,
+/// which is transparent in CSS and must reveal the item's background rather than the theme field.
+#[test]
+fn pseudo_boxes_never_own_a_background_their_element_did_not_paint() {
+    let page = render_source(
+        "<style>ul { margin: 0; padding: 0; background: #000080 }
+         li { margin: 0; background: #008000; list-style-type: decimal }
+         li::before { content: 'B'; background: initial } li::after { content: 'A' }
+         li::marker { background: initial }</style>
+         <ul><li id=item>text</li></ul>",
+        20,
+    );
+    let row = page.painted.row(0).expect("the item paints one row");
+    let line: String = row.spans.iter().map(|span| span.text.as_str()).collect();
+    assert_eq!(line.trim_end(), "1. BtextA");
+    for span in &row.spans {
+        assert_eq!(
+            span.style.bg,
+            Some(Rgb::new(0, 128, 0)),
+            "column {} escaped the item background",
+            span.col
+        );
+    }
+    // The marker field and both generated pieces still answer as the originating element.
+    let item = page.document.borrow().element_by_id("item").unwrap();
+    for col in [0, 3, 8] {
+        assert_eq!(page.painted.hit_test(col, 0), Some(item));
+    }
+}

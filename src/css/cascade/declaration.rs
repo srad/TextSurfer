@@ -29,8 +29,9 @@ pub(super) fn apply_declaration(
             if let Some(display) =
                 parse_ident(&declaration.value).and_then(|value| match value.as_str() {
                     "none" => Some(Display::None),
-                    "block" | "flow-root" | "list-item" | "flex" | "grid" | "inline-block"
-                    | "inline-flex" | "inline-grid" => Some(Display::Block),
+                    "list-item" => Some(Display::ListItem),
+                    "block" | "flow-root" | "flex" | "grid" | "inline-block" | "inline-flex"
+                    | "inline-grid" => Some(Display::Block),
                     "inline" => Some(Display::Inline),
                     "table" => Some(Display::Table),
                     "inline-table" => Some(Display::InlineTable),

@@ -223,8 +223,15 @@ fn list_item_count(document: &Document, list: NodeId) -> i64 {
         .count() as i64
 }
 
+/// `none` and the CSS-wide keywords all mean "this declaration names no counter". Returning an
+/// empty list rather than `None` matters: `None` means "invalid, ignore me", which would leave an
+/// earlier declaration standing instead of letting the later one win. An empty list still merges
+/// with the implicit `list-item` operation, so `li { counter-increment: initial }` does not stop a
+/// list numbering — which is also why `revert` needs no separate treatment, the UA origin it
+/// reverts to *is* that implicit operation. `inherit` is approximated the same way; we do not model
+/// parent counter values.
 fn parse_counter_values(source: &str, default: i64) -> Option<Vec<(String, i64)>> {
-    if parse_ident(source).as_deref() == Some("none") {
+    if parse_ident(source).is_some_and(|value| is_css_wide_keyword(&value)) {
         return Some(Vec::new());
     }
     let mut input = ParserInput::new(source);

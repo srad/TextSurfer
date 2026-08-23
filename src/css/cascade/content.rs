@@ -8,7 +8,11 @@ use super::counters::{CounterScopes, LIST_ITEM_COUNTER};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ContentSpec {
+    /// `none`: no box at all, even where the UA supplies one.
     None,
+    /// `normal`, and every CSS-wide keyword: defer to the UA. On `::marker` that is the default
+    /// marker; on `::before`/`::after` the UA supplies nothing, so the pseudo-element is dropped.
+    Normal,
     Pieces(Vec<ContentPiece>),
 }
 
@@ -30,10 +34,16 @@ pub(super) enum ContentPiece {
 /// Parses a `content` value. Anything the terminal cannot render (`url()`, quotes, images) makes
 /// the whole declaration invalid, which is what the spec asks for and keeps half-rendered
 /// generated content off the screen.
+///
+/// The CSS-wide keywords resolve to `Normal` rather than to "invalid": `content` is not inherited,
+/// so `initial` and `unset` are its initial value `normal`, `revert` returns to the UA value the
+/// caller passes as the fallback, and `inherit` is approximated the same way. Reporting them as
+/// invalid would let an earlier declaration keep the side-table entry the later one meant to clear.
 pub(super) fn parse_content(source: &str) -> Option<ContentSpec> {
     if let Some(keyword) = parse_ident(source) {
         return match keyword.as_str() {
-            "none" | "normal" => Some(ContentSpec::None),
+            "none" => Some(ContentSpec::None),
+            "normal" | "initial" | "inherit" | "unset" | "revert" => Some(ContentSpec::Normal),
             _ => None,
         };
     }

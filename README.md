@@ -37,8 +37,8 @@ Ready                              https://example.com
 ## Features
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
-M1-C done, awaiting the human terminal smoke; M1-D in progress with generated-content/display
-regressions open)**
+M1-C done, awaiting the human terminal smoke; M1-D in progress — tables and generated content done,
+length units next)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -70,8 +70,10 @@ regressions open)**
   decimal, roman, alphabetic and the disc/circle/square bullets that step with nesting depth.
   Outside markers hang in a field shared and right-aligned across sibling items, so `9.` and `10.`
   meet one text column and wrapped lines align under the item text; `<ol start>`, `<ol reversed>`,
-  `<li value>` and `ol`/`ul` `type` are honoured. Audit regressions remain for authored
-  `display:list-item`, CSS-wide side-table values and `content: normal` markers
+  `<li value>` and `ol`/`ul` `type` are honoured. Authored `display: list-item` makes any element a
+  real list item, the CSS-wide keywords clear `content` and `counter-*` the way they clear every
+  other property, and `content: normal` on `::marker` defers to the UA marker while `content: none`
+  suppresses it
 - Styled paint seam: author `color`, `background-color`, `font-weight` and `text-decoration` reach
   the terminal as coloured, bold, underlined and struck spans — with a contrast pass that keeps
   unreadable author colours legible over the theme's field — plus link and hit geometry carried
@@ -89,10 +91,10 @@ regressions open)**
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): close the remaining M1-D
-generated-content/display regressions, then CSS length units and the terminal cell metric — lengths currently ignore
-their unit, so `20px` of padding costs twenty columns — followed by presentational HTML, `text-align`
-and scaled headings. After M1-D: links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): CSS length units and the
+terminal cell metric — lengths currently ignore their unit, so `20px` of padding costs twenty
+columns — followed by outer/inner display modes, presentational HTML, `text-align` and scaled
+headings. After M1-D: links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa
 integration (M4–M5).
 
 ## Architecture
@@ -181,11 +183,10 @@ the real clock.
 Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
-style/layout/paint implemented with audit regressions open · M1-C external CSS implemented, awaiting
-the human terminal smoke · M1-D tables repaired and generated content/markers implemented with
-remaining display regressions open, with length units, legacy HTML styling and terminal typography also open · M2
-tabs/keyboard/forms ·
-M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
+style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
+awaiting the human terminal smoke · M1-D tables and generated content/markers implemented, with
+length units, outer/inner display modes, legacy HTML styling and terminal typography still open ·
+M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
 

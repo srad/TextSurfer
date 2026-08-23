@@ -354,7 +354,6 @@ fn unsupported_layout_modes_follow_the_degradation_contract() {
         "flex",
         "grid",
         "flow-root",
-        "list-item",
         "inline-flex",
         "inline-grid",
     ] {
@@ -740,5 +739,62 @@ fn a_marker_rule_overrides_the_ua_marker_text() {
 fn list_style_type_none_suppresses_the_marker_entirely() {
     assert!(
         markers_of("<style>li { list-style-type: none }</style><ul><li>a</li></ul>").is_empty()
+    );
+}
+
+#[test]
+fn an_authored_display_list_item_is_a_real_list_item_not_a_block() {
+    let mut document = Document::new();
+    let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse("p { display: list-item }");
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(styles.get(p).display, Display::ListItem);
+
+    // Decimal rather than the initial disc, so the implicit `list-item` step is observable at all.
+    assert_eq!(
+        markers_of(
+            "<style>div { display: list-item; list-style-type: decimal }</style>\
+             <section><div>a</div><div>b</div></section>"
+        ),
+        vec!["1.", "2."]
+    );
+}
+
+#[test]
+fn a_css_wide_content_keyword_clears_an_earlier_winning_declaration() {
+    assert_eq!(
+        pseudo_texts(
+            "<style>li::before { content: 'x' }</style><ul><li>a</li></ul>",
+            PseudoElement::Before
+        ),
+        vec!["x"]
+    );
+    assert!(
+        pseudo_texts(
+            "<style>li::before { content: 'x' } li::before { content: initial }</style>\
+             <ul><li>a</li></ul>",
+            PseudoElement::Before
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn a_css_wide_counter_keyword_clears_the_reset_without_stopping_the_list() {
+    let source = "<style>ol { counter-reset: n 5 } ol { counter-reset: initial }\
+                  li::before { content: counter(n) }</style>\
+                  <ol><li>a</li><li>b</li></ol>";
+    assert_eq!(pseudo_texts(source, PseudoElement::Before), vec!["0", "0"]);
+    assert_eq!(markers_of(source), vec!["1.", "2."]);
+}
+
+#[test]
+fn marker_content_normal_defers_to_the_default_while_none_suppresses_it() {
+    assert_eq!(
+        markers_of("<style>li::marker { content: normal }</style><ol><li>a</li><li>b</li></ol>"),
+        vec!["1.", "2."]
+    );
+    assert!(
+        markers_of("<style>li::marker { content: none }</style><ul><li>a</li></ul>").is_empty()
     );
 }
