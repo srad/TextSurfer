@@ -37,7 +37,7 @@ Ready                              https://example.com
 ## Features
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
-M1-C done, awaiting the human terminal smoke; M1-D in progress with table and generated-content
+M1-C done, awaiting the human terminal smoke; M1-D in progress with generated-content/display
 regressions open)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
@@ -62,8 +62,8 @@ regressions open)**
   scripting, color scheme and viewport dimensions; Taffy sizes nested and anonymous block flow,
   while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
   and nested-table support; textwrap and Unicode-aware fragments reflow six whitespace modes, and
-  sparse paint emits clipped terminal-cell lines and merged borders. The roadmap tracks audit
-  regressions in nested-table order/inline placement, cell line breaking and caption styling
+  sparse paint emits clipped terminal-cell lines and merged borders. Table cells share the normal
+  Unicode/white-space formatter; nested tables retain source order, and captions keep box styling
 - Generated content and list-marker support: `::before`, `::after` and `::marker` match, `content`
   supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped
   stack. Ordered lists number, nested lists number independently, and `list-style-type` covers
@@ -89,8 +89,8 @@ regressions open)**
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): close the reproduced M1-D
-regressions, then CSS length units and the terminal cell metric — lengths currently ignore
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): close the remaining M1-D
+generated-content/display regressions, then CSS length units and the terminal cell metric — lengths currently ignore
 their unit, so `20px` of padding costs twenty columns — followed by presentational HTML, `text-align`
 and scaled headings. After M1-D: links/forms/search (M2), mouse (M3), and the JavaScript seam/Boa
 integration (M4–M5).
@@ -189,8 +189,8 @@ Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
 style/layout/paint implemented with audit regressions open · M1-C external CSS implemented, awaiting
-the human terminal smoke · M1-D tables and generated content/markers implemented with audit
-regressions open, with length units, legacy HTML styling and terminal typography also open · M2
+the human terminal smoke · M1-D tables repaired and generated content/markers implemented with
+remaining display regressions open, with length units, legacy HTML styling and terminal typography also open · M2
 tabs/keyboard/forms ·
 M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 

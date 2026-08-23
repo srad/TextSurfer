@@ -63,7 +63,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — table/generated-content audit regressions open) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — generated-content/display audit regressions open) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
@@ -85,7 +85,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 | Owner | Unconfirmed risk or test gap | Required disposition |
 |---|---|---|
 | M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
-| M1-D | Anonymous-table fixup may split consecutive invalid children into separate cells; `colgroup` constraints, inherited table properties, nested clipped-stroke edges and non-inherited background ownership on pseudo boxes lack adversarial coverage | Challenge each through the public render harness while closing the reopened table/generated-content items |
+| M1-D | Non-inherited background ownership on pseudo boxes lacks adversarial coverage | Challenge it through the public render harness while closing the reopened generated-content item |
 | M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2 |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
 | M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row | Put explicit resource ceilings and sparse-vs-dense evidence behind the perf gate |
@@ -380,7 +380,7 @@ both viewport dimensions without restoring the blank loading state.
 Sequenced after M1-C and before M2: a terminal browser is judged on whether real pages are readable,
 and tables are what separate w3m from lynx. Flex/grid stay in M6.
 
-- [ ] **Table layout** *(in progress — audit regressions open)* — `display: table*` stops degrading
+- [x] **Table layout** *(done)* — `display: table*` stops degrading
       to block. Normalize the
       styled box tree with CSS anonymous-table fixup, then use an in-house formatter beside Taffy's
       block geometry. Support auto and fixed column width resolution, `colspan`/`rowspan`, nested
@@ -392,13 +392,14 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       may grow the table without recursive percentage reevaluation. Resource limits degrade an
       oversized table to normal block flow while preserving its content. In-house per the audit
       above; Taffy's `item_is_table` is used at its block-layout boundary.
-      The audit reproduced four contract failures: normal Latin words break at arbitrary graphemes
-      inside cells; `white-space: nowrap` preserves a source newline instead of collapsing it;
-      nested block/inline tables are emitted after all surrounding text (the accepted golden itself
-      shows `Before after` above the supposed inline table); and caption border/padding styles are
-      discarded. *Proof required:* focused regressions for shared line-break/white-space behavior,
-      DOM-order-preserving nested tables with true inline outer display, and styled caption boxes,
-      beside the existing occupancy, glyph, hit-box, width and fixture proofs.
+      The audit regressions are closed: normal flow and cells share one Unicode/white-space
+      formatter; nested tables retain source order and inline-table baseline placement; styled and
+      empty captions own real geometry, paint and hit regions; fixed tracks clip only after
+      formatting; column groups and inherited table properties contribute normally; limited
+      anonymous fixup groups consecutive improper children without synthetic DOM nodes; and clipped
+      nested strokes cannot relocate a far edge. Full misparented-role wrapper construction remains
+      explicitly owned by **Outer/inner display modes** below. Public render regressions sit beside
+      the occupancy, glyph, hit-box, width, depth-limit and fixture proofs.
 - [ ] **Generated content and markers** *(in progress — audit regressions open)* —
       `::before`/`::after`/`::marker` parse and match,
       `content` supports strings, `counter()`, `counters()`, `attr()` and `none`/`normal`, CSS
@@ -818,3 +819,14 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   share the nonempty/empty/missing image fallback. All five local gates are green at 347 library ·
   5 binary · 4 pipeline · 14 corpus · 17 render-golden tests; M1-B is done again with only the human
   terminal smoke pending.
+- 2026-08-23 — **M1-D table audit regressions closed.** No dependency changed: **textwrap 0.16.2**
+  and **Taffy 0.13.0** remain current. Normal flow and table cells now use one private inline
+  formatter; ordered nested-table atoms preserve block and inline source placement; depth-limited
+  metrics are cached and degraded rendering retains descendant text. Fixed layout honors its
+  declared width before grapheme-safe clipping. Styled captions own border/padding/background/hit
+  geometry, consecutive improper children share anonymous cells without synthetic DOM nodes,
+  `colgroup` widths and inherited table properties contribute normally, and clipped nested strokes
+  discard only the removed outer edges. The focused nested/fixed goldens were inspected and updated.
+  All five local gates are green at 348 library · 5 binary · 4 pipeline · 14 corpus · 24
+  render-golden tests; M1-D remains open for the separately owned generated-content/display work,
+  length units, presentational HTML, alignment and typography. Human terminal smoke remains pending.

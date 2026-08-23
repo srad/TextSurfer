@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use textsurfer::app::render::render_html;
-use textsurfer::core::style::{Palette, Rgb, Rgba};
+use textsurfer::app::render::{RenderedPage, render_html};
+use textsurfer::core::style::{BorderCollapse, BorderSpacing, CaptionSide, Palette, Rgb, Rgba};
 use textsurfer::paint::DisplayList;
 
 const WIDTH: usize = 40;
@@ -34,6 +34,27 @@ fn render(name: &str) -> DisplayList {
 
 fn golden(name: &str) -> String {
     render(name).text_lines().join("\n")
+}
+
+fn render_source(source: &str, width: u16) -> RenderedPage {
+    render_html(
+        source,
+        textsurfer::core::geom::Size {
+            cols: width,
+            rows: 24,
+        },
+        palette(),
+        false,
+    )
+}
+
+fn nonempty_lines(page: &RenderedPage) -> Vec<String> {
+    page.painted
+        .text_lines()
+        .into_iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
 }
 
 #[test]
@@ -94,6 +115,213 @@ fn nested_captioned_tables_golden() {
 #[test]
 fn fixed_table_overflow_golden() {
     insta::assert_snapshot!(golden("table_fixed_overflow.html"));
+}
+
+#[test]
+fn table_cells_share_normal_word_and_white_space_behavior() {
+    let wrapping = render_source(
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 6px; margin: 0 }
+         td { padding: 0 }</style><table><tr><td>alpha beta</td></tr></table>",
+        20,
+    );
+    assert_eq!(nonempty_lines(&wrapping), ["alpha", "beta"]);
+
+    let accented = render_source(
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 6px; margin: 0 }
+         td { padding: 0 }</style><table><tr><td>Grüße Grüße</td></tr></table>",
+        20,
+    );
+    assert_eq!(nonempty_lines(&accented), ["Grüße", "Grüße"]);
+
+    let wide = render_source(
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 6px; margin: 0 }
+         td { padding: 0 }</style><table><tr><td>日本語のテキスト</td></tr></table>",
+        20,
+    );
+    let wide_lines = nonempty_lines(&wide);
+    assert!(wide_lines.len() > 1);
+    assert_eq!(wide_lines.concat(), "日本語のテキスト");
+
+    let nowrap = render_source(
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 20px; margin: 0 }
+         td { padding: 0; white-space: nowrap }</style><table><tr><td>left
+         right<br>end</td></tr></table>",
+        24,
+    );
+    assert_eq!(nonempty_lines(&nowrap), ["left right", "end"]);
+}
+
+#[test]
+fn nested_tables_preserve_source_order_and_inline_outer_display() {
+    let page = render_source(
+        "<style>table { border-spacing: 0; margin: 0 } td { padding: 0 }
+         .inline { display: inline-table }
+         .inline > span { display: table-row }
+         .inline > span > span { display: table-cell }</style>
+         <table><tr><td>before<table><tr><td>block</td></tr></table>after</td></tr>
+         <tr><td>Before <span class=inline><span><span>Inline</span></span></span> after</td></tr></table>",
+        40,
+    );
+    let lines = nonempty_lines(&page);
+    let before = lines.iter().position(|line| line == "before").unwrap();
+    let block = lines.iter().position(|line| line == "block").unwrap();
+    let after = lines.iter().position(|line| line == "after").unwrap();
+    assert!(before < block && block < after);
+    assert!(lines.iter().any(|line| line == "Before Inline after"));
+}
+
+#[test]
+fn captions_apply_box_geometry_paint_and_hit_regions() {
+    let page = render_source(
+        "<style>table { border-spacing: 0; margin: 0 } td { padding: 0 }
+         caption { border: solid; padding: 1px; background: #008000 }
+         .bottom { caption-side: bottom }</style>
+         <table><caption id=top>Top</caption><tr><td>x</td></tr>
+         <caption id=bottom class=bottom>Bottom</caption></table>",
+        30,
+    );
+    let document = page.document.borrow();
+    let top = document.element_by_id("top").unwrap();
+    let bottom = document.element_by_id("bottom").unwrap();
+    let top_hit = page
+        .painted
+        .hits
+        .iter()
+        .find(|hit| hit.node == top)
+        .unwrap();
+    let bottom_hit = page
+        .painted
+        .hits
+        .iter()
+        .find(|hit| hit.node == bottom)
+        .unwrap();
+    assert_eq!(top_hit.rect.height, 5);
+    assert_eq!(bottom_hit.rect.height, 5);
+    assert!(top_hit.rect.row < bottom_hit.rect.row);
+    assert_eq!(
+        page.painted
+            .hit_test(top_hit.rect.col + 1, top_hit.rect.row + 1),
+        Some(top)
+    );
+    assert!(
+        page.painted.rows[top_hit.rect.row + 1]
+            .spans
+            .iter()
+            .any(|span| span.style.bg == Some(Rgb::new(0, 128, 0)))
+    );
+    assert!(
+        page.painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains('┌'))
+    );
+
+    let empty = render_source(
+        "<style>table { border-spacing: 0; margin: 0 } caption { border: solid; padding: 1px }
+         td { padding: 0 }</style><table><caption id=empty></caption><tr><td>x</td></tr></table>",
+        20,
+    );
+    let empty_node = empty.document.borrow().element_by_id("empty").unwrap();
+    let empty_hit = empty
+        .painted
+        .hits
+        .iter()
+        .find(|hit| hit.node == empty_node)
+        .unwrap();
+    assert_eq!(empty_hit.rect.height, 4);
+}
+
+#[test]
+fn anonymous_table_fixup_groups_only_consecutive_non_cells() {
+    let page = render_source(
+        "<div style='display:table;border-spacing:1px 0'>
+           <span style='display:table-cell'>A</span><span>X</span><span>Y</span><span style='display:table-cell'>B</span>
+         </div>",
+        30,
+    );
+    assert!(nonempty_lines(&page).iter().any(|line| line == "A XY B"));
+
+    let interrupted = render_source(
+        "<div style='display:table;border-spacing:0'>
+           <span>X</span><span style='display:table-caption'>Caption</span><span>Y</span>
+         </div>",
+        30,
+    );
+    let lines = nonempty_lines(&interrupted);
+    assert!(lines.iter().any(|line| line == "X"));
+    assert!(lines.iter().any(|line| line == "Y"));
+}
+
+#[test]
+fn column_group_widths_contribute_in_auto_and_fixed_layout() {
+    fn separation(source: &str) -> usize {
+        let page = render_source(source, 30);
+        page.painted
+            .text_lines()
+            .into_iter()
+            .find_map(|line| {
+                let a = line.chars().position(|ch| ch == 'A')?;
+                let b = line.chars().position(|ch| ch == 'B')?;
+                Some(b - a)
+            })
+            .unwrap()
+    }
+
+    let auto = separation(
+        "<style>table { border-spacing: 0; margin: 0 } td { padding: 0 }
+         colgroup { width: 6px }</style>
+         <table><colgroup><col><col></colgroup><tr><td>A</td><td>B</td></tr></table>",
+    );
+    let fixed = separation(
+        "<style>table { border-spacing: 0; table-layout: fixed; width: 4px; margin: 0 }
+         td { padding: 0 } colgroup { width: 6px }</style>
+         <table><colgroup><col><col></colgroup><tr><td>A</td><td>B</td></tr></table>",
+    );
+    assert!(auto >= 6);
+    assert!(fixed >= 6);
+}
+
+#[test]
+fn table_properties_inherit_through_the_public_render_path() {
+    let page = render_source(
+        "<div style='border-collapse:collapse;border-spacing:3px 2px;caption-side:bottom'>
+           <div id=table style='display:table'>
+             <span id=caption style='display:table-caption'>Caption</span>
+             <span style='display:table-row'><span style='display:table-cell'>Cell</span></span>
+           </div>
+         </div>",
+        30,
+    );
+    let document = page.document.borrow();
+    let table = document.element_by_id("table").unwrap();
+    let caption = document.element_by_id("caption").unwrap();
+    assert_eq!(
+        page.styles.get(table).border_collapse,
+        BorderCollapse::Collapse
+    );
+    assert_eq!(
+        page.styles.get(table).border_spacing,
+        BorderSpacing::new(3, 2)
+    );
+    assert_eq!(page.styles.get(caption).caption_side, CaptionSide::Bottom);
+}
+
+#[test]
+fn clipped_nested_tables_do_not_relocate_their_far_border() {
+    let page = render_source(
+        "<style>table { border-spacing: 0; margin: 0 } td { padding: 0; border: none }
+         .outer { table-layout: fixed; width: 8px }
+         .inner { width: 20px; border: solid }</style>
+         <table class=outer><tr><td><table class=inner><tr><td>x</td></tr></table></td></tr></table>",
+        30,
+    );
+    let top = page
+        .painted
+        .text_lines()
+        .into_iter()
+        .find(|line| line.contains('┌'))
+        .unwrap();
+    assert!(!top.ends_with('┐'), "{top:?}");
 }
 
 #[test]

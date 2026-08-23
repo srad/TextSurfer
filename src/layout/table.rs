@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -7,6 +8,10 @@ use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::style::{
     BorderCollapse, BorderEdges, BorderLineStyle, BorderSide, CellStyle, ComputedStyle, CssWidth,
     Display, PseudoElement, StyleTree, TableLayoutMode, WhiteSpace,
+};
+use crate::layout::text_flow::{
+    Atom, Glyph, Piece, format_inline, formatted_height, intrinsic_width, line_height,
+    min_content_width, normalize_segment_breaks,
 };
 use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, LayoutRect};
 
@@ -71,6 +76,16 @@ impl TableOutput {
     }
 }
 
+impl Atom for TableOutput {
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+}
+
 #[derive(Clone, Default)]
 pub(super) struct TableModel {
     pub rows: Vec<TableRow>,
@@ -88,7 +103,8 @@ pub(super) struct TableRow {
 
 #[derive(Clone)]
 pub(super) struct TableCell {
-    pub node: NodeId,
+    pub owner: Option<NodeId>,
+    roots: Vec<NodeId>,
     pub row: usize,
     pub col: usize,
     pub row_span: usize,
@@ -98,11 +114,16 @@ pub(super) struct TableCell {
 pub(super) struct TableFormatter<'a> {
     document: &'a Document,
     styles: &'a StyleTree,
+    metric_cache: RefCell<HashMap<(NodeId, usize, usize, usize), MetricAtom>>,
 }
 
 impl<'a> TableFormatter<'a> {
     pub fn new(document: &'a Document, styles: &'a StyleTree) -> Self {
-        Self { document, styles }
+        Self {
+            document,
+            styles,
+            metric_cache: RefCell::new(HashMap::new()),
+        }
     }
 
     pub fn format(
@@ -139,9 +160,16 @@ impl<'a> TableFormatter<'a> {
         let mut group = 0usize;
         for child in self.document.children(table) {
             match self.styles.get(child).display {
-                Display::TableCaption => captions.push(child),
-                Display::TableColumn => self.expand_column(child, None, &mut column_nodes),
+                Display::TableCaption => {
+                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    captions.push(child);
+                }
+                Display::TableColumn => {
+                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.expand_column(child, None, &mut column_nodes);
+                }
                 Display::TableColumnGroup => {
+                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     let before = column_nodes.len();
                     for column in self.document.children(child) {
                         if self.styles.get(column).display == Display::TableColumn {
@@ -173,7 +201,7 @@ impl<'a> TableFormatter<'a> {
                             node: None,
                             group,
                             group_node: None,
-                            cells: std::mem::take(&mut anonymous_cells),
+                            cells: self.cell_seeds(std::mem::take(&mut anonymous_cells)),
                         });
                     }
                     anonymous_rows.push(self.row_seed(child, group, None));
@@ -215,12 +243,19 @@ impl<'a> TableFormatter<'a> {
         let mut cells = Vec::new();
         let mut columns = 0usize;
         for (row, seed) in seeds.iter().enumerate() {
-            for node in &seed.cells {
+            for seed_cell in &seed.cells {
                 if cells.len() >= limits.max_cells {
                     return None;
                 }
-                let col_span = self.span(*node, "colspan", false).clamp(1, 1_000);
-                let raw_row_span = self.span(*node, "rowspan", true);
+                let col_span = seed_cell
+                    .owner
+                    .map(|node| self.span(node, "colspan", false))
+                    .unwrap_or(1)
+                    .clamp(1, 1_000);
+                let raw_row_span = seed_cell
+                    .owner
+                    .map(|node| self.span(node, "rowspan", true))
+                    .unwrap_or(1);
                 let group_end = seeds
                     .iter()
                     .enumerate()
@@ -246,7 +281,8 @@ impl<'a> TableFormatter<'a> {
                 occupy(&mut occupied, row, col, row_span, col_span);
                 columns = columns.max(col + col_span);
                 cells.push(TableCell {
-                    node: *node,
+                    owner: seed_cell.owner,
+                    roots: seed_cell.roots.clone(),
                     row,
                     col,
                     row_span,
@@ -284,7 +320,7 @@ impl<'a> TableFormatter<'a> {
                             node: None,
                             group,
                             group_node: Some(group_node),
-                            cells: std::mem::take(&mut cells),
+                            cells: self.cell_seeds(std::mem::take(&mut cells)),
                         });
                     }
                     rows.push(self.row_seed(child, group, Some(group_node)));
@@ -300,19 +336,14 @@ impl<'a> TableFormatter<'a> {
                 node: None,
                 group,
                 group_node: Some(group_node),
-                cells,
+                cells: self.cell_seeds(cells),
             });
         }
         rows
     }
 
     fn row_seed(&self, row: NodeId, group: usize, group_node: Option<NodeId>) -> RowSeed {
-        let mut cells = Vec::new();
-        for child in self.document.children(row) {
-            if self.styles.get(child).display != Display::None && !self.is_ignorable(child) {
-                cells.push(child);
-            }
-        }
+        let cells = self.cell_seeds(self.document.children(row));
         RowSeed {
             node: Some(row),
             group,
@@ -327,9 +358,41 @@ impl<'a> TableFormatter<'a> {
                 node: None,
                 group,
                 group_node: None,
-                cells: std::mem::take(cells),
+                cells: self.cell_seeds(std::mem::take(cells)),
             });
         }
+    }
+
+    fn cell_seeds(&self, children: Vec<NodeId>) -> Vec<CellSeed> {
+        let mut cells = Vec::new();
+        let mut anonymous = Vec::new();
+        for child in children {
+            let display = self.styles.get(child).display;
+            if display == Display::None || self.is_ignorable(child) {
+                continue;
+            }
+            if display == Display::TableCell {
+                if !anonymous.is_empty() {
+                    cells.push(CellSeed {
+                        owner: None,
+                        roots: std::mem::take(&mut anonymous),
+                    });
+                }
+                cells.push(CellSeed {
+                    owner: Some(child),
+                    roots: vec![child],
+                });
+            } else {
+                anonymous.push(child);
+            }
+        }
+        if !anonymous.is_empty() {
+            cells.push(CellSeed {
+                owner: None,
+                roots: anonymous,
+            });
+        }
+        cells
     }
 
     fn expand_column(&self, node: NodeId, group: Option<NodeId>, columns: &mut Vec<ColumnTrack>) {
@@ -378,6 +441,12 @@ impl<'a> TableFormatter<'a> {
         )
     }
 
+    fn cell_style(&self, cell: &TableCell) -> ComputedStyle {
+        cell.owner
+            .map(|node| self.styles.get(node))
+            .unwrap_or_default()
+    }
+
     fn layout_model(
         &self,
         table: NodeId,
@@ -390,7 +459,7 @@ impl<'a> TableFormatter<'a> {
         let metrics: Vec<_> = model
             .cells
             .iter()
-            .map(|cell| self.cell_metrics(cell.node))
+            .map(|cell| self.cell_metrics(&cell.roots, self.cell_style(cell), limits, nesting))
             .collect();
         let collapsed = table_style.border_collapse == BorderCollapse::Collapse;
         let grid = usize::from(
@@ -399,7 +468,7 @@ impl<'a> TableFormatter<'a> {
                     || model
                         .cells
                         .iter()
-                        .any(|cell| self.styles.get(cell.node).border.has_layout())
+                        .any(|cell| self.cell_style(cell).border.has_layout())
                     || model.rows.iter().any(|row| {
                         row.node
                             .is_some_and(|node| self.styles.get(node).border.has_layout())
@@ -460,12 +529,20 @@ impl<'a> TableFormatter<'a> {
                 grow_span(&mut minimum, cell.col, cell.col_span, metric.minimum);
                 grow_span(&mut maximum, cell.col, cell.col_span, metric.maximum);
             }
-            if let Some(width) = cell_width_hint(self.styles.get(cell.node), percentage_basis) {
+            if let Some(width) = cell_width_hint(self.cell_style(cell), percentage_basis) {
                 grow_span(&mut minimum, cell.col, cell.col_span, width);
                 grow_span(&mut maximum, cell.col, cell.col_span, width);
             }
         }
         for (col, track) in model.column_nodes.iter().enumerate() {
+            if let Some(group) = track.group {
+                apply_width_hint(
+                    self.styles.get(group).width,
+                    available_width,
+                    &mut minimum[col],
+                );
+                maximum[col] = maximum[col].max(minimum[col]);
+            }
             if let Some(node) = track.column {
                 apply_width_hint(
                     self.styles.get(node).width,
@@ -475,43 +552,46 @@ impl<'a> TableFormatter<'a> {
                 maximum[col] = maximum[col].max(minimum[col]);
             }
         }
-        let mut columns = if table_style.table_layout == TableLayoutMode::Fixed
-            && specified.is_some()
-        {
-            let mut fixed = vec![0usize; model.columns];
-            for (col, track) in model.column_nodes.iter().enumerate() {
-                if let Some(node) = track.column {
-                    apply_width_hint(
-                        self.styles.get(node).width,
-                        available_width,
-                        &mut fixed[col],
-                    );
-                }
-            }
-            for cell in model.cells.iter().filter(|cell| cell.row == 0) {
-                if let Some(width) = cell_width_hint(self.styles.get(cell.node), percentage_basis) {
-                    let each = width.div_ceil(cell.col_span);
-                    for value in &mut fixed[cell.col..cell.col + cell.col_span] {
-                        *value = (*value).max(each);
+        let mut columns =
+            if table_style.table_layout == TableLayoutMode::Fixed && specified.is_some() {
+                let mut fixed = vec![0usize; model.columns];
+                for (col, track) in model.column_nodes.iter().enumerate() {
+                    if let Some(group) = track.group {
+                        apply_width_hint(
+                            self.styles.get(group).width,
+                            available_width,
+                            &mut fixed[col],
+                        );
+                    }
+                    if let Some(node) = track.column {
+                        apply_width_hint(
+                            self.styles.get(node).width,
+                            available_width,
+                            &mut fixed[col],
+                        );
                     }
                 }
-            }
-            let target = specified.unwrap_or_default().saturating_sub(fixed_overhead);
-            distribute_remainder(&mut fixed, target);
-            for (value, min) in fixed.iter_mut().zip(&minimum) {
-                *value = (*value).max(*min);
-            }
-            fixed
-        } else {
-            let natural = maximum.iter().sum::<usize>();
-            let target = specified
-                .unwrap_or_else(|| natural.saturating_add(fixed_overhead).min(available_width))
-                .saturating_sub(fixed_overhead)
-                .max(minimum.iter().sum());
-            let mut auto = minimum.clone();
-            grow_towards(&mut auto, &maximum, target);
-            auto
-        };
+                for cell in model.cells.iter().filter(|cell| cell.row == 0) {
+                    if let Some(width) = cell_width_hint(self.cell_style(cell), percentage_basis) {
+                        let each = width.div_ceil(cell.col_span);
+                        for value in &mut fixed[cell.col..cell.col + cell.col_span] {
+                            *value = (*value).max(each);
+                        }
+                    }
+                }
+                let target = specified.unwrap_or_default().saturating_sub(fixed_overhead);
+                distribute_remainder(&mut fixed, target);
+                fixed
+            } else {
+                let natural = maximum.iter().sum::<usize>();
+                let target = specified
+                    .unwrap_or_else(|| natural.saturating_add(fixed_overhead).min(available_width))
+                    .saturating_sub(fixed_overhead)
+                    .max(minimum.iter().sum());
+                let mut auto = minimum.clone();
+                grow_towards(&mut auto, &maximum, target);
+                auto
+            };
         for value in &mut columns {
             *value = (*value).max(1);
         }
@@ -519,7 +599,10 @@ impl<'a> TableFormatter<'a> {
         let caption_natural = model
             .captions
             .iter()
-            .map(|caption| self.cell_metrics(*caption).maximum)
+            .map(|caption| {
+                self.cell_metrics(&[*caption], self.styles.get(*caption), limits, nesting)
+                    .maximum
+            })
             .max()
             .unwrap_or(0);
         let mut table_width = columns.iter().sum::<usize>().saturating_add(fixed_overhead);
@@ -539,7 +622,7 @@ impl<'a> TableFormatter<'a> {
                 } else {
                     spacing_x.saturating_mul(cell.col_span.saturating_sub(1))
                 });
-            let style = self.styles.get(cell.node);
+            let style = self.cell_style(cell);
             let edges = if collapsed {
                 EdgeInsets {
                     top: grid,
@@ -553,22 +636,16 @@ impl<'a> TableFormatter<'a> {
             let inner = span_width
                 .saturating_sub(edges.left + edges.right + style.padding.left + style.padding.right)
                 .max(1);
-            let lines = format_runs(
-                &metric.runs,
-                inner,
-                table_style.table_layout == TableLayoutMode::Fixed,
-            );
-            let nested = metric
-                .nested
-                .iter()
-                .map(|table| self.format(*table, inner, limits, nesting.saturating_add(1)))
-                .collect();
-            cell_layouts.push(CellLayout { lines, nested });
+            let pieces = resolve_items(&metric.items, |node| {
+                self.format(node, inner, limits, nesting.saturating_add(1))
+            });
+            let lines = format_inline(&pieces, inner);
+            cell_layouts.push(CellLayout { pieces, lines });
         }
         let mut row_heights = vec![0usize; model.rows.len()];
         for (cell, layout) in model.cells.iter().zip(&cell_layouts) {
             if cell.row_span == 1 {
-                let style = self.styles.get(cell.node);
+                let style = self.cell_style(cell);
                 let vertical = style.padding.top
                     + style.padding.bottom
                     + if collapsed {
@@ -582,7 +659,7 @@ impl<'a> TableFormatter<'a> {
         }
         for (cell, layout) in model.cells.iter().zip(&cell_layouts) {
             if cell.row_span > 1 {
-                let style = self.styles.get(cell.node);
+                let style = self.cell_style(cell);
                 let required = layout.height()
                     + style.padding.top
                     + style.padding.bottom
@@ -599,19 +676,53 @@ impl<'a> TableFormatter<'a> {
         let mut top_captions = Vec::new();
         let mut bottom_captions = Vec::new();
         for caption in &model.captions {
-            let lines = format_runs(
-                &self.cell_metrics(*caption).runs,
-                caption_width.max(1),
-                false,
-            );
-            if self.styles.get(*caption).caption_side == crate::core::style::CaptionSide::Top {
-                top_captions.push((*caption, lines));
+            let style = self.styles.get(*caption);
+            let edges = EdgeInsets::from_border(style.border);
+            let content_width = caption_width
+                .saturating_sub(edges.left + edges.right + style.padding.left + style.padding.right)
+                .max(1);
+            let metrics = self.cell_metrics(&[*caption], style, limits, nesting);
+            let pieces = resolve_items(&metrics.items, |node| {
+                self.format(node, content_width, limits, nesting.saturating_add(1))
+            });
+            let lines = format_inline(&pieces, content_width);
+            let content_height = formatted_height(&lines, &pieces);
+            let height = edges.top
+                + edges.bottom
+                + style.padding.top
+                + style.padding.bottom
+                + content_height;
+            let layout = CaptionLayout {
+                node: *caption,
+                style,
+                layout: CellLayout { pieces, lines },
+                border_rect: LayoutRect {
+                    col: 0,
+                    row: 0,
+                    width: caption_width,
+                    height,
+                },
+                content_rect: LayoutRect {
+                    col: edges.left + style.padding.left,
+                    row: edges.top + style.padding.top,
+                    width: content_width,
+                    height: content_height,
+                },
+            };
+            if style.caption_side == crate::core::style::CaptionSide::Top {
+                top_captions.push(layout);
             } else {
-                bottom_captions.push((*caption, lines));
+                bottom_captions.push(layout);
             }
         }
-        let top_height: usize = top_captions.iter().map(|(_, lines)| lines.len()).sum();
-        let bottom_height: usize = bottom_captions.iter().map(|(_, lines)| lines.len()).sum();
+        let top_height: usize = top_captions
+            .iter()
+            .map(|caption| caption.border_rect.height)
+            .sum();
+        let bottom_height: usize = bottom_captions
+            .iter()
+            .map(|caption| caption.border_rect.height)
+            .sum();
         let grid_height = table_edges.top
             + table_edges.bottom
             + table_padding.top
@@ -792,7 +903,7 @@ impl<'a> TableFormatter<'a> {
         }
         let placed_cells = output.model.cells.clone();
         for (index, cell) in placed_cells.iter().enumerate() {
-            let style = self.styles.get(cell.node);
+            let style = self.cell_style(cell);
             let left = x_positions[cell.col];
             let top = y_positions[cell.row];
             let right = x_positions[cell.col + cell.col_span].saturating_sub(if collapsed {
@@ -842,13 +953,15 @@ impl<'a> TableFormatter<'a> {
             if collapsed && cell.row + cell.row_span < output.model.rows.len() {
                 hit_rect.height = hit_rect.height.saturating_sub(grid);
             }
-            output.boxes.push(LayoutBox {
-                node: cell.node,
-                border_rect: hit_rect,
-                content_rect,
-                depth: 5,
-                style: style.cell_style(),
-            });
+            if let Some(node) = cell.owner {
+                output.boxes.push(LayoutBox {
+                    node,
+                    border_rect: hit_rect,
+                    content_rect,
+                    depth: 5,
+                    style: style.cell_style(),
+                });
+            }
             add_fill(&mut output.fills, rect, style, 5);
             if collapsed {
                 add_collapsed_candidates(
@@ -867,40 +980,13 @@ impl<'a> TableFormatter<'a> {
                     merge_group: index + 2,
                 });
             }
-            let mut content_offset = 0usize;
-            for (line_index, line) in cell_layouts[index]
-                .lines
-                .iter()
-                .take(content_rect.height)
-                .enumerate()
-            {
-                append_line(
-                    &mut output.fragments,
-                    line,
-                    content_rect.col,
-                    content_rect.row + line_index,
-                    content_rect.col + content_rect.width,
-                    6,
-                );
-                content_offset = line_index + 1;
-            }
-            for (nested_index, nested) in cell_layouts[index].nested.iter().enumerate() {
-                if content_offset >= content_rect.height {
-                    break;
-                }
-                append_nested_output(
-                    &mut output,
-                    nested,
-                    content_rect.col,
-                    content_rect.row + content_offset,
-                    content_rect,
-                    6,
-                    (index + 1)
-                        .saturating_mul(1_000)
-                        .saturating_add(nested_index),
-                );
-                content_offset = content_offset.saturating_add(nested.height);
-            }
+            append_cell_content(
+                &mut output,
+                &cell_layouts[index],
+                content_rect,
+                6,
+                (index + 1).saturating_mul(1_000),
+            );
         }
         if collapsed {
             output
@@ -925,162 +1011,194 @@ impl<'a> TableFormatter<'a> {
         output
     }
 
-    fn cell_metrics(&self, node: NodeId) -> CellMetrics {
-        let runs = self.collect_runs(node);
-        let nested = self.nested_tables(node);
-        let plain = normalized_text(&runs);
-        let mut maximum = plain
-            .lines()
-            .map(UnicodeWidthStr::width)
-            .max()
-            .unwrap_or(0)
-            .max(1);
-        let mut minimum = plain
-            .split_whitespace()
-            .flat_map(|word| word.graphemes(true))
-            .map(UnicodeWidthStr::width)
-            .max()
-            .unwrap_or(1);
-        for table in &nested {
-            let nested_metric = self.cell_metrics(*table);
-            minimum = minimum.max(nested_metric.minimum);
-            maximum = maximum.max(nested_metric.maximum);
-        }
-        let style = self.styles.get(node);
+    fn cell_metrics(
+        &self,
+        roots: &[NodeId],
+        style: ComputedStyle,
+        limits: TableLimits,
+        nesting: usize,
+    ) -> CellMetrics {
+        let items = self.collect_items(roots, true, true);
+        let pieces = resolve_items(&items, |node| {
+            self.nested_metric(node, limits, nesting.saturating_add(1))
+        });
+        let minimum = min_content_width(&pieces).max(1);
+        let maximum = intrinsic_width(&pieces).max(1);
         let horizontal = style.padding.left
             + style.padding.right
             + style.border.left.layout_width()
             + style.border.right.layout_width();
         CellMetrics {
-            runs,
-            nested,
+            items,
             minimum: minimum + horizontal,
             maximum: maximum + horizontal,
         }
     }
 
-    /// Generated content inside a cell is inline — the table formatter has no padding-based
-    /// marker field, so outside markers render inline here too.
-    fn push_pseudo(&self, runs: &mut Vec<RawRun>, node: NodeId, which: PseudoElement) {
+    fn nested_metric(&self, table: NodeId, limits: TableLimits, nesting: usize) -> MetricAtom {
+        let key = (table, nesting, limits.max_width, limits.max_nesting);
+        if let Some(metric) = self.metric_cache.borrow().get(&key).copied() {
+            return metric;
+        }
+        let metric = if nesting >= limits.max_nesting {
+            let items = self.collect_items(&[table], false, false);
+            let pieces: Vec<Piece<MetricAtom>> = resolve_items(&items, |_| unreachable!());
+            let lines = format_inline(&pieces, limits.max_width.max(1));
+            MetricAtom {
+                width: intrinsic_width(&pieces).max(1),
+                height: formatted_height(&lines, &pieces),
+            }
+        } else {
+            let output = self.format(table, limits.max_width, limits, nesting);
+            MetricAtom {
+                width: output.width,
+                height: output.height,
+            }
+        };
+        self.metric_cache.borrow_mut().insert(key, metric);
+        metric
+    }
+
+    fn push_pseudo(&self, items: &mut Vec<CellItem>, node: NodeId, which: PseudoElement) {
         let Some(pseudo) = self.styles.pseudo(node, which) else {
             return;
         };
-        runs.push(RawRun {
+        items.push(CellItem::Text(TextRun {
             node,
             text: pseudo.text.clone(),
             white_space: pseudo.style.white_space,
             style: pseudo.style.cell_style(),
-            forced: false,
-        });
+        }));
     }
 
-    fn collect_runs(&self, root: NodeId) -> Vec<RawRun> {
-        let mut runs = Vec::new();
-        let mut stack = vec![(root, false)];
-        while let Some((node, exit)) = stack.pop() {
-            if exit {
-                self.push_pseudo(&mut runs, node, PseudoElement::After);
-                if node != root && is_blockish(self.styles.get(node).display) {
-                    push_break(&mut runs, node, self.styles.get(node).cell_style());
+    fn collect_items(
+        &self,
+        roots: &[NodeId],
+        atomize_tables: bool,
+        atomize_roots: bool,
+    ) -> Vec<CellItem> {
+        let mut items = Vec::new();
+        let mut stack: Vec<_> = roots
+            .iter()
+            .rev()
+            .copied()
+            .map(|node| ContentEvent::Enter(node, true))
+            .collect();
+        while let Some(event) = stack.pop() {
+            let (node, root) = match event {
+                ContentEvent::Exit(node, root) => {
+                    self.push_pseudo(&mut items, node, PseudoElement::After);
+                    if !root && is_blockish(self.styles.get(node).display) {
+                        items.push(CellItem::Boundary(node, self.styles.get(node).cell_style()));
+                    }
+                    continue;
                 }
-                continue;
-            }
+                ContentEvent::Enter(node, root) => (node, root),
+            };
             match self.document.node(node) {
                 Some(Node::Text { data }) => {
-                    let parent = self.document.parent(node).unwrap_or(root);
+                    let parent = self.document.parent(node).unwrap_or(node);
                     let style = self.styles.get(parent);
-                    runs.push(RawRun {
+                    items.push(CellItem::Text(TextRun {
                         node,
-                        text: data.replace("\r\n", "\n").replace('\r', "\n"),
+                        text: normalize_segment_breaks(data),
                         white_space: style.white_space,
                         style: style.cell_style(),
-                        forced: false,
-                    });
+                    }));
                 }
                 Some(Node::Element { name, ns, attrs }) => {
                     let style = self.styles.get(node);
                     if style.display == Display::None {
                         continue;
                     }
-                    if node != root
+                    if atomize_tables
                         && matches!(style.display, Display::Table | Display::InlineTable)
+                        && (!root || atomize_roots)
                     {
+                        if style.display == Display::Table {
+                            items.push(CellItem::Boundary(node, style.cell_style()));
+                        }
+                        items.push(CellItem::Table(node));
+                        if style.display == Display::Table {
+                            items.push(CellItem::Boundary(node, style.cell_style()));
+                        }
                         continue;
                     }
-                    if node != root && is_blockish(style.display) {
-                        push_break(&mut runs, node, style.cell_style());
+                    if !root && is_blockish(style.display) {
+                        items.push(CellItem::Boundary(node, style.cell_style()));
                     }
                     if let Some(marker) = self.styles.marker(node) {
-                        runs.push(RawRun {
+                        items.push(CellItem::Text(TextRun {
                             node,
                             text: marker.text.clone(),
                             white_space: marker.style.white_space,
                             style: marker.style.cell_style(),
-                            forced: false,
-                        });
+                        }));
                     }
-                    self.push_pseudo(&mut runs, node, PseudoElement::Before);
+                    self.push_pseudo(&mut items, node, PseudoElement::Before);
                     if *ns == ElementNs::Html && name == "br" {
-                        push_break(&mut runs, node, style.cell_style());
+                        items.push(CellItem::Break(node, style.cell_style()));
                         continue;
                     }
                     if *ns == ElementNs::Html
                         && name == "img"
                         && let Some(text) = super::image_fallback(attrs)
                     {
-                        runs.push(RawRun {
+                        items.push(CellItem::Text(TextRun {
                             node,
                             text,
                             white_space: style.white_space,
                             style: style.cell_style(),
-                            forced: false,
-                        });
+                        }));
                     }
-                    stack.push((node, true));
+                    stack.push(ContentEvent::Exit(node, root));
                     let children = self.document.children(node);
-                    stack.extend(children.into_iter().rev().map(|child| (child, false)));
+                    stack.extend(
+                        children
+                            .into_iter()
+                            .rev()
+                            .map(|child| ContentEvent::Enter(child, false)),
+                    );
                 }
                 Some(Node::DocumentFragment) => {
                     let children = self.document.children(node);
-                    stack.extend(children.into_iter().rev().map(|child| (child, false)));
+                    stack.extend(
+                        children
+                            .into_iter()
+                            .rev()
+                            .map(|child| ContentEvent::Enter(child, false)),
+                    );
                 }
                 _ => {}
             }
         }
-        runs
-    }
-
-    fn nested_tables(&self, root: NodeId) -> Vec<NodeId> {
-        let mut tables = Vec::new();
-        let mut stack: Vec<_> = self.document.children(root).into_iter().rev().collect();
-        while let Some(node) = stack.pop() {
-            let display = self.styles.get(node).display;
-            if display == Display::None {
-                continue;
-            }
-            if matches!(display, Display::Table | Display::InlineTable) {
-                tables.push(node);
-                continue;
-            }
-            let children = self.document.children(node);
-            stack.extend(children.into_iter().rev());
-        }
-        tables
+        items
     }
 
     fn degraded(&self, table: NodeId, width: usize) -> TableOutput {
-        let runs = self.collect_runs(table);
-        let lines = format_runs(&runs, width.max(1), false);
+        let items = self.collect_items(&[table], false, false);
+        let pieces: Vec<Piece<TableOutput>> = resolve_items(&items, |_| unreachable!());
+        let lines = format_inline(&pieces, width.max(1));
         let mut output = TableOutput {
             width: width.max(1),
-            height: lines.len(),
+            height: formatted_height(&lines, &pieces),
             #[cfg(test)]
             degraded: true,
             ..Default::default()
         };
-        for (row, line) in lines.iter().enumerate() {
-            append_line(&mut output.fragments, line, 0, row, output.width, 0);
-        }
+        let output_rect = LayoutRect {
+            col: 0,
+            row: 0,
+            width: output.width,
+            height: output.height,
+        };
+        append_cell_content(
+            &mut output,
+            &CellLayout { pieces, lines },
+            output_rect,
+            0,
+            1,
+        );
         output
     }
 
@@ -1120,7 +1238,13 @@ struct RowSeed {
     node: Option<NodeId>,
     group: usize,
     group_node: Option<NodeId>,
-    cells: Vec<NodeId>,
+    cells: Vec<CellSeed>,
+}
+
+#[derive(Clone)]
+struct CellSeed {
+    owner: Option<NodeId>,
+    roots: Vec<NodeId>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1130,38 +1254,65 @@ struct ColumnTrack {
 }
 
 #[derive(Clone)]
-struct RawRun {
+struct TextRun {
     node: NodeId,
     text: String,
     white_space: WhiteSpace,
     style: CellStyle,
-    forced: bool,
+}
+
+#[derive(Clone)]
+enum CellItem {
+    Text(TextRun),
+    Table(NodeId),
+    Boundary(NodeId, CellStyle),
+    Break(NodeId, CellStyle),
 }
 
 struct CellMetrics {
-    runs: Vec<RawRun>,
-    nested: Vec<NodeId>,
+    items: Vec<CellItem>,
     minimum: usize,
     maximum: usize,
 }
 
 struct CellLayout {
-    lines: Vec<Vec<CellGlyph>>,
-    nested: Vec<TableOutput>,
+    pieces: Vec<Piece<TableOutput>>,
+    lines: Vec<Vec<Glyph>>,
 }
 
 impl CellLayout {
     fn height(&self) -> usize {
-        self.lines.len() + self.nested.iter().map(|table| table.height).sum::<usize>()
+        formatted_height(&self.lines, &self.pieces)
     }
 }
 
-#[derive(Clone)]
-struct CellGlyph {
+struct CaptionLayout {
     node: NodeId,
-    text: String,
+    style: ComputedStyle,
+    layout: CellLayout,
+    border_rect: LayoutRect,
+    content_rect: LayoutRect,
+}
+
+enum ContentEvent {
+    Enter(NodeId, bool),
+    Exit(NodeId, bool),
+}
+
+#[derive(Clone, Copy)]
+struct MetricAtom {
     width: usize,
-    style: CellStyle,
+    height: usize,
+}
+
+impl Atom for MetricAtom {
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1300,128 +1451,87 @@ fn is_blockish(display: Display) -> bool {
     )
 }
 
-fn push_break(runs: &mut Vec<RawRun>, node: NodeId, style: CellStyle) {
-    runs.push(RawRun {
-        node,
-        text: "\n".to_string(),
-        white_space: WhiteSpace::Pre,
-        style,
-        forced: true,
-    });
-}
-
-fn normalized_text(runs: &[RawRun]) -> String {
-    let mut text = String::new();
-    let mut space = false;
-    for run in runs {
-        for grapheme in run.text.graphemes(true) {
-            if run.forced || grapheme == "\n" {
-                while text.ends_with(' ') {
-                    text.pop();
+fn resolve_items<A: Atom>(
+    items: &[CellItem],
+    mut resolve_table: impl FnMut(NodeId) -> A,
+) -> Vec<Piece<A>> {
+    let mut pieces = Vec::new();
+    let mut has_content = false;
+    let mut pending_boundary = None;
+    for item in items {
+        match item {
+            CellItem::Boundary(node, style) => {
+                if has_content {
+                    pending_boundary = Some((*node, *style));
                 }
-                if !text.ends_with('\n') {
-                    text.push('\n');
-                }
-                space = false;
-            } else if grapheme.chars().all(char::is_whitespace)
-                && !matches!(
-                    run.white_space,
-                    WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
-                )
-            {
-                space = true;
-            } else {
-                if space && !text.is_empty() && !text.ends_with('\n') {
-                    text.push(' ');
-                }
-                text.push_str(grapheme);
-                space = false;
             }
-        }
-    }
-    text.trim().to_string()
-}
-
-fn format_runs(runs: &[RawRun], width: usize, clip: bool) -> Vec<Vec<CellGlyph>> {
-    if runs.is_empty() {
-        return Vec::new();
-    }
-    let width = width.max(1);
-    let mut lines = vec![Vec::new()];
-    let mut line_width = 0usize;
-    let mut pending_space: Option<(NodeId, CellStyle)> = None;
-    for run in runs {
-        for grapheme in run.text.graphemes(true) {
-            let forced = run.forced || (grapheme == "\n" && run.white_space != WhiteSpace::Normal);
-            if forced {
-                if !lines.last().is_some_and(Vec::is_empty) {
-                    lines.push(Vec::new());
-                }
-                line_width = 0;
-                pending_space = None;
-                continue;
+            CellItem::Break(node, style) => {
+                pieces.push(Piece {
+                    node: *node,
+                    text: "\n".to_string(),
+                    white_space: WhiteSpace::Pre,
+                    depth: 0,
+                    style: *style,
+                    atom: None,
+                });
+                has_content = true;
+                pending_boundary = None;
             }
-            let collapsible = grapheme.chars().all(char::is_whitespace)
-                && !matches!(
-                    run.white_space,
-                    WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
-                );
-            if collapsible {
-                pending_space = Some((run.node, run.style));
-                continue;
-            }
-            if let Some((node, style)) = pending_space.take()
-                && line_width > 0
-            {
-                if line_width + 1 > width {
-                    lines.push(Vec::new());
-                    line_width = 0;
-                } else {
-                    lines.last_mut().unwrap().push(CellGlyph {
+            CellItem::Text(run) => {
+                let visible = !run.text.chars().all(char::is_whitespace)
+                    || matches!(
+                        run.white_space,
+                        WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
+                    );
+                if visible && let Some((node, style)) = pending_boundary.take() {
+                    pieces.push(Piece {
                         node,
-                        text: " ".to_string(),
-                        width: 1,
+                        text: "\n".to_string(),
+                        white_space: WhiteSpace::Pre,
+                        depth: 0,
                         style,
+                        atom: None,
                     });
-                    line_width += 1;
                 }
+                pieces.push(Piece {
+                    node: run.node,
+                    text: run.text.clone(),
+                    white_space: run.white_space,
+                    depth: 0,
+                    style: run.style,
+                    atom: None,
+                });
+                has_content |= visible;
             }
-            let glyph_width = UnicodeWidthStr::width(grapheme);
-            if glyph_width == 0 {
-                if let Some(last) = lines.last_mut().and_then(|line| line.last_mut()) {
-                    last.text.push_str(grapheme);
+            CellItem::Table(node) => {
+                if let Some((boundary_node, style)) = pending_boundary.take() {
+                    pieces.push(Piece {
+                        node: boundary_node,
+                        text: "\n".to_string(),
+                        white_space: WhiteSpace::Pre,
+                        depth: 0,
+                        style,
+                        atom: None,
+                    });
                 }
-                continue;
+                pieces.push(Piece {
+                    node: *node,
+                    text: String::new(),
+                    white_space: WhiteSpace::Normal,
+                    depth: 0,
+                    style: CellStyle::default(),
+                    atom: Some(resolve_table(*node)),
+                });
+                has_content = true;
             }
-            let nowrap = matches!(run.white_space, WhiteSpace::NoWrap | WhiteSpace::Pre);
-            if line_width + glyph_width > width {
-                if clip || nowrap {
-                    continue;
-                }
-                lines.push(Vec::new());
-                line_width = 0;
-            }
-            if glyph_width > width {
-                continue;
-            }
-            lines.last_mut().unwrap().push(CellGlyph {
-                node: run.node,
-                text: grapheme.to_string(),
-                width: glyph_width,
-                style: run.style,
-            });
-            line_width += glyph_width;
         }
     }
-    while lines.len() > 1 && lines.last().is_some_and(Vec::is_empty) {
-        lines.pop();
-    }
-    lines
+    pieces
 }
 
 fn append_line(
     fragments: &mut Vec<TableFragment>,
-    line: &[CellGlyph],
+    line: &[Glyph],
     start: usize,
     row: usize,
     clip_right: usize,
@@ -1447,12 +1557,57 @@ fn append_line(
                 col,
                 row,
                 text: glyph.text.clone(),
-                depth,
+                depth: depth.saturating_add(glyph.depth),
                 style: glyph.style,
                 clip_right,
             }),
         }
         col += glyph.width;
+    }
+}
+
+fn append_cell_content(
+    output: &mut TableOutput,
+    layout: &CellLayout,
+    clip: LayoutRect,
+    depth: usize,
+    merge_base: usize,
+) {
+    let clip_bottom = clip.row.saturating_add(clip.height);
+    let clip_right = clip.col.saturating_add(clip.width);
+    let mut row = clip.row;
+    for line in &layout.lines {
+        if row >= clip_bottom {
+            break;
+        }
+        let height = line_height(line, &layout.pieces);
+        let mut col = clip.col;
+        for glyph in line {
+            if let Some(index) = glyph.atom {
+                if let Some(table) = &layout.pieces[index].atom {
+                    append_nested_output(
+                        output,
+                        table,
+                        col,
+                        row.saturating_add(height.saturating_sub(table.height)),
+                        clip,
+                        depth.saturating_add(layout.pieces[index].depth),
+                        merge_base.saturating_add(index),
+                    );
+                }
+            } else {
+                append_line(
+                    &mut output.fragments,
+                    std::slice::from_ref(glyph),
+                    col,
+                    row.saturating_add(height - 1),
+                    clip_right,
+                    depth,
+                );
+            }
+            col = col.saturating_add(glyph.width);
+        }
+        row = row.saturating_add(height);
     }
 }
 
@@ -1491,9 +1646,22 @@ fn append_nested_output(
     for stroke in &nested.strokes {
         let mut stroke = *stroke;
         offset_table_rect(&mut stroke.rect, col, row);
+        let unclipped = stroke.rect;
         let Some(rect) = intersect_rect(stroke.rect, clip) else {
             continue;
         };
+        if rect.row > unclipped.row {
+            stroke.edges.top = BorderSide::default();
+        }
+        if rect.col > unclipped.col {
+            stroke.edges.left = BorderSide::default();
+        }
+        if rect.row.saturating_add(rect.height) < unclipped.row.saturating_add(unclipped.height) {
+            stroke.edges.bottom = BorderSide::default();
+        }
+        if rect.col.saturating_add(rect.width) < unclipped.col.saturating_add(unclipped.width) {
+            stroke.edges.right = BorderSide::default();
+        }
         stroke.rect = rect;
         stroke.depth += depth;
         stroke.merge_group = merge_base
@@ -1679,30 +1847,41 @@ fn border_priority(side: BorderSide, origin: usize) -> (u8, u8, usize) {
 
 fn append_captions(
     output: &mut TableOutput,
-    captions: &[(NodeId, Vec<Vec<CellGlyph>>)],
+    captions: &[CaptionLayout],
     start_row: usize,
-    width: usize,
+    _width: usize,
 ) {
     let mut row = start_row;
-    for (node, lines) in captions {
-        let height = lines.len();
-        let rect = LayoutRect {
-            col: 0,
-            row,
-            width,
-            height,
-        };
+    for (index, caption) in captions.iter().enumerate() {
+        let mut border_rect = caption.border_rect;
+        let mut content_rect = caption.content_rect;
+        border_rect.row = border_rect.row.saturating_add(row);
+        content_rect.row = content_rect.row.saturating_add(row);
         output.boxes.push(LayoutBox {
-            node: *node,
-            border_rect: rect,
-            content_rect: rect,
+            node: caption.node,
+            border_rect,
+            content_rect,
             depth: 1,
-            style: CellStyle::default(),
+            style: caption.style.cell_style(),
         });
-        for (offset, line) in lines.iter().enumerate() {
-            append_line(&mut output.fragments, line, 0, row + offset, width, 2);
+        add_fill(&mut output.fills, border_rect, caption.style, 1);
+        if caption.style.border.is_visible() {
+            output.strokes.push(BorderStroke {
+                rect: border_rect,
+                edges: caption.style.border,
+                style: caption.style.cell_style(),
+                depth: 1,
+                merge_group: 900_000usize.saturating_add(index),
+            });
         }
-        row += height;
+        append_cell_content(
+            output,
+            &caption.layout,
+            content_rect,
+            2,
+            900_000usize.saturating_add(index),
+        );
+        row = row.saturating_add(border_rect.height);
     }
 }
 
@@ -1835,6 +2014,23 @@ mod tests {
         assert!(!output.fragments.is_empty());
         assert!(limited.degraded);
         assert_eq!(limited.plain_text(), "A B");
+
+        let outcome = Html5everParser::new(false).parse_document(
+            "<table id=table><tr><td>before<table><tr><td>middle<table><tr><td>deep</td></tr></table>after-middle</td></tr></table>after</td></tr></table>",
+        );
+        let document = outcome.document.borrow();
+        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let table = document.element_by_id("table").unwrap();
+        let nested = TableFormatter::new(&document, &styles).format(
+            table,
+            30,
+            TableLimits {
+                max_nesting: 1,
+                ..Default::default()
+            },
+            0,
+        );
+        assert_eq!(nested.plain_text(), "before middle deep after-middle after");
     }
 
     #[test]
@@ -1868,7 +2064,7 @@ mod tests {
              <table id=table><tr><td class=left>A</td><td>B</td></tr></table>",
             30,
         );
-        let left_node = output.model.cells[0].node;
+        let left_node = output.model.cells[0].owner.unwrap();
         let left_box = output
             .boxes
             .iter()

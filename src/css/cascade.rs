@@ -301,6 +301,9 @@ fn cascade_pseudo(
         reverse: origin.reverse,
         list_style_type: origin.list_style_type,
         list_style_position: origin.list_style_position,
+        border_collapse: origin.border_collapse,
+        border_spacing: origin.border_spacing,
+        caption_side: origin.caption_side,
         ..Default::default()
     };
     let mut style = inherited;
@@ -1012,6 +1015,9 @@ fn ua_style(
             strike: inherited.strike,
             list_style_type: inherited.list_style_type,
             list_style_position: inherited.list_style_position,
+            border_collapse: inherited.border_collapse,
+            border_spacing: inherited.border_spacing,
+            caption_side: inherited.caption_side,
             ..Default::default()
         };
     };
@@ -1023,6 +1029,9 @@ fn ua_style(
             strike: inherited.strike,
             list_style_type: inherited.list_style_type,
             list_style_position: inherited.list_style_position,
+            border_collapse: inherited.border_collapse,
+            border_spacing: inherited.border_spacing,
+            caption_side: inherited.caption_side,
             ..Default::default()
         };
     }
@@ -1090,6 +1099,9 @@ fn ua_style(
         strike: inherited.strike,
         list_style_type: inherited.list_style_type,
         list_style_position: inherited.list_style_position,
+        border_collapse: inherited.border_collapse,
+        border_spacing: inherited.border_spacing,
+        caption_side: inherited.caption_side,
         ..Default::default()
     };
     if name == "pre" {
@@ -1899,6 +1911,37 @@ mod tests {
         assert_eq!(styles.get(cell).border.left.style, BorderLineStyle::Hidden);
         assert_eq!(styles.get(cell).border.top.color, BorderColor::CurrentColor);
         assert_eq!(styles.get(caption).display, Display::TableCaption);
+    }
+
+    #[test]
+    fn table_properties_inherit_without_css_wide_keywords() {
+        let mut document = Document::new();
+        let parent = document.insert_element(
+            None,
+            "div",
+            ElementNs::Html,
+            vec![Attr::plain("id", "parent")],
+        );
+        let table = document.insert_element(
+            Some(parent),
+            "div",
+            ElementNs::Html,
+            vec![Attr::plain("id", "table")],
+        );
+        let caption = document.insert_element(
+            Some(table),
+            "span",
+            ElementNs::Html,
+            vec![Attr::plain("id", "caption")],
+        );
+        let sheet = CssparserParser.parse(
+            "#parent { border-collapse: collapse; border-spacing: 3px 2px; caption-side: bottom }
+             #table { display: table } #caption { display: table-caption }",
+        );
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(styles.get(table).border_collapse, BorderCollapse::Collapse);
+        assert_eq!(styles.get(table).border_spacing, BorderSpacing::new(3, 2));
+        assert_eq!(styles.get(caption).caption_side, CaptionSide::Bottom);
     }
 
     #[test]
