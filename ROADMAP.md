@@ -71,7 +71,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
 Test counts at the last green run (2026-08-23): **353 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
-25 golden**.
+25 golden**, and **412 lib** with `--features vga` (+59 for the framebuffer frontend).
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -103,6 +103,7 @@ cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo test --features js          # M4+; must pass, boa feature compiles
+cargo test --features vga         # framebuffer frontend; default build must stay green too
 ```
 
 First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (optional):
@@ -185,6 +186,34 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   a defect threshold.
 - Native text renderer (lynx/w3m/chawan family), not embedded-engine (carbonyl/browsh family) — our
   value is small footprint + terminal-native layout.
+- **Two frontends over one engine, behind ratatui's `Backend` trait** (2026-08-23). `ui::chrome::draw`
+  takes a backend-agnostic `Frame` and `app` never imports a terminal library, so a second frontend
+  costs a `Backend` impl and an event-mapping adapter — nothing in `css`/`layout`/`paint` moves. The
+  terminal frontend stays the default and keeps SSH-shaped distribution; `vga` (non-default feature)
+  opens a window and renders with **our own CP437 8x16 face**.
+  *Why a window at all:* the DOS look is mostly the font, and inside a terminal emulator the font
+  belongs to the user — `ui::Theme` fixes the palette but every glyph renders in whatever face the
+  terminal was configured with. Owning a framebuffer is the only way to own the face, the cell metric
+  and the palette together. It also doubles the usable columns (1280x800 = 160x50) and makes future
+  image support a blit rather than a Sixel/Kitty capability matrix.
+  *Rejected alternatives:* `mousefood` 0.5.2 (ratatui-org, embedded-graphics backend) — solves the
+  easy part, and its fixed-width `MonoFont` model cannot express Unifont's 16x16 wide glyphs across
+  two cells; `ibm437` 0.5.0 (MIT, softbuffer-ready) — ships 8x8 and 9x14 only, and 8x16 is forced by
+  Unifont's narrow metric; `minifb` 0.28 — simpler, but a polling keyboard model that handles
+  modifiers and text input poorly.
+- **Font tiers are CP437 first, then Unifont** (`vga`). CP437 wins wherever it has a glyph, so the
+  chrome stays authentically DOS; Unifont covers the rest of the BMP, which the web needs — curly
+  quotes, en/em dashes and every non-Latin script fall outside the code page, and without the second
+  tier most real pages would render as replacement boxes. Both are 8x16 (Unifont's wide glyphs are
+  16x16 = exactly two cells), so the tiers share one cell metric and one blitting loop.
+  *Licensing:* the CP437 bitmaps are generated from pcface's **Modern DOS 8x16** set, which is MIT or
+  CC0; pcface's *Oldschool PC* bitmaps are GPL/CC-BY-SA and are deliberately not used. Unifont
+  arrives via `unifont-bitmap` (crate MIT/Apache-2.0; font data OFL 1.1 / GPLv2+ with the font
+  embedding exception).
+- **`src/vga/font/table.rs` is generated and pinned.** `tools/gen_cp437.py` re-derives it from
+  upstream at a pinned commit and refuses to write unless its own re-render matches pcface's
+  published `glyph.txt` byte for byte; the emitted SHA-256 is asserted by a test, so a regeneration
+  that changes any glyph fails a gate rather than silently altering every frame.
 - CSS box model from day one (`(rejected)`: lynx-style linear flow — user chose box model).
 - `cssparser` + `selectors` for CSS (`(rejected)`: lightningcss — no selector matcher, orphan AST vendor).
 - `html5ever` for HTML with our direct `TreeSink` building an `indextree`-backed `Document`;
@@ -930,3 +959,27 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   tests; no fixture or golden moved, and no `.snap.new` was written. M1-D stays open for length
   units (next), outer/inner display modes, presentational HTML and terminal typography; the human
   terminal smoke remains pending.
+- 2026-08-23 — **Framebuffer frontend added behind a non-default `vga` feature.** TextSurfer now has
+  two frontends over one engine, both sitting on ratatui's `Backend` trait: the terminal build stays
+  the default, and `--vga` opens a window rendering with our own CP437 8x16 face. Nothing in
+  `css`/`layout`/`paint` moved — `ui::chrome::draw` already took a backend-agnostic `Frame` and `app`
+  already never imported a terminal library, so the cost was a `Backend` impl plus an event-mapping
+  adapter. Rationale, rejected alternatives (`mousefood`, `ibm437`, `minifb`) and the two-tier font
+  licensing are in the Decisions log above. New module `src/vga/` (font · surface · backend · input ·
+  window); `src/vga/font/table.rs` is generated by `tools/gen_cp437.py` and pinned by SHA-256. The
+  `draft()` chrome fixture moved from `ui::chrome`'s test module into `ui::test_util` so both
+  frontends' tests share it; the 8 chrome tests are unchanged. Deps (all optional): winit 0.30.12
+  — the latest *stable*, 0.31 being a prerelease — softbuffer 0.4.8, unifont-bitmap 1.0.0. Release
+  binary 5.1 MB default → 6.5 MB with `vga`.
+- 2026-08-23 — **Launch-time stack overflow found and fixed; test-harness stacks were hiding it.**
+  `unifont_bitmap::Unifont` is 139,264 bytes *by value* (a 4,352-entry page table held inline), and
+  `Unifont::open` materialises it through several by-value locals that a debug build does not elide.
+  Constructing it on the main thread overran the 1 MB stack Windows gives that thread, so the
+  frontend died on launch with `STATUS_STACK_OVERFLOW` before drawing anything — while every test
+  passed, because the harness runs tests on threads with a 2+ MiB stack and so never exercised the
+  real constraint. `vga::font::unifont` now builds the font on a 4 MB worker thread and moves a
+  `Box<Unifont>` back, keeping the large frame off the caller's stack entirely. Pinned by
+  `the_frontend_starts_within_a_main_thread_stack`, which drives the real launch path on a
+  deliberately 1 MB stack; it was confirmed to reproduce the overflow before the fix. **Process
+  lesson: a green suite does not establish that the binary starts** — assert launch-path limits
+  explicitly rather than inheriting the harness's more generous environment.

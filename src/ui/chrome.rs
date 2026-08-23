@@ -179,38 +179,10 @@ fn address_cursor_cell(view: &ChromeView<'_>, toolbar: Rect) -> u16 {
 mod tests {
     use super::*;
     use crate::core::geom::Size;
-    use crate::ui::mouse::ChromeGeometry;
+    use crate::ui::test_util::draft_view as draft;
     use crate::ui::theme::NORTON;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-
-    static DRAFT_CONTENT: std::sync::LazyLock<crate::paint::DisplayList> =
-        std::sync::LazyLock::new(|| crate::paint::DisplayList::from_lines(&["hello".to_string()]));
-
-    fn draft() -> ChromeView<'static> {
-        ChromeView {
-            geometry: ChromeGeometry::for_size(Size { cols: 60, rows: 10 }),
-            theme: NORTON,
-            can_back: false,
-            can_forward: false,
-            address: "https://example.com".to_string().into(),
-            address_cursor: 0,
-            address_focused: false,
-            menu_open: false,
-            menu_active: 0,
-            menu_item: 0,
-            tabs: Vec::new(),
-            active_tab: 0,
-            content: ContentLines {
-                painted: &DRAFT_CONTENT,
-                scroll: 0,
-            },
-            status: StatusView {
-                url: "https://example.com".to_string().into(),
-                message: "Ready".to_string().into(),
-            },
-        }
-    }
 
     fn render(view: &ChromeView<'_>, size: Size) -> String {
         let backend = TestBackend::new(size.cols, size.rows);

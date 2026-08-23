@@ -27,6 +27,14 @@ struct Cli {
     /// Render the page to stdout and exit instead of opening the terminal UI.
     #[arg(long)]
     dump: bool,
+    /// Open a window with a CP437 8x16 face instead of using the host terminal.
+    /// Requires the `vga` feature.
+    #[arg(long)]
+    vga: bool,
+    /// Integer pixel multiplier for `--vga`, so the 8x16 cell stays legible on a
+    /// high-density display.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=8))]
+    vga_scale: u8,
     /// Column budget used by --dump.
     #[arg(long, default_value_t = 80)]
     cols: u16,
@@ -67,6 +75,9 @@ fn main() -> io::Result<()> {
         };
         return dump(fetch, url, cli.cols, cli.rows);
     }
+    if cli.vga {
+        return run_vga(fetch, &cli);
+    }
     ratatui::run(|terminal| {
         let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
         let mut app = App::with_net(net);
@@ -80,6 +91,28 @@ fn main() -> io::Result<()> {
         }
         run(terminal, &mut app)
     })
+}
+
+/// Start the framebuffer frontend, or explain that it was not built in.
+///
+/// The flag exists in both builds so the failure is a clear message rather than an
+/// unrecognised argument, matching how `--js on` reports an unavailable engine.
+#[cfg(feature = "vga")]
+fn run_vga(fetch: Arc<dyn textsurfer::net::Fetch>, cli: &Cli) -> io::Result<()> {
+    let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
+    let options = textsurfer::vga::VgaOptions {
+        scale: usize::from(cli.vga_scale),
+        ..Default::default()
+    };
+    textsurfer::vga::run(net, options, cli.url.clone())
+}
+
+#[cfg(not(feature = "vga"))]
+fn run_vga(_fetch: Arc<dyn textsurfer::net::Fetch>, _cli: &Cli) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "this build has no framebuffer frontend; rebuild with --features vga",
+    ))
 }
 
 fn dump(fetch: Arc<dyn textsurfer::net::Fetch>, url: &str, cols: u16, rows: u16) -> io::Result<()> {

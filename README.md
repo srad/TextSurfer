@@ -88,6 +88,15 @@ length units next)**
   behavior remain M2/M3 work
 - `--dump` renders a page to stdout and exits through the same stylesheet loader and painter the TUI
   uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
+- **A second, optional frontend** behind the non-default `vga` feature: `--vga` opens a window and
+  renders the same chrome with **our own CP437 8x16 face** instead of the host terminal's font. The
+  DOS look is mostly the font, and inside a terminal the font belongs to the user — owning a
+  framebuffer is the only way to own the face, the cell metric and the palette together. It also
+  doubles the usable columns (1280x800 is 160x50). Glyphs come from CP437 first, so the chrome stays
+  authentically DOS, then GNU Unifont for the rest of the BMP — curly quotes, dashes and non-Latin
+  scripts fall outside the code page and would otherwise render as replacement boxes. Both faces are
+  8x16, with Unifont's wide glyphs spanning exactly two cells. The terminal build remains the
+  default and gains no dependencies
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
@@ -111,8 +120,12 @@ integration (M4–M5).
 ```
 
 Single crate, module-per-layer: `core` · `net` · `html` · `css` · `layout` · `paint` · `script` ·
-`pipeline` · `ui` · `app` + a thin `main`. Concrete wiring happens only in `app`/`main`; the app
-never imports crossterm or a concrete fetch implementation, and time remains injected.
+`pipeline` · `ui` · `app` + a thin `main`, plus `vga` behind its feature. Concrete wiring happens
+only in `app`/`main`; the app never imports crossterm or a concrete fetch implementation, and time
+remains injected.
+
+Because `ui` draws into a backend-agnostic ratatui `Frame`, the frontend is swappable: `main` picks
+either the crossterm terminal or `vga`'s window, and everything below `ui` is identical in both.
 
 ## Getting started
 
@@ -125,6 +138,8 @@ $ cargo run --release            # start page
 $ cargo run -- --url https://example.com
 $ cargo run -- --user-agent TextSurferDev/1 --js off
 $ cargo run -- --dump --cols 60 --rows 24 --url https://example.com   # render to stdout, no TUI
+$ cargo run --features vga -- --vga --url https://example.com         # window, CP437 8x16 face
+$ cargo run --features vga -- --vga --vga-scale 2                     # 2x pixels, for HiDPI
 ```
 
 Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurfer falls back
@@ -173,10 +188,13 @@ cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo test --features js
+cargo test --features vga
 ```
 
 The suite covers unit, integration, corpus and binary-boundary behavior without network access or
-the real clock.
+the real clock. No test opens a window: the framebuffer frontend is exercised headlessly, including
+a launch test pinned to a 1 MB stack — the size the main thread actually gets, rather than the
+larger one the test harness would otherwise hand it.
 
 ## Roadmap
 
@@ -198,5 +216,10 @@ M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 [selectors](https://github.com/servo/stylo) ·
 [Taffy](https://github.com/DioxusLabs/taffy) · [textwrap](https://github.com/mgeisler/textwrap) ·
 [thiserror](https://github.com/dtolnay/thiserror) · [boa_engine](https://github.com/boa-dev/boa)
-(behind the `js` feature) — plus the [Web Platform Tests](https://github.com/web-platform-tests/wpt)
-corpus for conformance.
+(behind the `js` feature) · [winit](https://github.com/rust-windowing/winit) ·
+[softbuffer](https://github.com/rust-windowing/softbuffer) ·
+[unifont-bitmap](https://github.com/SolraBizna/unifont-bitmap) (behind the `vga` feature) — plus the
+[Web Platform Tests](https://github.com/web-platform-tests/wpt) corpus for conformance.
+
+The CP437 face is generated from [pcface](https://github.com/susam/pcface)'s Modern DOS 8x16 bitmaps
+(MIT or CC0); the fallback face is [GNU Unifont](https://unifoundry.com/unifont/) (SIL OFL 1.1).

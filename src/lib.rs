@@ -10,3 +10,5 @@ pub mod paint;
 pub mod pipeline;
 pub mod script;
 pub mod ui;
+#[cfg(feature = "vga")]
+pub mod vga;
