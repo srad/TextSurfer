@@ -572,7 +572,7 @@ fn build_flow_tree(document: &Document, styles: &StyleTree, viewport_width: usiz
                                 atom: None,
                             });
                         } else if *ns == ElementNs::Html && name == "img" {
-                            if let Some(text) = super::image_fallback(attrs) {
+                            if let Some(text) = crate::layout::replaced::image_fallback(attrs) {
                                 buffer.push(InlinePiece {
                                     node,
                                     text,

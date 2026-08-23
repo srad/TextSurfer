@@ -1142,7 +1142,7 @@ impl<'a> TableFormatter<'a> {
                     }
                     if *ns == ElementNs::Html
                         && name == "img"
-                        && let Some(text) = super::image_fallback(attrs)
+                        && let Some(text) = crate::layout::replaced::image_fallback(attrs)
                     {
                         items.push(CellItem::Text(TextRun {
                             node,
