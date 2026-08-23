@@ -69,7 +69,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **315 lib · 5 binary · 4 pipeline · 14 corpus ·
+Test counts at the last green run (2026-08-23): **319 lib · 5 binary · 4 pipeline · 14 corpus ·
 14 golden**.
 Cross-cutting: test infrastructure (done: contract suites, snapshots, proptest, fakes) · gates (done:
 local only, no CI) · coverage floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -380,7 +380,17 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       hostile page can exhaust the stack) and replace the eight Taffy `expect()` calls in the render
       path with a degraded box tree plus a status-bar message. *Proof:* a 100k-deep synthetic
       document renders a truncation notice instead of aborting.
-- [ ] Designed start page: `about:blank` becomes a real landing with a keymap reference.
+- [x] **Designed start page** *(done)* — `about:blank` is a viewport-aware ANSI-style scene with an
+      exact 78×18 default canvas. Unicode half blocks provide two independently colored vertical
+      pixels per terminal cell for the TextSurfer logo, surfer, sun, beach and palm; repeated
+      `TEXTSURFER` letters with layered blue backgrounds form the breaking wave and its board-side
+      tail. The scene scales and centers with the content viewport, adding detail on larger tabs,
+      without image protocols or invented sub-cell detail. It deliberately contains no instructional
+      copy; the M2 help overlay owns the keymap reference. *Proof:*
+      `start_page_is_the_exact_colored_default_terminal_canvas`,
+      `start_page_renders_inside_the_default_content_frame`,
+      `start_page_scales_to_fill_a_larger_content_viewport` and
+      `resize_refits_the_start_page_to_the_content_viewport`. (done)
 - [ ] Basic forms: text/search/hidden/submit, textarea, select, checkbox, radio; GET and
       `application/x-www-form-urlencoded` POST via `url::form_urlencoded`; unsupported
       methods/encodings render a controlled error. `:checked`/`:enabled`/`:disabled` become live.
@@ -590,3 +600,9 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   Four table goldens cover simple, collapsed/spanned, nested/captioned and fixed-overflow cases;
   local proof is green at 315 library · 5 binary · 4 pipeline · 14 corpus · 14 golden tests. The
   Wikipedia-infobox smoke remains human-run by standing rule.
+- 2026-08-23 — The M2 designed start page landed early by user direction. `about:blank` now scales
+  and centers a static EGA-palette scene for the content viewport; an isolated compositor draws its
+  curling wave from repeated `TEXTSURFER` letters over bright-blue and dark-blue water cells. The
+  exact default canvas remains 78×18, larger tabs gain detail, and no image protocol or raster asset
+  is used. The earlier keymap-reference requirement moved to the existing M2 help-overlay work
+  because the accepted artwork contains no instructional copy.

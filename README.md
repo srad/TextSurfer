@@ -45,7 +45,8 @@ Ready                              https://example.com
 - Standards-grade encoding detection: BOM → HTTP header → `<meta charset>` prescan → UTF-8
 - Media-type handling through mediatype: HTML/XHTML parse, plain text stays literal, unsupported
   valid types render a controlled error page
-- Scheme routing: `http(s)://`, `file://`, `about:blank` start page, unknown schemes rejected
+- Scheme routing: `http(s)://`, `file://`, a responsive colored half-block `about:blank` start page,
+  unknown schemes rejected
   with a status error
 - Stable tab, generation and resource-tagged fetch results: concurrent document stylesheets land in
   the right load, background tabs render lazily, and superseded responses are discarded

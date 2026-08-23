@@ -20,7 +20,7 @@ use crate::ui::widgets::tabs::TabChip;
 use super::net::{Navigate, NoopNet, Route, route};
 use super::page_load::{PageLoad, PageLoadOptions};
 use super::render::{RenderedPage, ResponseKind, paint_document, response_kind};
-use super::startpage::{content_for, start_page};
+use super::startpage::{content_for, start_page_for};
 use super::tabs::TabManager;
 use crate::ui::theme::NORTON;
 use crate::ui::widgets::menu::MENUS;
@@ -56,14 +56,18 @@ impl App {
     }
 
     pub fn with_net(net: Arc<dyn Navigate>) -> Self {
+        let geometry = ChromeGeometry::for_size(DEFAULT_SIZE);
         Self {
             focus: Focus::Address,
-            tabs: TabManager::new(start_page(), STARTUP_HINT.to_string()),
+            tabs: TabManager::new(
+                start_page_for(content_viewport(geometry)),
+                STARTUP_HINT.to_string(),
+            ),
             address: EditBuffer::new(),
             dirty: true,
             quit: false,
             generation: 0,
-            geometry: ChromeGeometry::for_size(DEFAULT_SIZE),
+            geometry,
             net,
             menu_open: false,
             menu_active: 0,
@@ -97,7 +101,9 @@ impl App {
         };
         let active = self.tabs.active_index();
         for (index, tab) in self.tabs.tabs_mut().iter_mut().enumerate() {
-            if let Some(load) = tab.load.as_mut() {
+            if tab.url.is_empty() || tab.url == "about:blank" {
+                tab.painted = start_page_for(viewport);
+            } else if let Some(load) = tab.load.as_mut() {
                 if index == active {
                     if let Some(page) = load.resize(viewport) {
                         apply_rendered_page(tab, page, width);
@@ -504,7 +510,8 @@ impl App {
                     .cancel(self.tabs.active().id, self.tabs.active().generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
-                self.repoint_active(&fixed, generation, start_page());
+                let page = start_page_for(content_viewport(self.geometry));
+                self.repoint_active(&fixed, generation, page);
                 if record {
                     self.tabs.active_mut().push_history(&fixed);
                 }
@@ -601,7 +608,7 @@ impl App {
         self.tabs.open_tab(
             String::new(),
             generation,
-            start_page(),
+            start_page_for(content_viewport(self.geometry)),
             STARTUP_HINT.to_string(),
         );
         self.address.set_text("");
@@ -614,8 +621,11 @@ impl App {
             .cancel(self.tabs.active().id, self.tabs.active().generation);
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
-        self.tabs
-            .close_active(generation, start_page(), STARTUP_HINT.to_string());
+        self.tabs.close_active(
+            generation,
+            start_page_for(content_viewport(self.geometry)),
+            STARTUP_HINT.to_string(),
+        );
         if self.focus == Focus::Address {
             self.address.set_text(&self.tabs.active().url);
         }
@@ -677,6 +687,13 @@ impl App {
     }
 }
 
+fn content_viewport(geometry: ChromeGeometry) -> Size {
+    Size {
+        cols: geometry.content_cols().min(usize::from(u16::MAX)) as u16,
+        rows: geometry.content_rows().min(usize::from(u16::MAX)) as u16,
+    }
+}
+
 fn apply_rendered_page(tab: &mut super::tab::Tab, page: RenderedPage, width: usize) {
     tab.painted = page.painted;
     tab.layout_width = width;
@@ -734,6 +751,7 @@ fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::startpage::start_page;
     use crate::core::event::KeyModifiers;
     use crate::net::{FetchError, FetchResponse};
     use proptest::prelude::*;
@@ -760,6 +778,7 @@ mod tests {
             let mut app = App::new();
             app.handle_key(press(Key::Esc));
             app.on_resize(Size { cols: 80, rows: terminal_rows });
+            app.tabs.active_mut().url = "https://example.com".to_string();
             app.tabs.active_mut().painted =
                 DisplayList::from_lines(&vec![String::new(); document_rows]);
             for step in steps {
@@ -829,10 +848,7 @@ mod tests {
         assert!(!app.take_dirty());
         let view = app.chrome_view();
         assert!(view.address_focused);
-        assert_eq!(
-            view.content.painted.text_lines().first().unwrap(),
-            "TextSurfer - a text-mode browser"
-        );
+        assert_eq!(view.content.painted, &start_page());
     }
 
     #[test]
@@ -884,6 +900,7 @@ mod tests {
         app.handle_key(press(Key::Esc));
         app.on_resize(Size { cols: 80, rows: 9 });
         assert_eq!(app.geometry.content_rows(), 3);
+        app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 10]);
         let max = app.tabs.active().painted.len().saturating_sub(3);
         for _ in 0..10 {
             app.handle_key(press(Key::Char('j')));
@@ -923,6 +940,25 @@ mod tests {
         let max = app.tabs.active().painted.len().saturating_sub(7);
         assert!(app.tabs.active().scroll <= max);
         assert_eq!(app.tabs.active().layout_width, 38);
+    }
+
+    #[test]
+    fn resize_refits_the_start_page_to_the_content_viewport() {
+        let mut app = App::new();
+        app.on_resize(Size {
+            cols: 158,
+            rows: 42,
+        });
+
+        assert_eq!(app.tabs.active().painted.rows.len(), 36);
+        assert!(
+            app.tabs
+                .active()
+                .painted
+                .text_lines()
+                .iter()
+                .all(|row| unicode_width::UnicodeWidthStr::width(row.as_str()) == 156)
+        );
     }
 
     #[test]
