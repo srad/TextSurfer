@@ -157,13 +157,11 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
 }
 
 pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
-    view.geometry.layout(area).content.and_then(|rect| {
-        (rect.width >= 2 && rect.height >= 2).then_some(Rect {
-            x: rect.x + 1,
-            y: rect.y + 1,
-            width: rect.width - 2,
-            height: rect.height - 2,
-        })
+    view.geometry.content_view_in(area).map(|content| Rect {
+        x: content.origin.col,
+        y: content.origin.row,
+        width: content.cols,
+        height: content.rows,
     })
 }
 
@@ -179,6 +177,24 @@ fn buf_set_string(frame: &mut Frame<'_>, rect: Rect, col: u16, text: &str, style
     frame
         .buffer_mut()
         .set_string(rect.x + col, rect.y, text, style);
+}
+
+/// The grapheme index a click at `col` selects in an address field `toolbar_width` wide.
+///
+/// The inverse of [`address_cursor_cell`]: it walks the same widths and stops at the same
+/// visible budget, so clicking a caret's own cell puts the caret back where it was.
+pub fn address_index_at(address: &str, toolbar_width: u16, col: u16) -> usize {
+    let budget = usize::from(toolbar_width.saturating_sub(FIELD_TEXT + 1));
+    let target = usize::from(col.saturating_sub(FIELD_TEXT)).min(budget);
+    let mut width = 0usize;
+    for (index, grapheme) in address.graphemes(true).enumerate() {
+        let next = width + UnicodeWidthStr::width(grapheme);
+        if next > target || next > budget {
+            return index;
+        }
+        width = next;
+    }
+    address.graphemes(true).count()
 }
 
 fn address_cursor_cell(view: &ChromeView<'_>, toolbar: Rect) -> u16 {
@@ -234,6 +250,39 @@ mod tests {
     #[test]
     fn tiny_window_still_draws_chrome() {
         insta::assert_snapshot!(snapshot(Size { cols: 40, rows: 4 }));
+    }
+
+    #[test]
+    fn the_content_rect_starts_where_the_first_document_cell_is_painted() {
+        let view = draft();
+        let size = Size { cols: 60, rows: 10 };
+        let backend = TestBackend::new(size.cols, size.rows);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let area = Rect::new(0, 0, size.cols, size.rows);
+        let rect = content_rect(&view, area).expect("a content rect");
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(rect.x, rect.y)].symbol(), "h");
+        assert_eq!(buffer[(rect.x - 1, rect.y)].symbol(), "│");
+        assert_eq!(buffer[(rect.right() - 1 + 1, rect.y)].symbol(), "│");
+    }
+
+    #[test]
+    fn the_content_rect_ends_on_the_last_row_the_widget_draws() {
+        let view = draft();
+        let size = Size { cols: 60, rows: 10 };
+        let backend = TestBackend::new(size.cols, size.rows);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let area = Rect::new(0, 0, size.cols, size.rows);
+        let rect = content_rect(&view, area).expect("a content rect");
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(rect.x - 1, rect.bottom() - 1)].symbol(), "│");
+        assert_ne!(
+            buffer[(rect.x - 1, rect.bottom())].symbol(),
+            "│",
+            "the row below the content rect is the status bar, not content"
+        );
     }
 
     #[test]

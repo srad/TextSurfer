@@ -6,10 +6,13 @@
 //! reach it the same way the other, or the same keymap will act differently per
 //! frontend.
 
-use winit::event::ElementState;
+use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 
-use crate::core::event::{Key, KeyEvent, KeyModifiers};
+use crate::core::event::{
+    Key, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseKind, WheelDirection,
+};
+use crate::core::geom::Point;
 
 /// Translate a window key event, or `None` if it carries nothing the app can use.
 ///
@@ -43,6 +46,67 @@ pub fn from_window_key(
             alt: modifiers.alt_key(),
         },
     })
+}
+
+/// Translate a window mouse button event into a domain event at `at`.
+///
+/// `WindowEvent::MouseInput` carries no position, so the caller supplies the cell it
+/// tracked from the last `CursorMoved`. Buttons winit cannot name are dropped rather
+/// than guessed at.
+pub fn from_window_button(
+    button: WinitMouseButton,
+    state: ElementState,
+    at: Point,
+) -> Option<MouseEvent> {
+    let button = match button {
+        WinitMouseButton::Left => MouseButton::Left,
+        WinitMouseButton::Right => MouseButton::Right,
+        WinitMouseButton::Middle => MouseButton::Middle,
+        WinitMouseButton::Back => MouseButton::Back,
+        WinitMouseButton::Forward => MouseButton::Forward,
+        WinitMouseButton::Other(_) => return None,
+    };
+    let kind = match state {
+        ElementState::Pressed => MouseKind::Press(button),
+        ElementState::Released => MouseKind::Release(button),
+    };
+    Some(MouseEvent { kind, at })
+}
+
+/// Wheel and trackpad deltas turned into whole notches.
+///
+/// A wheel reports one line per notch, but a trackpad reports pixels, and dropping the
+/// remainder would make small gestures scroll nothing at all. The fraction is kept until
+/// it adds up to a notch, and a reversal starts over so an abandoned gesture cannot push
+/// the next one over the line.
+#[derive(Debug, Default)]
+pub struct WheelAccumulator {
+    notches: f64,
+}
+
+impl WheelAccumulator {
+    pub fn push(&mut self, delta: MouseScrollDelta, notch_pixels: f64) -> Option<WheelDirection> {
+        let notches = match delta {
+            MouseScrollDelta::LineDelta(_, lines) => f64::from(lines),
+            MouseScrollDelta::PixelDelta(position) => position.y / notch_pixels.max(1.0),
+        };
+        if notches == 0.0 {
+            return None;
+        }
+        if self.notches != 0.0 && self.notches.signum() != notches.signum() {
+            self.notches = 0.0;
+        }
+        self.notches += notches;
+        if self.notches >= 1.0 {
+            self.notches -= 1.0;
+            Some(WheelDirection::Up)
+        } else if self.notches <= -1.0 {
+            self.notches += 1.0;
+            Some(WheelDirection::Down)
+        } else {
+            None
+        }
+    }
 }
 
 /// Map a named key, folding Shift+Tab into `BackTab` the way a terminal reports it.

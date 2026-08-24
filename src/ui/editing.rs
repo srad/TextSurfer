@@ -53,6 +53,10 @@ impl EditBuffer {
         self.cursor = (self.cursor + 1).min(self.len());
     }
 
+    pub fn set_cursor(&mut self, grapheme: usize) {
+        self.cursor = grapheme.min(self.len());
+    }
+
     pub fn home(&mut self) {
         self.cursor = 0;
     }

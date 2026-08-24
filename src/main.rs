@@ -4,12 +4,18 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::ExecutableCommand;
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 
 use textsurfer::app::App;
 use textsurfer::app::net::{Navigate, PoolNet};
-use textsurfer::core::event::{Key, KeyEvent, KeyModifiers as AppKeyModifiers};
-use textsurfer::core::geom::Size;
+use textsurfer::core::event::{
+    Key, KeyEvent, KeyModifiers as AppKeyModifiers, MouseButton, MouseEvent, MouseKind,
+    WheelDirection,
+};
+use textsurfer::core::geom::{Point, Size};
 use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
 use textsurfer::pipeline::dump::dump_lines;
 use textsurfer::ui::chrome;
@@ -109,6 +115,14 @@ fn main() -> io::Result<()> {
     if frontend_choice(&cli)? == FrontendChoice::Vga {
         return run_vga(fetch, &cli);
     }
+    // `ratatui::restore` leaves raw mode and the alternate screen, but knows nothing
+    // about mouse capture: without this a panic would leave the shell reporting mouse
+    // escape codes at the user.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = io::stdout().execute(DisableMouseCapture);
+        previous_hook(info);
+    }));
     ratatui::run(|terminal| {
         let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
         let mut app = App::with_net(net);
@@ -120,7 +134,10 @@ fn main() -> io::Result<()> {
         if let Some(url) = cli.url {
             app.submit_url(&url);
         }
-        run(terminal, &mut app)
+        io::stdout().execute(EnableMouseCapture)?;
+        let outcome = run(terminal, &mut app);
+        io::stdout().execute(DisableMouseCapture)?;
+        outcome
     })
 }
 
@@ -165,6 +182,11 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
                         app.handle_key(event);
                     }
                 }
+                Event::Mouse(mouse) => {
+                    if let Some(event) = from_terminal_mouse(mouse) {
+                        app.handle_mouse(event);
+                    }
+                }
                 Event::Resize(cols, rows) => app.on_resize(Size { cols, rows }),
                 _ => {}
             }
@@ -180,6 +202,34 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
             return Ok(());
         }
     }
+}
+
+/// Translate a terminal mouse report, keeping the window adapter's behaviour.
+///
+/// A drag is reported as plain motion: winit sends `CursorMoved` while a button is held
+/// too, and the app has no drag semantics to tell them apart with. Horizontal wheels have
+/// nowhere to scroll and are dropped.
+fn from_terminal_mouse(mouse: event::MouseEvent) -> Option<MouseEvent> {
+    let button = |button| match button {
+        event::MouseButton::Left => MouseButton::Left,
+        event::MouseButton::Right => MouseButton::Right,
+        event::MouseButton::Middle => MouseButton::Middle,
+    };
+    let kind = match mouse.kind {
+        event::MouseEventKind::Down(pressed) => MouseKind::Press(button(pressed)),
+        event::MouseEventKind::Up(released) => MouseKind::Release(button(released)),
+        event::MouseEventKind::Moved | event::MouseEventKind::Drag(_) => MouseKind::Move,
+        event::MouseEventKind::ScrollUp => MouseKind::Wheel(WheelDirection::Up),
+        event::MouseEventKind::ScrollDown => MouseKind::Wheel(WheelDirection::Down),
+        event::MouseEventKind::ScrollLeft | event::MouseEventKind::ScrollRight => return None,
+    };
+    Some(MouseEvent {
+        kind,
+        at: Point {
+            col: mouse.column,
+            row: mouse.row,
+        },
+    })
 }
 
 fn from_terminal_key(key: event::KeyEvent) -> Option<KeyEvent> {

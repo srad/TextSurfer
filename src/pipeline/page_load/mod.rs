@@ -78,6 +78,7 @@ struct FetchEntry {
 pub struct PageLoad {
     document: SharedDocument,
     document_url: Url,
+    effective_base: Url,
     html_encoding: &'static Encoding,
     parse_errors: usize,
     roots: Vec<RootSource>,
@@ -125,6 +126,7 @@ impl PageLoad {
         let mut load = Self {
             document: outcome.document,
             document_url,
+            effective_base: effective_base.clone(),
             html_encoding,
             parse_errors: outcome.parse_errors,
             roots: Vec::new(),
@@ -188,6 +190,12 @@ impl PageLoad {
 
     pub fn parse_errors(&self) -> usize {
         self.parse_errors
+    }
+
+    /// The URL relative references in this document resolve against: the document URL,
+    /// or what its first `<base href>` made of it.
+    pub fn base_url(&self) -> &Url {
+        &self.effective_base
     }
 
     pub fn has_painted(&self) -> bool {

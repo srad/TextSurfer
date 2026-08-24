@@ -105,6 +105,7 @@ impl App {
                                 let page = (index == active_index)
                                     .then(|| load.render_if_ready(self.now))
                                     .flatten();
+                                tab.base = Some(load.base_url().clone());
                                 tab.load = Some(load);
                                 if let Some(page) = page {
                                     let css_warnings = page.css_warnings;
@@ -121,6 +122,7 @@ impl App {
                             ResponseKind::PlainText => {
                                 let decoded = decode_text(&response.body, charset.as_deref());
                                 tab.load = None;
+                                tab.base = None;
                                 tab.document = None;
                                 tab.styles = None;
                                 tab.painted = DisplayList::from_lines(
@@ -133,6 +135,7 @@ impl App {
                             }
                             ResponseKind::Unsupported(content_type) => {
                                 tab.load = None;
+                                tab.base = None;
                                 tab.document = None;
                                 tab.styles = None;
                                 tab.painted = DisplayList::from_lines(&[
@@ -146,6 +149,7 @@ impl App {
                     }
                     Err(error) => {
                         tab.load = None;
+                        tab.base = None;
                         tab.document = None;
                         tab.styles = None;
                         tab.painted = DisplayList::from_lines(&[

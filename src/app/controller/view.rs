@@ -10,6 +10,19 @@ use crate::ui::widgets::tabs::TabChip;
 use super::App;
 
 impl App {
+    /// The tab strip's chips, shared by the renderer and the pointer hit test so both
+    /// measure the same boxes.
+    pub(super) fn tab_chips(&self) -> Vec<TabChip<'_>> {
+        self.tabs
+            .tabs()
+            .iter()
+            .map(|tab| TabChip {
+                title: Cow::Borrowed(tab.title.as_str()),
+                url: Cow::Borrowed(tab.url.as_str()),
+            })
+            .collect()
+    }
+
     pub fn chrome_view(&self) -> ChromeView<'_> {
         let active = self.tabs.active();
         let address = if self.focus == Focus::Address {
@@ -28,15 +41,7 @@ impl App {
             menu_open: self.menu_open,
             menu_active: self.menu_active,
             menu_item: self.menu_item,
-            tabs: self
-                .tabs
-                .tabs()
-                .iter()
-                .map(|tab| TabChip {
-                    title: Cow::Borrowed(tab.title.as_str()),
-                    url: Cow::Borrowed(tab.url.as_str()),
-                })
-                .collect(),
+            tabs: self.tab_chips(),
             active_tab: self.tabs.active_index(),
             content: ContentLines {
                 painted: &active.painted,
@@ -45,6 +50,7 @@ impl App {
             status: StatusView {
                 url: Cow::Borrowed(active.url.as_str()),
                 message: Cow::Borrowed(active.message.as_str()),
+                hover: self.hovered_href().map(Cow::Borrowed),
             },
         }
     }

@@ -16,7 +16,9 @@ use ratatui::backend::{Backend, ClearType, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size as TerminalSize};
 
-use crate::core::geom::Size;
+use winit::dpi::PhysicalPosition;
+
+use crate::core::geom::{Point, Size};
 use crate::core::style::Palette;
 use crate::layout::LayoutRect;
 use crate::paint::ScaledTextRun;
@@ -187,6 +189,27 @@ pub fn pixel_size(size: Size, scale: usize) -> (usize, usize) {
         size.cols as usize * CELL_W * scale,
         size.rows as usize * CELL_H * scale,
     )
+}
+
+/// The cell a window pixel position falls in, at `scale`.
+///
+/// Deliberately unclamped at the far edge: the grid rarely fills the window exactly, and
+/// a click in the right or bottom margin must land outside it so the zone test can call
+/// it inert rather than pinning it to the last row.
+pub fn cell_at(position: PhysicalPosition<f64>, scale: usize) -> Point {
+    let scale = scale.max(1) as f64;
+    let cell = |value: f64, size: usize| {
+        let cells = (value.max(0.0) / (size as f64 * scale)).floor();
+        if cells >= f64::from(u16::MAX) {
+            u16::MAX
+        } else {
+            cells as u16
+        }
+    };
+    Point {
+        col: cell(position.x, CELL_W),
+        row: cell(position.y, CELL_H),
+    }
 }
 
 /// Cell grid that fits a window of this pixel size, at `scale`.

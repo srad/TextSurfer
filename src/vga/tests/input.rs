@@ -1,8 +1,10 @@
-use winit::event::ElementState;
+use winit::dpi::PhysicalPosition;
+use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 
-use crate::core::event::{Key, KeyModifiers};
-use crate::vga::input::from_window_key;
+use crate::core::event::{Key, KeyModifiers, MouseButton, MouseKind, WheelDirection};
+use crate::core::geom::Point;
+use crate::vga::input::{WheelAccumulator, from_window_button, from_window_key};
 
 fn press(key: WinitKey) -> Option<crate::core::event::KeyEvent> {
     from_window_key(&key, ElementState::Pressed, ModifiersState::empty())
@@ -121,4 +123,83 @@ fn dead_and_unidentified_keys_are_dropped() {
 #[test]
 fn an_empty_character_payload_is_dropped_rather_than_panicking() {
     assert!(press(WinitKey::Character("".into())).is_none());
+}
+
+#[test]
+fn window_buttons_map_including_the_side_pair() {
+    let at = Point { col: 3, row: 4 };
+    let pressed = |button| from_window_button(button, ElementState::Pressed, at);
+    assert_eq!(
+        pressed(WinitMouseButton::Left).unwrap().kind,
+        MouseKind::Press(MouseButton::Left)
+    );
+    assert_eq!(
+        pressed(WinitMouseButton::Middle).unwrap().kind,
+        MouseKind::Press(MouseButton::Middle)
+    );
+    assert_eq!(
+        pressed(WinitMouseButton::Back).unwrap().kind,
+        MouseKind::Press(MouseButton::Back)
+    );
+    assert_eq!(
+        pressed(WinitMouseButton::Forward).unwrap().kind,
+        MouseKind::Press(MouseButton::Forward)
+    );
+    assert_eq!(pressed(WinitMouseButton::Other(9)), None);
+    assert_eq!(
+        from_window_button(WinitMouseButton::Left, ElementState::Released, at)
+            .unwrap()
+            .kind,
+        MouseKind::Release(MouseButton::Left)
+    );
+    assert_eq!(pressed(WinitMouseButton::Left).unwrap().at, at);
+}
+
+#[test]
+fn a_wheel_line_is_one_notch_in_the_direction_it_points() {
+    let mut wheel = WheelAccumulator::default();
+    assert_eq!(
+        wheel.push(MouseScrollDelta::LineDelta(0.0, 1.0), 48.0),
+        Some(WheelDirection::Up)
+    );
+    assert_eq!(
+        wheel.push(MouseScrollDelta::LineDelta(0.0, -1.0), 48.0),
+        Some(WheelDirection::Down)
+    );
+    assert_eq!(
+        wheel.push(MouseScrollDelta::LineDelta(0.0, 0.0), 48.0),
+        None
+    );
+}
+
+#[test]
+fn trackpad_pixels_accumulate_into_whole_notches() {
+    // A notch is three 16-pixel rows; four nudges of 12 pixels are one notch and a
+    // remainder, not four notches and not nothing.
+    let mut wheel = WheelAccumulator::default();
+    let nudge = |wheel: &mut WheelAccumulator, pixels: f64| {
+        wheel.push(
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, pixels)),
+            48.0,
+        )
+    };
+    assert_eq!(nudge(&mut wheel, -12.0), None);
+    assert_eq!(nudge(&mut wheel, -12.0), None);
+    assert_eq!(nudge(&mut wheel, -12.0), None);
+    assert_eq!(nudge(&mut wheel, -12.0), Some(WheelDirection::Down));
+    assert_eq!(nudge(&mut wheel, -12.0), None);
+}
+
+#[test]
+fn reversing_direction_drops_the_abandoned_remainder() {
+    let mut wheel = WheelAccumulator::default();
+    let nudge = |wheel: &mut WheelAccumulator, pixels: f64| {
+        wheel.push(
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, pixels)),
+            48.0,
+        )
+    };
+    assert_eq!(nudge(&mut wheel, 40.0), None);
+    assert_eq!(nudge(&mut wheel, -40.0), None, "the upward part is gone");
+    assert_eq!(nudge(&mut wheel, -40.0), Some(WheelDirection::Down));
 }

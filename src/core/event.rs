@@ -37,20 +37,26 @@ pub enum MouseButton {
     Left,
     Right,
     Middle,
+    Back,
+    Forward,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WheelDirection {
+    Up,
+    Down,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseKind {
-    Press,
-    Release,
-    WheelUp,
-    WheelDown,
-    Hover,
+    Press(MouseButton),
+    Release(MouseButton),
+    Move,
+    Wheel(WheelDirection),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseEvent {
-    pub button: MouseButton,
     pub kind: MouseKind,
     pub at: crate::core::geom::Point,
 }

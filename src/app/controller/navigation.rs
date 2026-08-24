@@ -94,7 +94,10 @@ impl App {
         tab.document = None;
         tab.styles = None;
         tab.load = None;
+        tab.base = None;
         tab.render_dirty = false;
+        self.pressed = None;
+        self.refresh_hover();
     }
 
     pub(super) fn go_back(&mut self) {

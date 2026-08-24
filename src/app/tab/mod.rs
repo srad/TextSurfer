@@ -1,3 +1,5 @@
+use url::Url;
+
 use crate::core::dom::SharedDocument;
 use crate::core::style::StyleTree;
 use crate::paint::DisplayList;
@@ -9,6 +11,8 @@ mod tests;
 pub struct Tab {
     pub id: u64,
     pub url: String,
+    /// What relative links in this document resolve against, once a page has parsed.
+    pub base: Option<Url>,
     pub title: String,
     pub history: Vec<String>,
     pub history_pos: usize,
@@ -47,6 +51,7 @@ impl Tab {
             history,
             history_pos: 0,
             url,
+            base: None,
             scroll: 0,
             layout_width: 0,
             generation,

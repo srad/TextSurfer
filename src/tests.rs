@@ -30,6 +30,76 @@ fn press_events_are_mapped_with_modifiers() {
     assert!(mapped.modifiers.shift && mapped.modifiers.ctrl && !mapped.modifiers.alt);
 }
 
+fn terminal_mouse(kind: event::MouseEventKind) -> event::MouseEvent {
+    event::MouseEvent {
+        kind,
+        column: 7,
+        row: 9,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn mouse_reports_map_onto_domain_events() {
+    let down = from_terminal_mouse(terminal_mouse(event::MouseEventKind::Down(
+        event::MouseButton::Middle,
+    )))
+    .unwrap();
+    assert_eq!(down.kind, MouseKind::Press(MouseButton::Middle));
+    assert_eq!(down.at, Point { col: 7, row: 9 });
+    assert_eq!(
+        from_terminal_mouse(terminal_mouse(event::MouseEventKind::Up(
+            event::MouseButton::Left
+        )))
+        .unwrap()
+        .kind,
+        MouseKind::Release(MouseButton::Left)
+    );
+    assert_eq!(
+        from_terminal_mouse(terminal_mouse(event::MouseEventKind::ScrollUp))
+            .unwrap()
+            .kind,
+        MouseKind::Wheel(WheelDirection::Up)
+    );
+}
+
+#[test]
+fn a_drag_is_plain_motion_and_a_sideways_wheel_is_dropped() {
+    // winit reports motion with a button held as `CursorMoved`, and the app has no drag
+    // semantics to distinguish the two with.
+    for kind in [
+        event::MouseEventKind::Moved,
+        event::MouseEventKind::Drag(event::MouseButton::Left),
+    ] {
+        assert_eq!(
+            from_terminal_mouse(terminal_mouse(kind)).unwrap().kind,
+            MouseKind::Move
+        );
+    }
+    for kind in [
+        event::MouseEventKind::ScrollLeft,
+        event::MouseEventKind::ScrollRight,
+    ] {
+        assert_eq!(from_terminal_mouse(terminal_mouse(kind)), None);
+    }
+}
+
+#[cfg(feature = "vga")]
+#[test]
+fn both_frontends_report_the_same_press() {
+    // The adapters take different library types; what reaches the app must not differ.
+    use textsurfer::vga::input::from_window_button;
+    use winit::event::{ElementState, MouseButton as WinitMouseButton};
+
+    let at = Point { col: 7, row: 9 };
+    let terminal = from_terminal_mouse(terminal_mouse(event::MouseEventKind::Down(
+        event::MouseButton::Right,
+    )))
+    .unwrap();
+    let window = from_window_button(WinitMouseButton::Right, ElementState::Pressed, at).unwrap();
+    assert_eq!(terminal, window);
+}
+
 #[test]
 fn cli_parses_the_start_url_and_rejects_unknown_flags() {
     let cli = Cli::try_parse_from(["textsurfer", "--url", "https://example.com"]).unwrap();

@@ -37,6 +37,7 @@ impl App {
             tab.layout_width = width;
             tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
         }
+        self.refresh_hover();
         self.touch();
     }
 

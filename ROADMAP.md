@@ -67,7 +67,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
 | M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, VGA-native bitmap typography | (done — user VGA smoke pending; terminal smoke deferred) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
-| M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
+| M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
@@ -88,7 +88,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 |---|---|---|
 | M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
 | ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
-| M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2 |
+| M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. The pointer path is no longer exposed to the clipping gap — M3 slice 1 bounds-checks a click against the visible content view before converting it — but paint still emits unclipped rectangles, so keyboard link navigation must not assume they are safe |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
 | M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row | Put explicit resource ceilings and sparse-vs-dense evidence behind the perf gate |
 | Test infrastructure | `tree_dump` is recursive on untrusted depth; UI clipping walks scalar values rather than grapheme clusters | Add bounded-depth and emoji/ZWJ cases; these do not currently establish a product crash |
@@ -600,19 +600,50 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
   snapshot-tested; the robustness and cache items proven by the tests named above; manual DuckDuckGo
   Lite submission works.
 
-### M3 — Mouse (open)
+### M3 — Mouse (in progress)
 
-- [ ] crossterm mouse capture with the same release-event gate as keys; zones wired to
-      `ChromeGeometry` (Menu/Tabs/Address/Content, wheel in content, clicks set focus, tab-bar clicks
-      switch, middle-click/`target=_blank` → new tab).
-- [ ] Menu-bar mouse: title clicks open/drive dropdowns, item clicks dispatch, hover tracking.
-- [ ] Link hover highlight (re-paint on hover-target change only) + status bar URL preview; `:hover`
-      and `:focus` become live inputs to the dynamic-state evaluation added in M1-B.
+Sequenced ahead of M2 at the user's request (2026-08-24): mouse navigation before keyboard/tab work.
+VGA-first — the window frontend is the default, so winit is the primary adapter and the crossterm
+mapping exists to keep the frozen terminal fallback behaviourally aligned, as `from_window_key` and
+`from_terminal_key` already are.
+
+**Slice 1 — navigation (done — user smoke pending)**
+
+- [x] One content origin shared by paint and hit-testing *(done)*. `chrome::content_rect` insets the content
+      band on all four sides, but the `Content` widget draws side rails only, so the VGA scaled-text
+      overlay — its single caller — paints every 2x/3x/4x glyph one row below the background cell
+      reserved for it and clips scaled text on the first and last visible rows. Replaced by
+      `ChromeGeometry::content_view`, which paint and hit-testing both use. Confirmed M1-D regression,
+      fixed here per the register's rule that confirmed regressions are acceptance items.
+- [x] Pointer plumbing *(done)*: `MouseKind` carries its button so wheel and move cannot claim one,
+      `MouseButton` gains the `Back`/`Forward` side buttons winit reports, and both frontends map
+      pointer events into `core::event` — winit primary (`MouseInput` carries no position, so the last
+      `CursorMoved` cell is tracked), crossterm aligned, with mouse capture enabled and released
+      around the terminal loop plus a panic hook, since `ratatui::restore` does not clear capture.
+- [x] Zone dispatch *(done)* over `ChromeGeometry::target_at`: menu titles toggle dropdowns and popup rows
+      dispatch, tab chips activate and the `+` box opens a tab, toolbar buttons run their existing
+      actions including the dimmed states, an address click focuses and places the caret without
+      destroying a partial edit, content clicks focus. Everything routes through the existing
+      `Action` set; the mouse is not a second command set. Wheel scrolls only in content.
+- [x] Link activation *(done)* on release against the tracked press node (WHATWG/Ladybird `handle_mouseup`
+      contract), middle-click and `target="_blank"` to a new tab, `<base href>`-aware resolution of
+      the raw `href`, and same-document fragments deferred to M2's anchor item instead of refetching.
+- [x] Hover *(done)*: status-bar URL preview, repaint only on target change, re-derived after scroll,
+      navigation, tab switch and resize; `CursorIcon::Pointer` over links in the window frontend.
+- **Hit-test resolution contract:** targets resolved by NodeId against the live document at dispatch.
+      Slice 1 resolves links in document order via `DisplayList::link_at`, which equals Ladybird's
+      topmost-in-paint-order rule only while nothing overlaps — true until M6 adds positioned, floated
+      and flex/grid boxes. **Trigger:** when M6 lands any of those, switch to depth-ordered resolution
+      over `HitRegion.depth`, which already carries paint depth.
+
+**Slice 2 — live dynamic state (open)**
+
+- [ ] `:hover` and `:focus` become live inputs to the dynamic-state evaluation added in M1-B.
 - [ ] Keep `:focus`, `:focus-visible` and `:focus-within` distinct. The parser currently maps all
       three to the exact-focus state; ancestor propagation and the keyboard focus-indicator policy
       need separate selector tests before focus styling becomes live.
-- [ ] Hit-test resolution contract: targets resolved by NodeId against the live document at dispatch.
 - [ ] Theme extension: hover/selected/search-match states with their own accents. Snapshot goldens.
+- [ ] Honour the CSS `cursor` property, which slice 1 approximates with the UA link default.
 - **Acceptance:** scripted zone tests + goldens with hover states; manual mouse walkthrough.
 
 ### M4 — JS seam (open)
@@ -1086,3 +1117,38 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   corpus · 31 render-golden tests in the default and `js` configurations, plus 385 library tests in
   the terminal-only `--no-default-features` configuration. M1-D is done; the human VGA smoke remains
   pending and the older terminal smoke is deferred while that frontend is paused.
+- 2026-08-24 — **M3 pulled ahead of M2 (user) and started as slice 1, mouse navigation.** The
+  milestone is re-scoped VGA-first: winit is the primary pointer adapter and crossterm keeps the
+  frozen terminal aligned, replacing the old "crossterm mouse capture" wording. Two defects found
+  while planning are fixed inside the slice: `chrome::content_rect` inset the content band on all
+  four sides although the `Content` widget draws side rails only, so the VGA scaled-text overlay
+  painted every scaled glyph one row low and clipped the first and last visible rows (confirmed M1-D
+  regression, unpinned because the surface tests pass `origin = (0, 0)`); and AGENTS.md's invariant
+  "mouse acts only in Tabs/Address/Content zones" contradicted M3's own menu-bar item, so it now
+  reads Menu/Tabs/Address/Content with `MouseZone::Outside` inert. AGENTS.md also gains the
+  `cargo test --features vga` gate and a `main.rs` description covering pointer mapping. Behaviour
+  was compared against Ladybird `8baf4260d40dd53cd09c21c868d2bd0625a69149`
+  (`Libraries/LibWeb/Page/EventHandler.cpp`): activation fires on mouseup against the tracked
+  mousedown target, hit testing takes the topmost element in paint order — recorded above with its M6
+  trigger — and wheel deltas are converted rather than fixed to a step, while side buttons and
+  open-in-new-tab sit in the chrome layer. No dependency changed: winit 0.30.13 (0.31 is beta only),
+  ratatui 0.30.2, softbuffer 0.4.8, unifont-bitmap 1.0.0, crossterm 0.29.0 via ratatui. Baseline
+  gates green at 449 library · 6 binary · 4 fetch-pipeline · 14 corpus · 31 render-golden tests, plus
+  385 library tests with `--no-default-features`.
+- 2026-08-24 — **M3 slice 1 delivered.** `ChromeGeometry` now owns `content_view` and
+  `target_at`, so paint and hit-testing share one screen-to-document mapping and the controller
+  never sees a widget rectangle; `chrome::content_rect` delegates to it, which fixes the scaled-text
+  off-by-one and is pinned by tests that fail against the old inset. `App::handle_mouse` routes
+  through the existing `Action` set: menu titles toggle, popup rows dispatch, chips activate, the
+  `+` box opens a tab, toolbar buttons match their keys down to the dimmed message, the address
+  field takes a caret without losing a partial edit, the wheel scrolls only content, side buttons
+  walk history, and links follow on release over the pressed node with `<base href>` resolution,
+  middle-click and `target="_blank"` new tabs, and fragments deferred to M2. Hover previews the URL
+  in the status bar, repaints only on a target change, survives scroll and tab switches, and shows
+  `CursorIcon::Pointer` in the window. Both frontends map pointer events — winit primary with a
+  tracked cursor cell and a pixel-delta wheel accumulator, crossterm with capture enabled around the
+  loop and a panic hook, since `ratatui::restore` leaves capture on. Final gates green at 492
+  library · 9 binary · 4 fetch-pipeline · 14 corpus · 31 render-golden tests in the default, `js` and
+  `vga` configurations, plus 420 library · 8 binary with `--no-default-features`; no `.snap.new`
+  remains. Slice 1 is done pending the human mouse smoke; slice 2 (`:hover`/`:focus*` liveness,
+  theme states, the CSS `cursor` property) stays open.

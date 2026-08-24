@@ -1,5 +1,5 @@
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Widget};
@@ -22,6 +22,36 @@ pub fn title_x(menu: usize) -> u16 {
         x += width(title) + 2;
     }
     x
+}
+
+/// The menu whose title covers `col` of a bar `bar_width` wide, if any.
+///
+/// Walks the same spans `MenuBar::render` writes, including its overflow break, so a
+/// title that was never drawn is not clickable.
+pub fn title_at(col: u16, bar_width: u16) -> Option<usize> {
+    let mut x = 0u16;
+    for (index, title) in MENU_TITLES.iter().enumerate() {
+        let span = width(title) + 2;
+        if x + span > bar_width {
+            return None;
+        }
+        if col >= x && col < x + span {
+            return Some(index);
+        }
+        x += span;
+    }
+    None
+}
+
+/// The item at `row` of the open popup, if the point is inside its interior.
+pub fn popup_item_at(area: Rect, menu: usize, at: Position) -> Option<usize> {
+    let rect = popup_rect(area, area, menu);
+    if rect.width < 2 || rect.height < 2 || !rect.contains(at) {
+        return None;
+    }
+    let index = usize::from(at.y.checked_sub(rect.y + 1)?);
+    let last_row = usize::from(rect.height.saturating_sub(2));
+    (index < MENUS[menu].len().min(last_row)).then_some(index)
 }
 
 pub fn popup_rect(area: Rect, bounds: Rect, menu: usize) -> Rect {

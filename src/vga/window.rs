@@ -18,19 +18,22 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::app::App;
 use crate::app::net::Navigate;
-use crate::core::geom::Size;
+use crate::core::event::{MouseEvent, MouseKind};
+use crate::core::geom::{Point, Size};
 use crate::core::style::Rgb;
 use crate::core::style::TextRendering;
 use crate::layout::LayoutRect;
 use crate::ui::chrome;
+use crate::ui::mouse::WHEEL_ROWS;
 use crate::ui::theme::{NORTON, rgb_of};
 
-use super::backend::{VgaBackend, grid_for, pixel_size};
-use super::input::from_window_key;
+use super::backend::{VgaBackend, cell_at, grid_for, pixel_size};
+use super::font::CELL_H;
+use super::input::{WheelAccumulator, from_window_button, from_window_key};
 use super::surface::SurfaceConfig;
 
 /// Matches the terminal frontend's poll interval, so both pump `App::step` alike.
@@ -88,6 +91,11 @@ struct VgaApp {
     options: VgaOptions,
     started: Instant,
     modifiers: ModifiersState,
+    /// The cell the pointer was last seen in; `MouseInput` and `MouseWheel` carry no
+    /// position of their own.
+    pointer: Option<Point>,
+    wheel: WheelAccumulator,
+    cursor_icon: CursorIcon,
     background: Rgb,
     presented: Option<Presented>,
     /// The first error to escape a callback. `ApplicationHandler` cannot return one,
@@ -116,6 +124,9 @@ impl VgaApp {
             options,
             started: Instant::now(),
             modifiers: ModifiersState::empty(),
+            pointer: None,
+            wheel: WheelAccumulator::default(),
+            cursor_icon: CursorIcon::Default,
             background,
             presented: None,
             failure: None,
@@ -140,6 +151,24 @@ impl VgaApp {
         Tick {
             quit: false,
             redraw: self.app.take_dirty(),
+        }
+    }
+
+    /// Show the hand over links, the arrow everywhere else, and only when it changes —
+    /// a cursor request per pointer move would be a round trip to the window system for
+    /// nothing.
+    fn sync_cursor_icon(&mut self) {
+        let wanted = if self.app.hovers_link() {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::Default
+        };
+        if self.cursor_icon == wanted {
+            return;
+        }
+        self.cursor_icon = wanted;
+        if let Some(presented) = self.presented.as_ref() {
+            presented.window.set_cursor(wanted);
         }
     }
 
@@ -280,6 +309,43 @@ impl ApplicationHandler for VgaApp {
                 if let Some(key) = from_window_key(&event.logical_key, event.state, self.modifiers)
                 {
                     self.app.handle_key(key);
+                }
+                self.sync_cursor_icon();
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let at = cell_at(position, self.options.scale);
+                self.pointer = Some(at);
+                self.app.handle_mouse(MouseEvent {
+                    kind: MouseKind::Move,
+                    at,
+                });
+                self.sync_cursor_icon();
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.pointer = None;
+                self.app.pointer_left();
+                self.sync_cursor_icon();
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                // A press before any `CursorMoved` has no position to aim at; aiming it
+                // at the origin would click the menu bar.
+                if let Some(at) = self.pointer
+                    && let Some(event) = from_window_button(button, state, at)
+                {
+                    self.app.handle_mouse(event);
+                    self.sync_cursor_icon();
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let notch = (CELL_H * self.options.scale.max(1)) as f64 * f64::from(WHEEL_ROWS);
+                if let Some(at) = self.pointer
+                    && let Some(direction) = self.wheel.push(delta, notch)
+                {
+                    self.app.handle_mouse(MouseEvent {
+                        kind: MouseKind::Wheel(direction),
+                        at,
+                    });
+                    self.sync_cursor_icon();
                 }
             }
             // Both carry a new physical size; the scale-factor case also arrives when a

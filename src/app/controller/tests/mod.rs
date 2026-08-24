@@ -1,5 +1,6 @@
 mod delivery;
 mod keys;
+mod mouse;
 mod navigation;
 
 use std::sync::{Arc, Mutex};
@@ -26,10 +27,28 @@ pub(super) fn press(code: Key) -> KeyEvent {
     }
 }
 
-#[derive(Default)]
 pub(super) struct FakeNet {
     pub(super) pending: Mutex<Vec<FetchPayload>>,
     pub(super) submitted: Mutex<Vec<(u64, Url)>>,
+    body: Vec<u8>,
+}
+
+impl Default for FakeNet {
+    fn default() -> Self {
+        Self::serving("<p>hi there</p>")
+    }
+}
+
+impl FakeNet {
+    /// A fake that answers every request with the same markup, so a test can put a
+    /// document with real links in front of the pointer.
+    pub(super) fn serving(html: &str) -> Self {
+        Self {
+            pending: Mutex::default(),
+            submitted: Mutex::default(),
+            body: html.as_bytes().to_vec(),
+        }
+    }
 }
 
 impl Navigate for FakeNet {
@@ -44,7 +63,7 @@ impl Navigate for FakeNet {
             resource_id,
             result: Ok(FetchResponse {
                 final_url: url,
-                body: b"<p>hi there</p>".to_vec(),
+                body: self.body.clone(),
                 content_type: None,
             }),
         });

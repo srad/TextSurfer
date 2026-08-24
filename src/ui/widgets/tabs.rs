@@ -17,12 +17,21 @@ pub struct TabChip<'a> {
     pub url: Cow<'a, str>,
 }
 
+/// What a laid-out box stands for. The strip ends with a new-tab hint that is not a
+/// tab, so the position of a box in the vector is not its tab index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabSlot {
+    Tab(usize),
+    NewTab,
+}
+
 pub struct TabBox {
     pub text: String,
     pub x: u16,
     pub width: u16,
     pub closed: bool,
     pub active: bool,
+    pub slot: TabSlot,
 }
 
 pub struct TabBar<'a> {
@@ -48,6 +57,7 @@ pub fn layout_tabs(tabs: &[TabChip<'_>], active: usize, inner: u16) -> Vec<TabBo
                     width: room,
                     closed: false,
                     active: index == active,
+                    slot: TabSlot::Tab(index),
                 });
             }
             return boxes;
@@ -59,6 +69,7 @@ pub fn layout_tabs(tabs: &[TabChip<'_>], active: usize, inner: u16) -> Vec<TabBo
             width: box_width,
             closed: true,
             active: index == active,
+            slot: TabSlot::Tab(index),
         });
         x = at + box_width;
     }
@@ -71,9 +82,18 @@ pub fn layout_tabs(tabs: &[TabChip<'_>], active: usize, inner: u16) -> Vec<TabBo
             width: HINT_WIDTH,
             closed: true,
             active: false,
+            slot: TabSlot::NewTab,
         });
     }
     boxes
+}
+
+/// The slot covering `col`, measured from the strip's interior left edge.
+pub fn tab_at(tabs: &[TabChip<'_>], active: usize, inner: u16, col: u16) -> Option<TabSlot> {
+    layout_tabs(tabs, active, inner)
+        .into_iter()
+        .find(|tab_box| col >= tab_box.x && col < tab_box.x + tab_box.width)
+        .map(|tab_box| tab_box.slot)
 }
 
 pub fn active_span(tabs: &[TabChip<'_>], active: usize, inner: u16) -> Option<(u16, u16)> {

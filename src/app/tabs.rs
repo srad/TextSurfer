@@ -41,6 +41,14 @@ impl TabManager {
         self.active = self.active.min(self.tabs.len() - 1);
     }
 
+    pub fn activate(&mut self, index: usize) -> bool {
+        if index >= self.tabs.len() || index == self.active {
+            return false;
+        }
+        self.active = index;
+        true
+    }
+
     pub fn next(&mut self) {
         self.active = (self.active + 1) % self.tabs.len();
     }

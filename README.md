@@ -37,7 +37,8 @@ Ready                              https://example.com
 ## Features
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting human smoke;
-M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; terminal smoke deferred)**
+M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; M3 slice 1 — mouse navigation
+— done, awaiting human mouse smoke; terminal smoke deferred)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -90,6 +91,14 @@ M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; terminal s
   and `:disabled` parse against injected state; `:visited` never matches, so page styling cannot
   observe history. Host-language-correct form states and distinct `:focus-visible`/`:focus-within`
   behavior remain M2/M3 work
+- Mouse navigation in both frontends: click a link to follow it — on release over the node the press
+  landed on, as the DOM defines activation, so dragging off cancels — with `<base href>`-aware
+  resolution, middle-click and `target="_blank"` opening a new tab. The wheel scrolls the content,
+  the side buttons walk history, tab chips and the `+` box switch and open tabs, the toolbar
+  `[‹][›][↻][⌂]` buttons do exactly what their keys do, clicking the address field places the caret
+  without disturbing a half-typed URL, and the menu bar opens, toggles and dispatches under the
+  pointer. Hovering a link previews its target in the status bar and shows a hand cursor in the
+  window, repainting only when the target actually changes
 - `--dump` renders a page to stdout and exits through the same stylesheet loader and painter the TUI
   uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
 - **The default VGA frontend** behind the default `vga` feature opens a window and
@@ -105,8 +114,9 @@ M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; terminal s
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): links/forms/search (M2),
-then mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the rest of mouse support —
+live `:hover`/`:focus` styling and its theme states (M3 slice 2) — then keyboard links, forms and
+in-page search (M2), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 
@@ -164,6 +174,23 @@ to DuckDuckGo's lite search for anything that isn't a URL.
 | `Home` / `End` | Top / bottom of page |
 | `q` | Quit |
 
+## Mouse
+
+| Action | Result |
+|---|---|
+| Click a link | Follows it on release, if the press landed on the same link |
+| Middle-click a link, or click a `target="_blank"` one | Opens it in a new tab |
+| Wheel over the page | Scrolls three rows per notch (trackpad pixels accumulate) |
+| Side buttons | Back / forward, from anywhere in the window |
+| Click a tab chip / the `+` box | Switches tabs / opens one |
+| Click `[‹] [›] [↻] [⌂]` | Back, forward, reload, start page |
+| Click the address field | Focuses it and places the caret, keeping a half-typed URL |
+| Click a menu title or item | Opens, toggles, dispatches; a click elsewhere closes the menu |
+| Hover a link | Previews the URL in the status bar, hand cursor in the window |
+
+The terminal frontend enables mouse capture while it runs, so your terminal's own selection needs
+its override key (usually `Shift`) while TextSurfer has the screen.
+
 ## Testing & conformance
 
 - **html5lib corpus** — 62 `.dat` files vendored from WPT `html/syntax/parsing/resources/` at a
@@ -208,7 +235,8 @@ Status, decisions, acceptance criteria and the updates log live in
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
 style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
 awaiting human smoke · M1-D layout completeness implemented, awaiting the human VGA smoke ·
-M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
+M3 mouse pulled ahead of M2: slice 1 navigation implemented, awaiting the human mouse smoke, slice 2
+live `:hover`/`:focus` styling open · M2 tabs/keyboard/forms · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
 

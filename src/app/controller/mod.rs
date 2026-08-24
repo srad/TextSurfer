@@ -1,6 +1,7 @@
 mod actions;
 mod delivery;
 mod navigation;
+mod pointer;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -10,8 +11,9 @@ mod viewport;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::core::dom::NodeId;
 use crate::core::focus::Focus;
-use crate::core::geom::Size;
+use crate::core::geom::{Point, Size};
 use crate::core::style::TextRendering;
 use crate::ui::editing::EditBuffer;
 use crate::ui::mouse::ChromeGeometry;
@@ -20,6 +22,7 @@ use super::net::{Navigate, NoopNet};
 use super::startpage::start_page_for;
 use super::tabs::TabManager;
 use delivery::{apply_rendered_page, update_load_message};
+use pointer::HoverTarget;
 use viewport::content_viewport;
 
 const DEFAULT_SIZE: Size = Size { cols: 80, rows: 24 };
@@ -40,6 +43,9 @@ pub struct App {
     focus_before_menu: Focus,
     now: Duration,
     text_rendering: TextRendering,
+    pointer: Option<Point>,
+    hover: Option<HoverTarget>,
+    pressed: Option<NodeId>,
 }
 
 impl Default for App {
@@ -77,6 +83,9 @@ impl App {
             focus_before_menu: Focus::Address,
             now: Duration::ZERO,
             text_rendering,
+            pointer: None,
+            hover: None,
+            pressed: None,
         }
     }
 
