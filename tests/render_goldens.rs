@@ -134,6 +134,49 @@ fn outer_and_inner_display_modes_golden() {
 }
 
 #[test]
+fn presentational_html_golden() {
+    insta::assert_snapshot!(golden("presentational.html"));
+}
+
+#[test]
+fn text_alignment_moves_fragments_and_link_geometry_together() {
+    let page = render_source(
+        "<style>p { margin:0 }</style><p style='text-align:right'><a href=x>R</a></p>
+         <p style='text-align:center'>C</p><p style='text-align:justify'>J</p>",
+        20,
+    );
+    let right = page.painted.links.first().expect("right-aligned link");
+    assert_eq!(right.rects[0].col, 19);
+    let rows = page.painted.text_lines();
+    assert_eq!(rows[1].chars().position(|ch| ch == 'C'), Some(10));
+    assert_eq!(rows[2].chars().position(|ch| ch == 'J'), Some(0));
+}
+
+#[test]
+fn table_cell_vertical_alignment_uses_the_final_row_height() {
+    let page = render_source(
+        "<style>table{border-spacing:0;margin:0}td{padding:0;width:5ch}</style>
+         <table><tr><td valign=bottom>B</td><td>T<br>T</td><td valign=middle>M</td></tr></table>",
+        20,
+    );
+    let lines = page.painted.text_lines();
+    let b_row = lines.iter().position(|line| line.contains('B')).unwrap();
+    let m_row = lines.iter().position(|line| line.contains('M')).unwrap();
+    assert_eq!(b_row, 1);
+    assert_eq!(m_row, 1);
+}
+
+#[test]
+fn center_aligns_an_intrinsic_table_descendant() {
+    let page = render_source(
+        "<center><table style='border-spacing:0;width:4ch;margin:0'><tr><td style='padding:0;text-align:left'>X</td></tr></table></center>",
+        20,
+    );
+    let line = &page.painted.text_lines()[0];
+    assert_eq!(line.chars().position(|ch| ch == 'X'), Some(8));
+}
+
+#[test]
 fn table_cells_share_normal_word_and_white_space_behavior() {
     let wrapping = render_source(
         "<style>table { border-spacing: 0; table-layout: fixed; width: 6ch; margin: 0 }

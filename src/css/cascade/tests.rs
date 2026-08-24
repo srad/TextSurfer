@@ -3,9 +3,9 @@ use super::*;
 use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
-    BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide,
+    BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide, CssMargin,
     CssPercentage, CssWidth, Display, DisplayInside, DisplayOutside, EdgeSizes, Palette,
-    PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, WhiteSpace,
+    PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign, VerticalAlign, WhiteSpace,
 };
 use crate::css::values::parse_font_weight;
 use crate::css::{ColorScheme, CssParser, CssparserParser};
@@ -14,6 +14,91 @@ use crate::pipeline::render::embedded_style_sheets;
 
 fn apply_naive(sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree {
     super::document::cascade_document(sheets, document, media, false)
+}
+
+#[test]
+fn presentational_hints_are_zero_specificity_author_declarations() {
+    let mut document = Document::new();
+    let div = document.insert_element(
+        None,
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain("align", "right"), Attr::plain("bgcolor", "red")],
+    );
+    let font = document.insert_element(
+        Some(div),
+        "font",
+        ElementNs::Html,
+        vec![Attr::plain("color", "#00ff00")],
+    );
+    let sheet = CssparserParser.parse(":where(div) { text-align: center; background: blue }");
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(styles.get(div).text_align, TextAlign::Center);
+    assert_eq!(styles.get(div).background, Some(Rgb::new(0, 0, 255)));
+    assert_eq!(
+        styles.get(font).color,
+        Some(Rgba::opaque(Rgb::new(0, 255, 0)))
+    );
+}
+
+#[test]
+fn legacy_table_attributes_map_through_the_css_value_model() {
+    let mut document = Document::new();
+    let table = document.insert_element(
+        None,
+        "table",
+        ElementNs::Html,
+        vec![
+            Attr::plain("align", "center"),
+            Attr::plain("width", "50%"),
+            Attr::plain("cellspacing", "8"),
+            Attr::plain("border", "bad"),
+            Attr::plain("frame", "hsides"),
+        ],
+    );
+    let row = document.insert_element(
+        Some(table),
+        "tr",
+        ElementNs::Html,
+        vec![Attr::plain("valign", "bottom")],
+    );
+    let cell = document.insert_element(
+        Some(row),
+        "td",
+        ElementNs::Html,
+        vec![Attr::plain("width", "0"), Attr::plain("align", "middle")],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let table_style = styles.get(table);
+    assert_eq!(table_style.margin.left, CssMargin::Auto);
+    assert_eq!(table_style.margin.right, CssMargin::Auto);
+    assert_eq!(
+        table_style.width,
+        CssWidth::Percent(CssPercentage::new(5_000))
+    );
+    assert_eq!(table_style.border_spacing, BorderSpacing::new(1, 1));
+    assert_eq!(table_style.border.top.style, BorderLineStyle::Outset);
+    assert_eq!(table_style.border.right.style, BorderLineStyle::Hidden);
+    assert_eq!(styles.get(row).vertical_align, VerticalAlign::Bottom);
+    assert_eq!(styles.get(cell).vertical_align, VerticalAlign::Bottom);
+    assert_eq!(styles.get(cell).text_align, TextAlign::Center);
+    assert_eq!(styles.get(cell).width, CssWidth::Auto);
+}
+
+#[test]
+fn authored_alignment_and_auto_margins_parse_and_inherit() {
+    let mut document = Document::new();
+    let parent = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let child = document.insert_element(Some(parent), "span", ElementNs::Html, vec![]);
+    let sheet = CssparserParser
+        .parse("div { text-align: right; margin: 1ch auto 2ch } span { vertical-align: top }");
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(styles.get(parent).text_align, TextAlign::Right);
+    assert_eq!(styles.get(parent).margin.top, CssMargin::Cells(1));
+    assert_eq!(styles.get(parent).margin.right, CssMargin::Auto);
+    assert_eq!(styles.get(parent).margin.bottom, CssMargin::Cells(1));
+    assert_eq!(styles.get(child).text_align, TextAlign::Right);
+    assert_eq!(styles.get(child).vertical_align, VerticalAlign::Top);
 }
 
 #[test]
@@ -36,7 +121,7 @@ fn ua_and_author_rules_form_a_computed_style_tree() {
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
     assert_eq!(styles.get(main).display, Display::BLOCK);
     assert_eq!(styles.get(p).display, Display::NONE);
-    assert_eq!(styles.get(p).margin.left, 3);
+    assert_eq!(styles.get(p).margin.left, CssMargin::Cells(3));
     assert_eq!(styles.get(span).display, Display::INLINE);
 }
 
@@ -471,11 +556,11 @@ fn lengths_are_strict_and_bounded_without_partial_overrides() {
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     assert_eq!(
         styles.get(p).margin,
-        EdgeSizes {
-            top: 2,
-            right: 2,
-            bottom: 2,
-            left: 2
+        crate::core::style::MarginEdges {
+            top: CssMargin::Cells(2),
+            right: CssMargin::Cells(2),
+            bottom: CssMargin::Cells(2),
+            left: CssMargin::Cells(2)
         }
     );
     assert_eq!(styles.get(p).padding.top, 0);
@@ -504,11 +589,11 @@ fn lengths_resolve_through_the_terminal_cell_metric_on_each_axis() {
     assert_eq!(style.width, CssWidth::Cells(12));
     assert_eq!(
         style.margin,
-        EdgeSizes {
-            top: 1,
-            right: 1,
-            bottom: 1,
-            left: 1
+        crate::core::style::MarginEdges {
+            top: CssMargin::Cells(1),
+            right: CssMargin::Cells(1),
+            bottom: CssMargin::Cells(1),
+            left: CssMargin::Cells(1)
         }
     );
     assert_eq!(

@@ -3,7 +3,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::core::dom::{Document, ElementNs, Node, NodeId};
 use crate::core::style::{
     CellStyle, ComputedStyle, Display, ListStylePosition, Marker, PseudoElement, StyleTree,
-    WhiteSpace,
+    TextAlign, WhiteSpace,
 };
 use crate::layout::table::{TableFormatter, TableLimits, TableOutput};
 use crate::layout::text_flow::{
@@ -38,7 +38,7 @@ struct InlineContext {
 
 enum FlowEvent {
     Enter(NodeId, InlineContext),
-    Exit(NodeId, ComputedStyle, InlineContext, bool),
+    Exit(NodeId, ComputedStyle, Box<InlineContext>, bool),
     AnonymousTable(Vec<NodeId>, InlineContext),
 }
 
@@ -118,7 +118,7 @@ pub(super) fn build_flow_tree(
                         &mut buffer,
                     );
                     if has_edge {
-                        append_edge(node, style, false, context, &mut buffer);
+                        append_edge(node, style, false, *context, &mut buffer);
                     }
                 }
                 FlowEvent::AnonymousTable(roots, context) => {
@@ -142,7 +142,13 @@ pub(super) fn build_flow_tree(
                     if context.inline_parent {
                         buffer.push(piece);
                     } else {
-                        flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
+                        flush_inline(
+                            &mut flow,
+                            &mut children,
+                            &mut buffer,
+                            context.depth,
+                            context.computed,
+                        );
                         let child = flow.len();
                         flow.push(FlowBox {
                             owner: None,
@@ -190,7 +196,7 @@ pub(super) fn build_flow_tree(
                             },
                         };
                         if style.display.is_contents() {
-                            events.push(FlowEvent::Exit(node, style, context, false));
+                            events.push(FlowEvent::Exit(node, style, Box::new(context), false));
                             append_pseudo(
                                 styles,
                                 node,
@@ -206,7 +212,13 @@ pub(super) fn build_flow_tree(
                                 element_context,
                             );
                         } else if style.display == Display::TABLE {
-                            flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
+                            flush_inline(
+                                &mut flow,
+                                &mut children,
+                                &mut buffer,
+                                context.depth,
+                                context.computed,
+                            );
                             let child = flow.len();
                             flow.push(FlowBox {
                                 owner: Some(node),
@@ -220,7 +232,12 @@ pub(super) fn build_flow_tree(
                             });
                             children.push(child);
                         } else if style.display.is_atomic_inline() {
-                            append_horizontal_margin(node, style.margin.left, context, &mut buffer);
+                            append_horizontal_margin(
+                                node,
+                                style.margin.left.cells(),
+                                context,
+                                &mut buffer,
+                            );
                             buffer.push(InlinePiece {
                                 node,
                                 text: String::new(),
@@ -238,12 +255,18 @@ pub(super) fn build_flow_tree(
                             });
                             append_horizontal_margin(
                                 node,
-                                style.margin.right,
+                                style.margin.right.cells(),
                                 context,
                                 &mut buffer,
                             );
                         } else if style.display.is_block_container() {
-                            flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
+                            flush_inline(
+                                &mut flow,
+                                &mut children,
+                                &mut buffer,
+                                context.depth,
+                                context.computed,
+                            );
                             let child = flow.len();
                             flow.push(FlowBox {
                                 owner: Some(node),
@@ -297,7 +320,7 @@ pub(super) fn build_flow_tree(
                                 });
                             }
                             append_edge(node, style, true, context, &mut buffer);
-                            events.push(FlowEvent::Exit(node, style, context, true));
+                            events.push(FlowEvent::Exit(node, style, Box::new(context), true));
                             append_pseudo(
                                 styles,
                                 node,
@@ -339,7 +362,13 @@ pub(super) fn build_flow_tree(
                 &mut buffer,
             );
         }
-        flush_inline(&mut flow, &mut children, &mut buffer, depth);
+        flush_inline(
+            &mut flow,
+            &mut children,
+            &mut buffer,
+            depth,
+            inherited.computed,
+        );
         flow[flow_index].children = children;
         tasks.extend(nested_tasks.into_iter().rev());
     }
@@ -430,6 +459,7 @@ fn flush_inline(
     children: &mut Vec<usize>,
     buffer: &mut Vec<InlinePiece>,
     depth: usize,
+    parent_style: ComputedStyle,
 ) {
     if buffer.is_empty()
         || buffer.iter().all(|piece| {
@@ -447,10 +477,7 @@ fn flush_inline(
     let child = flow.len();
     flow.push(FlowBox {
         owner: None,
-        style: ComputedStyle {
-            display: Display::BLOCK,
-            ..Default::default()
-        },
+        style: ComputedStyle::anonymous_inheriting(parent_style, Display::BLOCK),
         depth,
         inline: std::mem::take(buffer),
         children: Vec::new(),
@@ -489,9 +516,13 @@ fn append_edge(
     buffer: &mut Vec<InlinePiece>,
 ) {
     let cells = if left {
-        style.margin.left.saturating_add(style.padding.left)
+        style.margin.left.cells().saturating_add(style.padding.left)
     } else {
-        style.margin.right.saturating_add(style.padding.right)
+        style
+            .margin
+            .right
+            .cells()
+            .saturating_add(style.padding.right)
     };
     if cells > 0 {
         buffer.push(InlinePiece {
@@ -529,12 +560,20 @@ pub(super) fn append_inline(
     col: usize,
     row: usize,
     width: usize,
+    text_align: TextAlign,
     merge_base: usize,
 ) {
     let mut current_row = row;
     for line in format_inline(pieces, width) {
         let (line_height, baseline) = line_metrics(&line, pieces);
-        let mut current_col = col;
+        let line_width = line.iter().map(|glyph| glyph.width).sum::<usize>();
+        let remaining = width.saturating_sub(line_width);
+        let offset = match text_align {
+            TextAlign::Right => remaining,
+            TextAlign::Center => remaining.div_ceil(2),
+            TextAlign::Start | TextAlign::Left | TextAlign::Justify => 0,
+        };
+        let mut current_col = col.saturating_add(offset);
         for glyph in line {
             if let Some(index) = glyph.atom {
                 if let Some(table) = &pieces[index].atom {

@@ -26,6 +26,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `css/parser.rs` — terminal media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
 | `css/cascade/{content,counters}.rs` + `css/values.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
 | Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.13 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
+| Presentational HTML legacy values (M1-D) | narrow standards adapter | **Custom is correct** — html5ever owns HTML parsing and cssparser/cssparser-color own CSS syntax, but none implements WHATWG's legacy non-negative integer, dimension, or color-value algorithms. Keep these untrusted-value adapters isolated under `css::presentational`; compare structure and edge cases with Ladybird commit `8baf4260d40dd53cd09c21c868d2bd0625a69149`, with WHATWG authoritative |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ### Prior-art audit (2026-08-22)
@@ -63,15 +64,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content, length units and outer/inner display modes done; presentational HTML next) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content, length units, outer/inner display modes and presentational HTML done; terminal typography next) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-24): **367 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
-27 golden**, and **427 lib** with `--features vga` (+60 for the framebuffer frontend).
+Test counts at the last green run (2026-08-24): **372 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
+31 golden**, and **432 lib** with `--features vga` (+60 for the framebuffer frontend).
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -516,10 +517,15 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       halves upward and clamp after conversion; media queries compare unrounded CSS pixels. MQ4
       feature-first, value-first and chained ranges join the legacy colon/min/max forms. Borders
       remain binary, and the VGA feature pins this shared default to its actual 8×16 glyph grid.
-- [ ] **Presentational HTML** — map `align`, `bgcolor`, `width`, `cellspacing`, `cellpadding`,
-      `border`, `rules`, `frame`, `valign`/`vertical-align`, `<center>` and `<font color>` into the
-      cascade at UA-origin specificity, plus `text-align` (left/right/center/justify→left).
-      *Proof:* an old-school fixture page lays out as intended.
+- [x] **Presentational HTML** *(done)* — map `align`, `bgcolor`, `width`, `cellspacing`,
+      `cellpadding`, `border`, `rules`, `frame`, `valign`/`vertical-align`, `<center>` and
+      `<font color>` into the normal author origin at zero specificity, before all author rules;
+      attribute-dependent UA defaults remain at UA origin. Add inherited `text-align`
+      (`start`/left/right/center, with justify rendered left), table-cell `vertical-align`, reusable
+      auto margins, legacy descendant alignment, WHATWG integer/dimension/color parsing, and exact
+      direct-table association for derived cell hints. `table[align=center]` uses auto margins;
+      left/right table floats stay in M6. Preserve compact HTML-table spacing and binary terminal
+      borders. *Proof:* focused parser/cascade/layout cases plus a style-aware old-school fixture.
 - [ ] **Terminal typography** — heading and `font-size` scale drawn from bitmap glyph fonts into
       half-block cells (two vertical pixels per cell, as `app/startpage.rs` already does for the
       logo): 3×4 at two rows, 4×6 at three, 5×7 at four. Ladder ≥2em → 4 rows, ≥1.5em → 3,
@@ -1032,3 +1038,20 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   **textwrap 0.16.2** remain current. The public display-modes golden was inspected. Final six-gate
   counts: 367 library · 4 binary · 4 fetch-pipeline · 14 corpus · 27 render-golden tests, plus 427
   library tests with `--features vga`. M1-D remains in progress; presentational HTML is next.
+- 2026-08-24 — **M1-D Presentational HTML started after a green six-gate baseline.** Corrected the
+  item from UA-origin specificity to WHATWG's author-origin zero-specificity hint layer and pinned
+  Ladybird `8baf4260d40dd53cd09c21c868d2bd0625a69149` as the comparison implementation, with WHATWG
+  authoritative. No dependency is planned: html5ever 0.39.0, cssparser 0.37.0,
+  cssparser-color 0.5.0 and Taffy 0.13.0 remain current; the narrow legacy-value adapters are now
+  justified in the parser audit. Baseline: 367 library · 4 binary · 4 fetch-pipeline · 14 corpus ·
+  27 render-golden tests, plus 427 library tests with `--features vga`.
+- 2026-08-24 — **M1-D Presentational HTML completed.** Presentational attributes now enter the
+  cascade as zero-specificity author hints, with attribute-dependent UA defaults kept at UA origin.
+  The isolated WHATWG adapters cover legacy integers, dimensions and colours; computed styles now
+  carry inherited horizontal alignment, table-cell vertical alignment and auto margins through
+  normal flow, table layout, paint and link geometry. The reviewed old-school fixture covers legacy
+  colours, rules, frame, cell spacing/padding, captions and alignment; existing table goldens were
+  deliberately re-baselined for centered captions/header cells and baseline alignment. No
+  dependency changed. Final six-gate counts: 372 library · 4 binary · 4 fetch-pipeline · 14 corpus ·
+  31 render-golden tests, plus 432 library tests with `--features vga`. M1-D remains in progress;
+  terminal typography is next.

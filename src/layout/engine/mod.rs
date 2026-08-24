@@ -281,6 +281,7 @@ impl LayoutEngine for TaffyLayoutEngine {
                     rect.col,
                     rect.row,
                     rect.width,
+                    flow[index].style.text_align,
                     index.saturating_add(1),
                 );
                 tree.height = tree.height.max(rect.row.saturating_add(rect.height));

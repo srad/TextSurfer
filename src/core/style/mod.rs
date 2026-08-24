@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use crate::core::dom::NodeId;
 
 pub use box_model::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssPercentage, CssWidth,
-    EdgeSizes,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssMargin, CssPercentage,
+    CssWidth, EdgeSizes, MarginEdges,
 };
 pub use color::{CellStyle, Palette, Rgb, Rgba};
 pub use display::{
@@ -43,18 +43,49 @@ pub enum WhiteSpace {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlign {
+    #[default]
+    Start,
+    Left,
+    Right,
+    Center,
+    Justify,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VerticalAlign {
+    #[default]
+    Baseline,
+    Top,
+    Middle,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum LegacyAlign {
+    #[default]
+    None,
+    Left,
+    Right,
+    Center,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ComputedStyle {
     pub display: Display,
     pub white_space: WhiteSpace,
     pub width: CssWidth,
     pub box_sizing: BoxSizing,
-    pub margin: EdgeSizes,
+    pub margin: MarginEdges,
     pub padding: EdgeSizes,
     pub border: BorderEdges,
     pub table_layout: TableLayoutMode,
     pub border_collapse: BorderCollapse,
     pub border_spacing: BorderSpacing,
     pub caption_side: CaptionSide,
+    pub text_align: TextAlign,
+    pub vertical_align: VerticalAlign,
+    pub(crate) legacy_align: LegacyAlign,
     pub list_style_type: ListStyleType,
     pub list_style_position: ListStylePosition,
     pub color: Option<Rgba>,
@@ -75,6 +106,8 @@ impl ComputedStyle {
             border_collapse: parent.border_collapse,
             border_spacing: parent.border_spacing,
             caption_side: parent.caption_side,
+            text_align: parent.text_align,
+            legacy_align: parent.legacy_align,
             color: parent.color,
             bold: parent.bold,
             underline: parent.underline,

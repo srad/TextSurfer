@@ -2,15 +2,15 @@ use cssparser::{Parser, ParserInput, Token};
 
 use super::MediaContext;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, LengthAxis,
-    ListStyleType, TableLayoutMode, WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssMargin, LegacyAlign,
+    LengthAxis, ListStyleType, MarginEdges, TableLayoutMode, TextAlign, VerticalAlign, WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
     assign_border_color, assign_border_colors, assign_border_side, assign_border_style,
     assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
     consume_block, parse_background_color, parse_border, parse_color, parse_display,
-    parse_font_weight, parse_ident, parse_lengths, parse_list_style_position,
+    parse_font_weight, parse_ident, parse_length_token, parse_lengths, parse_list_style_position,
     parse_list_style_type, parse_text_decoration, parse_width,
 };
 
@@ -47,6 +47,46 @@ pub(super) fn apply_declaration(
                 style.white_space = white_space;
             }
         }
+        "text-align" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "start" => Some(TextAlign::Start),
+                    "left" => Some(TextAlign::Left),
+                    "right" => Some(TextAlign::Right),
+                    "center" => Some(TextAlign::Center),
+                    "justify" => Some(TextAlign::Justify),
+                    _ => None,
+                })
+            {
+                style.text_align = value;
+                style.legacy_align = LegacyAlign::None;
+            }
+        }
+        "-textsurfer-legacy-align" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "left" => Some(LegacyAlign::Left),
+                    "right" => Some(LegacyAlign::Right),
+                    "center" => Some(LegacyAlign::Center),
+                    _ => None,
+                })
+            {
+                style.legacy_align = value;
+            }
+        }
+        "vertical-align" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
+                    "baseline" => Some(VerticalAlign::Baseline),
+                    "top" => Some(VerticalAlign::Top),
+                    "middle" => Some(VerticalAlign::Middle),
+                    "bottom" => Some(VerticalAlign::Bottom),
+                    _ => None,
+                })
+            {
+                style.vertical_align = value;
+            }
+        }
         "width" => {
             if let Some(width) = parse_width(&declaration.value, media.cell_metric, media.viewport)
             {
@@ -65,13 +105,8 @@ pub(super) fn apply_declaration(
             }
         }
         "margin" => {
-            if let Some(values) = parse_lengths(&declaration.value) {
-                assign_edges(
-                    &mut style.margin,
-                    &values,
-                    media.cell_metric,
-                    media.viewport,
-                );
+            if let Some(values) = parse_margins(&declaration.value, media) {
+                style.margin = values;
             }
         }
         "padding" => {
@@ -84,33 +119,29 @@ pub(super) fn apply_declaration(
                 );
             }
         }
-        "margin-top" => assign_one(
+        "margin-top" => assign_margin(
             &mut style.margin.top,
             &declaration.value,
             LengthAxis::Vertical,
-            media.cell_metric,
-            media.viewport,
+            media,
         ),
-        "margin-right" => assign_one(
+        "margin-right" => assign_margin(
             &mut style.margin.right,
             &declaration.value,
             LengthAxis::Horizontal,
-            media.cell_metric,
-            media.viewport,
+            media,
         ),
-        "margin-bottom" => assign_one(
+        "margin-bottom" => assign_margin(
             &mut style.margin.bottom,
             &declaration.value,
             LengthAxis::Vertical,
-            media.cell_metric,
-            media.viewport,
+            media,
         ),
-        "margin-left" => assign_one(
+        "margin-left" => assign_margin(
             &mut style.margin.left,
             &declaration.value,
             LengthAxis::Horizontal,
-            media.cell_metric,
-            media.viewport,
+            media,
         ),
         "padding-top" => assign_one(
             &mut style.padding.top,
@@ -272,6 +303,11 @@ fn apply_css_wide(
     match property {
         "display" => style.display = source.display,
         "white-space" => style.white_space = source.white_space,
+        "text-align" => {
+            style.text_align = source.text_align;
+            style.legacy_align = source.legacy_align;
+        }
+        "vertical-align" => style.vertical_align = source.vertical_align,
         "color" => style.color = source.color,
         "background-color" | "background" => style.background = source.background,
         "font-weight" => style.bold = source.bold,
@@ -322,6 +358,7 @@ fn is_inherited(property: &str) -> bool {
     matches!(
         property,
         "white-space"
+            | "text-align"
             | "color"
             | "font-weight"
             | "border-collapse"
@@ -331,6 +368,67 @@ fn is_inherited(property: &str) -> bool {
             | "list-style-type"
             | "list-style-position"
     )
+}
+
+fn parse_margins(source: &str, media: MediaContext) -> Option<MarginEdges> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut values = Vec::new();
+    while !parser.is_exhausted() && values.len() < 4 {
+        let value = if parser
+            .try_parse(|input| input.expect_ident_matching("auto"))
+            .is_ok()
+        {
+            CssMargin::Auto
+        } else {
+            let length = parse_length_token(&mut parser)?;
+            let axis = if matches!(values.len(), 0 | 2) {
+                LengthAxis::Vertical
+            } else {
+                LengthAxis::Horizontal
+            };
+            CssMargin::Cells(
+                media
+                    .cell_metric
+                    .resolve_cells(length, axis, media.viewport),
+            )
+        };
+        values.push(value);
+    }
+    if values.is_empty() || !parser.is_exhausted() {
+        return None;
+    }
+    let (top, right, bottom, left) = match values.as_slice() {
+        [all] => (*all, *all, *all, *all),
+        [vertical, horizontal] => (*vertical, *horizontal, *vertical, *horizontal),
+        [top, horizontal, bottom] => (*top, *horizontal, *bottom, *horizontal),
+        [top, right, bottom, left] => (*top, *right, *bottom, *left),
+        _ => return None,
+    };
+    Some(MarginEdges {
+        top,
+        right,
+        bottom,
+        left,
+    })
+}
+
+fn assign_margin(target: &mut CssMargin, source: &str, axis: LengthAxis, media: MediaContext) {
+    if parse_ident(source).as_deref() == Some("auto") {
+        *target = CssMargin::Auto;
+        return;
+    }
+    let Some(length) = parse_lengths(source).and_then(|values| match values.as_slice() {
+        [value] => Some(*value),
+        _ => None,
+    }) else {
+        return;
+    };
+    *target = CssMargin::Cells(
+        media
+            .cell_metric
+            .resolve_cells(length, axis, media.viewport),
+    );
 }
 
 /// `list-style` sets type, position and image; `none` may stand for either type or image, and an

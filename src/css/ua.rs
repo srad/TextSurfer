@@ -3,7 +3,8 @@
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId, attr_value};
 use crate::core::style::{
-    BorderSpacing, ComputedStyle, Display, ListStyleType, Palette, Rgba, WhiteSpace,
+    BorderSpacing, ComputedStyle, CssMargin, Display, ListStyleType, Palette, Rgba, TextAlign,
+    VerticalAlign, WhiteSpace,
 };
 
 use super::values::parse_list_style_type;
@@ -26,6 +27,8 @@ pub(super) fn ua_style(
             border_collapse: inherited.border_collapse,
             border_spacing: inherited.border_spacing,
             caption_side: inherited.caption_side,
+            text_align: inherited.text_align,
+            legacy_align: inherited.legacy_align,
             ..Default::default()
         };
     };
@@ -61,6 +64,7 @@ pub(super) fn ua_style(
             | "footer"
             | "address"
             | "div"
+            | "center"
             | "p"
             | "pre"
             | "blockquote"
@@ -110,6 +114,8 @@ pub(super) fn ua_style(
         border_collapse: inherited.border_collapse,
         border_spacing: inherited.border_spacing,
         caption_side: inherited.caption_side,
+        text_align: inherited.text_align,
+        legacy_align: inherited.legacy_align,
         ..Default::default()
     };
     if name == "pre" {
@@ -129,6 +135,26 @@ pub(super) fn ua_style(
     }
     if name == "table" {
         style.border_spacing = BorderSpacing::new(1, 0);
+    }
+    if name == "caption" {
+        style.text_align = TextAlign::Center;
+    }
+    if matches!(name.as_str(), "thead" | "tbody" | "tfoot")
+        || name == "tr" && document.parent(id).is_some_and(|parent| {
+            matches!(document.node(parent), Some(Node::Element { name, ns, .. }) if *ns == ElementNs::Html && name == "table")
+        })
+    {
+        style.vertical_align = VerticalAlign::Middle;
+    }
+    if matches!(name.as_str(), "tr" | "td" | "th") {
+        style.vertical_align = inherited.vertical_align;
+    }
+    if name == "th" && inherited.text_align == TextAlign::Start {
+        style.text_align = TextAlign::Center;
+    }
+    if name == "hr" {
+        style.margin.left = CssMargin::Auto;
+        style.margin.right = CssMargin::Auto;
     }
     if name == "a"
         && attrs
@@ -151,15 +177,15 @@ pub(super) fn ua_style(
         name.as_str(),
         "p" | "pre" | "blockquote" | "ul" | "ol" | "table"
     ) {
-        style.margin.bottom = 1;
+        style.margin.bottom = CssMargin::Cells(1);
     }
     if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-        style.margin.top = 1;
-        style.margin.bottom = 1;
+        style.margin.top = CssMargin::Cells(1);
+        style.margin.bottom = CssMargin::Cells(1);
         style.bold = true;
     }
     if name == "blockquote" {
-        style.margin.left = 2;
+        style.margin.left = CssMargin::Cells(2);
     }
     style
 }

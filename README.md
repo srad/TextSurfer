@@ -38,7 +38,7 @@ Ready                              https://example.com
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
 M1-C done, awaiting the human terminal smoke; M1-D in progress — tables, generated content, length
-units and outer/inner display modes done; presentational HTML next)**
+units, outer/inner display modes and presentational HTML done; terminal typography next)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -105,8 +105,8 @@ units and outer/inner display modes done; presentational HTML next)**
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): presentational HTML,
-followed by `text-align` and scaled headings. After M1-D: links/forms/search
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): terminal typography and
+scaled headings. After M1-D: links/forms/search
 (M2), mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture

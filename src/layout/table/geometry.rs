@@ -188,6 +188,9 @@ pub(super) fn place_table(
             geometry.spacing_y
         },
     );
+    if !output.model.rows.is_empty() {
+        output.baseline = Some(y_positions[0].saturating_add(cells.row_baselines[0]));
+    }
     for (column, track) in output.model.column_nodes.iter().enumerate() {
         let rect = LayoutRect {
             col: x_positions[column],
@@ -355,12 +358,24 @@ pub(super) fn place_table(
         let content_height = rect
             .height
             .saturating_sub(edge.top + edge.bottom + style.padding.top + style.padding.bottom);
-        let content_rect = LayoutRect {
+        let mut content_rect = LayoutRect {
             col: content_col,
             row: content_row,
             width: content_width,
             height: content_height,
         };
+        let free = content_height.saturating_sub(cells.layouts[index].height());
+        let offset = match style.vertical_align {
+            crate::core::style::VerticalAlign::Top => 0,
+            crate::core::style::VerticalAlign::Middle => free.div_ceil(2),
+            crate::core::style::VerticalAlign::Bottom => free,
+            crate::core::style::VerticalAlign::Baseline => y_positions[cell.row]
+                .saturating_add(cells.row_baselines[cell.row])
+                .saturating_sub(content_row.saturating_add(cells.layouts[index].baseline()))
+                .min(free),
+        };
+        content_rect.row = content_rect.row.saturating_add(offset);
+        content_rect.height = content_rect.height.saturating_sub(offset);
         let mut hit_rect = rect;
         if geometry.collapsed && cell.col + cell.col_span < output.model.columns {
             hit_rect.width = hit_rect.width.saturating_sub(geometry.grid);

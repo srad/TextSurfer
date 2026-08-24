@@ -3,7 +3,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{ElementNs, Node, NodeId};
 use crate::core::style::{
-    BorderSide, CellStyle, ComputedStyle, Display, PseudoElement, WhiteSpace,
+    BorderSide, CellStyle, ComputedStyle, Display, PseudoElement, TextAlign, WhiteSpace,
 };
 use crate::layout::LayoutRect;
 use crate::layout::text_flow::{
@@ -41,16 +41,25 @@ pub(super) struct CellMetrics {
 pub(super) struct CellLayout {
     pub(super) pieces: Vec<Piece<TableOutput>>,
     pub(super) lines: Vec<Vec<Glyph>>,
+    pub(super) text_align: TextAlign,
 }
 
 pub(super) struct CellGrid {
     pub(super) layouts: Vec<CellLayout>,
     pub(super) row_heights: Vec<usize>,
+    pub(super) row_baselines: Vec<usize>,
 }
 
 impl CellLayout {
     pub(super) fn height(&self) -> usize {
         formatted_height(&self.lines, &self.pieces)
+    }
+
+    pub(super) fn baseline(&self) -> usize {
+        self.lines
+            .first()
+            .map(|line| line_metrics(line, &self.pieces).1)
+            .unwrap_or_else(|| self.height().saturating_sub(1))
     }
 }
 
@@ -130,12 +139,18 @@ impl TableFormatter<'_> {
                 self.format_inline_atom(node, inner, limits, nesting.saturating_add(1))
             });
             let lines = format_inline(&pieces, inner);
-            layouts.push(CellLayout { pieces, lines });
+            layouts.push(CellLayout {
+                pieces,
+                lines,
+                text_align: style.text_align,
+            });
         }
         let mut row_heights = vec![0usize; model.rows.len()];
+        let mut row_baselines = vec![0usize; model.rows.len()];
+        let mut row_descents = vec![0usize; model.rows.len()];
         for (cell, layout) in model.cells.iter().zip(&layouts) {
+            let style = self.cell_style(cell);
             if cell.row_span == 1 {
-                let style = self.cell_style(cell);
                 let vertical = style.padding.top
                     + style.padding.bottom
                     + if geometry.collapsed {
@@ -146,6 +161,37 @@ impl TableFormatter<'_> {
                 row_heights[cell.row] =
                     row_heights[cell.row].max(layout.height().saturating_add(vertical));
             }
+            if style.vertical_align == crate::core::style::VerticalAlign::Baseline {
+                let top = style.padding.top
+                    + if geometry.collapsed {
+                        0
+                    } else {
+                        style.border.top.layout_width()
+                    };
+                let bottom = style.padding.bottom
+                    + if geometry.collapsed {
+                        0
+                    } else {
+                        style.border.bottom.layout_width()
+                    };
+                let baseline = top.saturating_add(layout.baseline());
+                let descent = bottom.saturating_add(
+                    layout
+                        .height()
+                        .saturating_sub(layout.baseline().saturating_add(1)),
+                );
+                row_baselines[cell.row] = row_baselines[cell.row].max(baseline);
+                if cell.row_span == 1 {
+                    row_descents[cell.row] = row_descents[cell.row].max(descent);
+                }
+            }
+        }
+        for row in 0..row_heights.len() {
+            row_heights[row] = row_heights[row].max(
+                row_baselines[row]
+                    .saturating_add(row_descents[row])
+                    .saturating_add(1),
+            );
         }
         for (cell, layout) in model.cells.iter().zip(&layouts) {
             if cell.row_span > 1 {
@@ -164,6 +210,7 @@ impl TableFormatter<'_> {
         CellGrid {
             layouts,
             row_heights,
+            row_baselines,
         }
     }
 
@@ -358,7 +405,11 @@ impl TableFormatter<'_> {
         };
         append_cell_content(
             &mut output,
-            &CellLayout { pieces, lines },
+            &CellLayout {
+                pieces,
+                lines,
+                text_align: self.styles.get(roots[0]).text_align,
+            },
             output_rect,
             0,
             1,
@@ -501,7 +552,14 @@ pub(super) fn append_cell_content(
             break;
         }
         let (height, baseline) = line_metrics(line, &layout.pieces);
-        let mut col = clip.col;
+        let line_width = line.iter().map(|glyph| glyph.width).sum::<usize>();
+        let remaining = clip.width.saturating_sub(line_width);
+        let offset = match layout.text_align {
+            TextAlign::Right => remaining,
+            TextAlign::Center => remaining.div_ceil(2),
+            TextAlign::Start | TextAlign::Left | TextAlign::Justify => 0,
+        };
+        let mut col = clip.col.saturating_add(offset);
         for glyph in line {
             if let Some(index) = glyph.atom {
                 if let Some(table) = &layout.pieces[index].atom {

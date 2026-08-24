@@ -40,6 +40,48 @@ pub struct EdgeSizes {
     pub left: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CssMargin {
+    Auto,
+    Cells(usize),
+}
+
+impl Default for CssMargin {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+impl CssMargin {
+    pub const ZERO: Self = Self::Cells(0);
+
+    pub const fn cells(self) -> usize {
+        match self {
+            Self::Auto => 0,
+            Self::Cells(value) => value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MarginEdges {
+    pub top: CssMargin,
+    pub right: CssMargin,
+    pub bottom: CssMargin,
+    pub left: CssMargin,
+}
+
+impl Default for MarginEdges {
+    fn default() -> Self {
+        Self {
+            top: CssMargin::ZERO,
+            right: CssMargin::ZERO,
+            bottom: CssMargin::ZERO,
+            left: CssMargin::ZERO,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BorderLineStyle {
     #[default]

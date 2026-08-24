@@ -2,8 +2,9 @@ use taffy::prelude::{
     BoxSizing as TaffyBoxSizing, Dimension, Display as TaffyDisplay, LengthPercentage,
     LengthPercentageAuto, Rect as TaffyRect, Size as TaffySize, Style as TaffyStyle,
 };
+use taffy::style::TextAlign as TaffyTextAlign;
 
-use crate::core::style::{BoxSizing, CssWidth};
+use crate::core::style::{BoxSizing, CssMargin, CssWidth, LegacyAlign};
 
 use super::LayoutRect;
 use super::flow::FlowBox;
@@ -32,6 +33,12 @@ pub(super) fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> 
     }
     TaffyStyle {
         display: TaffyDisplay::Block,
+        text_align: match flow.style.legacy_align {
+            LegacyAlign::None => TaffyTextAlign::Auto,
+            LegacyAlign::Left => TaffyTextAlign::LegacyLeft,
+            LegacyAlign::Right => TaffyTextAlign::LegacyRight,
+            LegacyAlign::Center => TaffyTextAlign::LegacyCenter,
+        },
         item_is_table: flow.table.is_some(),
         box_sizing: match flow.style.box_sizing {
             BoxSizing::ContentBox => TaffyBoxSizing::ContentBox,
@@ -52,10 +59,10 @@ pub(super) fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> 
             },
         },
         margin: TaffyRect {
-            left: LengthPercentageAuto::length(flow.style.margin.left as f32),
-            right: LengthPercentageAuto::length(flow.style.margin.right as f32),
-            top: LengthPercentageAuto::length(flow.style.margin.top as f32),
-            bottom: LengthPercentageAuto::length(flow.style.margin.bottom as f32),
+            left: margin(flow.style.margin.left),
+            right: margin(flow.style.margin.right),
+            top: margin(flow.style.margin.top),
+            bottom: margin(flow.style.margin.bottom),
         },
         padding: TaffyRect {
             left: LengthPercentage::length(
@@ -76,6 +83,13 @@ pub(super) fn taffy_style(flow: &FlowBox, root: bool, viewport_width: usize) -> 
             bottom: LengthPercentage::length(flow.style.border.bottom.layout_width() as f32),
         },
         ..Default::default()
+    }
+}
+
+fn margin(value: CssMargin) -> LengthPercentageAuto {
+    match value {
+        CssMargin::Auto => LengthPercentageAuto::auto(),
+        CssMargin::Cells(value) => LengthPercentageAuto::length(value as f32),
     }
 }
 

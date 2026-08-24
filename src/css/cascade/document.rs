@@ -9,6 +9,7 @@ use crate::core::style::{
 };
 use crate::css::StyleSheet;
 use crate::css::parser::{StyleRule, parse_declarations};
+use crate::css::presentational::presentational_hints;
 use crate::css::selectors::{BucketKey, MatchTarget, bucket_keys, matching_specificity};
 use crate::css::ua::{inline_style, ua_style};
 
@@ -38,6 +39,10 @@ pub(super) fn cascade_document(
         let mut style = ua_style(document, id, parent_style, media.palette);
         let mut declarations = Vec::new();
         let mut order = 0usize;
+        for declaration in presentational_hints(document, id) {
+            declarations.push((false, 0, order, declaration));
+            order += 1;
+        }
         let candidates: Vec<usize> = index.as_ref().map_or_else(
             || (0..rules.len()).collect(),
             |index| index.candidates(document, id),
@@ -225,6 +230,8 @@ fn cascade_pseudo(
         border_collapse: origin.border_collapse,
         border_spacing: origin.border_spacing,
         caption_side: origin.caption_side,
+        text_align: origin.text_align,
+        legacy_align: origin.legacy_align,
         ..Default::default()
     };
     let mut style = inherited;

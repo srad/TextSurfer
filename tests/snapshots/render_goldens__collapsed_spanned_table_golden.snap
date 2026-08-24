@@ -4,13 +4,13 @@ expression: "golden(\"table_collapsed.html\")"
 ---
 ┌────────────────────┐
 │                    │
-│ Inventory          │
+│      Inventory     │
 │                    │
 ├─────────┬──────────┤
 │         │          │
-│ Tools   │ Hammer   │
+│         │ Hammer   │
 │         │          │
-│         ├──────────┤
+│ Tools   ├──────────┤
 │         │          │
 │         │ Saw      │
 │         │          │

@@ -81,7 +81,11 @@ pub(super) fn layout_captions(
         let layout = CaptionLayout {
             node: *caption,
             style,
-            layout: CellLayout { pieces, lines },
+            layout: CellLayout {
+                pieces,
+                lines,
+                text_align: style.text_align,
+            },
             border_rect: LayoutRect {
                 col: 0,
                 row: 0,
