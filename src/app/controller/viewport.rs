@@ -6,8 +6,43 @@ use crate::ui::theme::NORTON;
 use super::super::startpage::start_page_for;
 use super::{App, apply_rendered_page};
 
+const RESIZE_SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
+
 impl App {
     pub fn on_resize(&mut self, size: Size) {
+        if self.geometry.size == size && self.pending_resize.is_none() {
+            return;
+        }
+        self.pending_resize = None;
+        self.resize_settled(size);
+    }
+
+    pub(super) fn preview_resize(&mut self, size: Size) {
+        if self.geometry.size == size {
+            self.pending_resize = Some((size, self.now.saturating_add(RESIZE_SETTLE)));
+            return;
+        }
+        self.geometry = ChromeGeometry::for_size(size);
+        let rows = self.geometry.content_rows();
+        for tab in self.tabs.tabs_mut() {
+            tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
+        }
+        self.pending_resize = Some((size, self.now.saturating_add(RESIZE_SETTLE)));
+        self.touch();
+    }
+
+    pub(super) fn settle_resize(&mut self, now: std::time::Duration) {
+        let Some((size, deadline)) = self.pending_resize else {
+            return;
+        };
+        if now < deadline {
+            return;
+        }
+        self.pending_resize = None;
+        self.resize_settled(size);
+    }
+
+    fn resize_settled(&mut self, size: Size) {
         self.geometry = ChromeGeometry::for_size(size);
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
@@ -54,18 +89,37 @@ impl App {
     pub(super) fn scroll(&mut self, delta: i32) {
         let max = self.max_scroll();
         let current = self.tabs.active().scroll;
-        self.tabs.active_mut().scroll = if delta.is_negative() {
+        let next = if delta.is_negative() {
             current.saturating_sub(delta.unsigned_abs() as usize)
         } else {
             current.saturating_add(delta as usize).min(max)
         };
-        self.touch();
+        if next == current {
+            return;
+        }
+        self.tabs.active_mut().scroll = next;
+        self.damage.scroll(scroll_delta(current, next));
+        self.refresh_hover();
     }
 
     pub(super) fn set_scroll(&mut self, requested: usize) {
         let max = self.max_scroll();
-        self.tabs.active_mut().scroll = requested.min(max);
-        self.touch();
+        let current = self.tabs.active().scroll;
+        let next = requested.min(max);
+        if next == current {
+            return;
+        }
+        self.tabs.active_mut().scroll = next;
+        self.damage.scroll(scroll_delta(current, next));
+        self.refresh_hover();
+    }
+}
+
+fn scroll_delta(current: usize, next: usize) -> i32 {
+    if next >= current {
+        i32::try_from(next - current).unwrap_or(i32::MAX)
+    } else {
+        -i32::try_from(current - next).unwrap_or(i32::MAX)
     }
 }
 

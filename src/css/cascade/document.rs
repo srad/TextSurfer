@@ -11,7 +11,7 @@ use crate::css::StyleSheet;
 use crate::css::parser::{StyleRule, parse_declarations};
 use crate::css::presentational::presentational_hints;
 use crate::css::selectors::{BucketKey, MatchTarget, bucket_keys, matching_specificity};
-use crate::css::ua::{inline_style, ua_style};
+use crate::css::ua::{UaContext, inline_style, ua_style};
 
 use super::content::{ContentSpec, default_marker_text, parse_content, resolve_content};
 use super::counters::{AuthoredCounterOps, CounterScopes};
@@ -38,7 +38,15 @@ pub(super) fn cascade_document(
             hidden_depth = None;
         }
         let parent_style = document.parent(id).map(|parent| tree.get(parent));
-        let mut style = ua_style(document, id, parent_style, media.palette);
+        let mut style = ua_style(
+            document,
+            id,
+            parent_style,
+            UaContext {
+                palette: media.palette,
+                state: media.state,
+            },
+        );
         let mut declarations = Vec::new();
         let mut order = 0usize;
         for declaration in presentational_hints(document, id) {
@@ -235,6 +243,7 @@ fn cascade_pseudo(
     let inherited = ComputedStyle {
         display: Display::INLINE,
         white_space: origin.white_space,
+        cursor: origin.cursor,
         color: origin.color,
         background: (!origin.display.is_contents())
             .then_some(origin.background)

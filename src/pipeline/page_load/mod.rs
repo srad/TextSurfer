@@ -13,10 +13,10 @@ use std::time::Duration;
 use encoding_rs::Encoding;
 use url::Url;
 
-use crate::core::dom::SharedDocument;
+use crate::core::dom::{AttrNs, Node, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{Palette, TextRendering};
-use crate::css::{ColorScheme, MediaContext, MediaQueryList, StyleSheet};
+use crate::css::{ColorScheme, DynamicState, MediaContext, MediaQueryList, StateDeps, StyleSheet};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::net::{FetchResponse, ResourceId};
 
@@ -100,6 +100,7 @@ pub struct PageLoad {
     first_painted: bool,
     final_painted: bool,
     dirty: bool,
+    state_deps: StateDeps,
 }
 
 impl PageLoad {
@@ -153,6 +154,7 @@ impl PageLoad {
             first_painted: false,
             final_painted: false,
             dirty: true,
+            state_deps: StateDeps::default(),
         };
         load.discover_document_sources(&effective_base);
         load.process_materializations();
@@ -186,6 +188,41 @@ impl PageLoad {
             self.media = self.media.with_viewport(viewport);
             self.dirty = true;
         }
+    }
+
+    pub fn set_dynamic_state(&mut self, state: DynamicState) -> Option<RenderedPage> {
+        if self.media.state == state {
+            return None;
+        }
+        let previous = self.media.state;
+        self.media = self.media.with_state(state);
+        if !self.first_painted || !self.restyle_needed(previous, state) {
+            return None;
+        }
+        Some(self.render_page())
+    }
+
+    fn restyle_needed(&self, previous: DynamicState, next: DynamicState) -> bool {
+        self.state_deps.hover && previous.hover != next.hover
+            || self.state_deps.focus && previous.focus != next.focus
+            || self.state_deps.active && previous.active != next.active
+            || self.hovered_link(previous.hover) != self.hovered_link(next.hover)
+    }
+
+    fn hovered_link(&self, mut node: Option<NodeId>) -> Option<NodeId> {
+        let document = self.document.borrow();
+        while let Some(id) = node {
+            if matches!(
+                document.node(id),
+                Some(Node::Element { name, attrs, .. })
+                    if name == "a"
+                        && attrs.iter().any(|attr| attr.ns == AttrNs::None && attr.name == "href")
+            ) {
+                return Some(id);
+            }
+            node = document.parent(id);
+        }
+        None
     }
 
     pub fn parse_errors(&self) -> usize {

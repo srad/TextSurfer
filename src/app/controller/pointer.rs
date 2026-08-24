@@ -1,12 +1,12 @@
 use url::Url;
 
 use crate::core::dom::{Node, NodeId, attr_value};
-use crate::core::event::{MouseButton, MouseEvent, MouseKind, WheelDirection};
+use crate::core::event::{MouseButton, MouseEvent, MouseKind};
 use crate::core::focus::Focus;
 use crate::core::geom::Point;
 use crate::ui::chrome::address_index_at;
 use crate::ui::keymap::Action;
-use crate::ui::mouse::{ChromeState, ChromeTarget, WHEEL_ROWS};
+use crate::ui::mouse::{ChromeState, ChromeTarget};
 
 use super::App;
 
@@ -14,53 +14,82 @@ use super::App;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct HoverTarget {
     pub(super) node: NodeId,
-    pub(super) href: String,
+    pub(super) href: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PressedTarget {
+    pub(super) button: MouseButton,
+    pub(super) node: NodeId,
+    pub(super) link: Option<NodeId>,
 }
 
 impl App {
     pub fn handle_mouse(&mut self, event: MouseEvent) {
+        if event.kind == MouseKind::Move && self.pointer == Some(event.at) {
+            return;
+        }
+        let previous_href = self.hovered_href().map(str::to_string);
         self.pointer = Some(event.at);
         let target = self.target_at(event.at);
+        self.update_hover(target);
         match event.kind {
-            MouseKind::Move => self.update_hover(target),
-            MouseKind::Wheel(direction) => self.wheel(target, direction),
+            MouseKind::Move => {}
+            MouseKind::Wheel { rows } => self.wheel(target, rows),
             MouseKind::Press(button) => self.press(target, button),
             MouseKind::Release(button) => self.release(target, button),
+        }
+        let painted_changed = self.sync_dynamic_state();
+        if painted_changed {
+            self.touch();
+        } else if previous_href.as_deref() != self.hovered_href() {
+            self.touch_status();
         }
     }
 
     /// Whether the pointer is resting on a link, so a window frontend can show a hand.
     pub fn hovers_link(&self) -> bool {
-        self.hover.is_some()
+        self.hover
+            .as_ref()
+            .is_some_and(|hover| hover.href.is_some())
     }
 
     pub(super) fn hovered_href(&self) -> Option<&str> {
-        self.hover.as_ref().map(|hover| hover.href.as_str())
+        self.hover.as_ref().and_then(|hover| hover.href.as_deref())
     }
 
     /// Re-derive the hover after the content moved under a pointer that did not.
     pub(super) fn refresh_hover(&mut self) {
-        match self.pointer {
-            Some(at) => {
-                let target = self.target_at(at);
-                self.update_hover(target);
-            }
-            None => {
-                if self.hover.take().is_some() {
-                    self.touch();
-                }
-            }
+        let previous_href = self.hovered_href().map(str::to_string);
+        self.rederive_hover();
+        let painted_changed = self.sync_dynamic_state();
+        if painted_changed {
+            self.touch();
+        } else if previous_href.as_deref() != self.hovered_href() {
+            self.touch_status();
         }
+    }
+
+    pub(super) fn rederive_hover(&mut self) {
+        let next = self.pointer.map(|at| self.target_at(at));
+        self.hover = next.and_then(|target| self.hover_for_target(target));
     }
 
     /// The pointer left the window, so nothing is hovered and no press is outstanding.
     pub fn pointer_left(&mut self) {
+        let had_href = self.hovered_href().is_some();
         self.pointer = None;
         self.pressed = None;
-        self.refresh_hover();
+        self.hover = None;
+        let painted_changed = self.sync_dynamic_state();
+        if painted_changed {
+            self.touch();
+        } else if had_href {
+            self.touch_status();
+        }
     }
 
-    fn target_at(&self, at: Point) -> ChromeTarget {
+    pub(super) fn target_at(&self, at: Point) -> ChromeTarget {
         let tabs = self.tab_chips();
         self.geometry.target_at(
             at,
@@ -79,6 +108,7 @@ impl App {
             MouseButton::Right => return,
             MouseButton::Left | MouseButton::Middle => {}
         }
+        self.pressed = None;
         if self.menu_open {
             match target {
                 ChromeTarget::MenuItem(item) => {
@@ -105,23 +135,40 @@ impl App {
             },
             ChromeTarget::Address { col } => self.focus_address_at(col),
             ChromeTarget::Content { col, row } => {
-                if self.focus != Focus::Content {
-                    self.focus = Focus::Content;
-                    self.touch();
+                let node = self.hit_at(col, row);
+                let link = self.link_at(col, row).map(|link| link.node);
+                match button {
+                    MouseButton::Left => {
+                        if self.focus != Focus::Content {
+                            self.focus = Focus::Content;
+                            self.touch();
+                        }
+                        let focus = node.and_then(|node| self.focusable_ancestor(node));
+                        self.set_pointer_focus(focus);
+                        self.pressed = node.map(|node| PressedTarget { button, node, link });
+                    }
+                    MouseButton::Middle => {
+                        self.pressed = link.map(|link| PressedTarget {
+                            button,
+                            node: node.unwrap_or(link),
+                            link: Some(link),
+                        });
+                    }
+                    _ => {}
                 }
-                self.pressed = self.link_at(col, row).map(|link| link.node);
             }
             ChromeTarget::MenuItem(_) | ChromeTarget::Inert => {}
         }
     }
 
     fn release(&mut self, target: ChromeTarget, button: MouseButton) {
-        let Some(pressed) = self.pressed.take() else {
+        let Some(pressed) = self.pressed.as_ref().copied() else {
             return;
         };
-        if !matches!(button, MouseButton::Left | MouseButton::Middle) {
+        if pressed.button != button {
             return;
         }
+        self.pressed = None;
         let ChromeTarget::Content { col, row } = target else {
             return;
         };
@@ -131,36 +178,37 @@ impl App {
         else {
             return;
         };
-        if node != pressed {
+        if Some(node) != pressed.link {
             return;
         }
         let new_tab = button == MouseButton::Middle || self.link_opens_a_new_tab(node);
         self.activate_link(&href, new_tab);
     }
 
-    fn wheel(&mut self, target: ChromeTarget, direction: WheelDirection) {
+    fn wheel(&mut self, target: ChromeTarget, rows: i32) {
         if self.menu_open || !matches!(target, ChromeTarget::Content { .. }) {
             return;
         }
-        match direction {
-            WheelDirection::Up => self.scroll(-WHEEL_ROWS),
-            WheelDirection::Down => self.scroll(WHEEL_ROWS),
-        }
-        self.refresh_hover();
+        self.scroll(rows);
     }
 
     fn update_hover(&mut self, target: ChromeTarget) {
-        let next = match target {
-            ChromeTarget::Content { col, row } => self.link_at(col, row).map(|link| HoverTarget {
-                node: link.node,
-                href: link.href.clone(),
-            }),
-            _ => None,
+        self.hover = self.hover_for_target(target);
+    }
+
+    fn hover_for_target(&self, target: ChromeTarget) -> Option<HoverTarget> {
+        let ChromeTarget::Content { col, row } = target else {
+            return None;
         };
-        if next != self.hover {
-            self.hover = next;
-            self.touch();
-        }
+        let node = self.hit_at(col, row)?;
+        let href = self.link_at(col, row).map(|link| link.href.clone());
+        Some(HoverTarget { node, href })
+    }
+
+    fn hit_at(&self, col: u16, row: u16) -> Option<NodeId> {
+        let tab = self.tabs.active();
+        let row = usize::from(row).checked_add(tab.scroll)?;
+        tab.painted.hit_test(usize::from(col), row)
     }
 
     fn link_at(&self, col: u16, row: u16) -> Option<&crate::paint::PaintedLink> {

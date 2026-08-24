@@ -1,7 +1,8 @@
 use super::*;
 
-use crate::core::event::{MouseButton, MouseEvent, MouseKind, WheelDirection};
+use crate::core::event::{MouseButton, MouseEvent, MouseKind};
 use crate::core::geom::Point;
+use crate::ui::mouse::WHEEL_ROWS;
 use crate::ui::widgets::menu::popup_rect;
 use crate::ui::widgets::toolbar::FIELD_TEXT;
 
@@ -36,9 +37,9 @@ fn moved(at: Point) -> MouseEvent {
     }
 }
 
-fn wheel(direction: WheelDirection, at: Point) -> MouseEvent {
+fn wheel(rows: i32, at: Point) -> MouseEvent {
     MouseEvent {
-        kind: MouseKind::Wheel(direction),
+        kind: MouseKind::Wheel { rows },
         at,
     }
 }
@@ -158,11 +159,11 @@ fn a_blank_target_opens_a_new_tab_on_a_plain_click() {
 fn the_wheel_scrolls_the_content_and_nothing_else() {
     let mut app = loaded(&tall_page());
     let content = at(ORIGIN.col, ORIGIN.row + 1);
-    app.handle_mouse(wheel(WheelDirection::Down, content));
+    app.handle_mouse(wheel(WHEEL_ROWS, content));
     assert_eq!(app.tabs.active().scroll, 3);
-    app.handle_mouse(wheel(WheelDirection::Up, content));
+    app.handle_mouse(wheel(-WHEEL_ROWS, content));
     assert_eq!(app.tabs.active().scroll, 0);
-    app.handle_mouse(wheel(WheelDirection::Down, at(10, 3)));
+    app.handle_mouse(wheel(WHEEL_ROWS, at(10, 3)));
     assert_eq!(app.tabs.active().scroll, 0, "the toolbar does not scroll");
 }
 
@@ -322,7 +323,7 @@ fn hover_follows_the_content_when_it_scrolls_under_a_still_pointer() {
     let cell = first_link_cell(&app);
     app.handle_mouse(moved(cell));
     assert!(app.hovers_link());
-    app.handle_mouse(wheel(WheelDirection::Down, cell));
+    app.handle_mouse(wheel(WHEEL_ROWS, cell));
     assert!(
         !app.hovers_link(),
         "the link scrolled out from under the pointer"
@@ -347,7 +348,7 @@ fn a_window_with_no_room_for_content_swallows_every_click() {
         app.handle_mouse(press(MouseButton::Left, at(2, row)));
         app.handle_mouse(release(MouseButton::Left, at(2, row)));
         app.handle_mouse(moved(at(2, row)));
-        app.handle_mouse(wheel(WheelDirection::Down, at(2, row)));
+        app.handle_mouse(wheel(WHEEL_ROWS, at(2, row)));
     }
     assert_eq!(app.active_url(), PAGE);
     assert!(!app.hovers_link());

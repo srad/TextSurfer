@@ -1,7 +1,13 @@
 use std::path::Path;
+use std::time::Duration;
 
-use textsurfer::core::style::{BorderCollapse, BorderSpacing, CaptionSide, Palette, Rgb, Rgba};
+use textsurfer::core::geom::Size;
+use textsurfer::core::style::{
+    BorderCollapse, BorderSpacing, CaptionSide, Palette, Rgb, Rgba, TextRendering,
+};
+use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::paint::DisplayList;
+use textsurfer::pipeline::page_load::{PageLoad, PageLoadOptions};
 use textsurfer::pipeline::render::{RenderedPage, render_html};
 
 const WIDTH: usize = 40;
@@ -11,6 +17,7 @@ fn palette() -> Palette {
         text: Rgb::new(255, 255, 255),
         background: Rgb::new(0, 0, 128),
         link: Rgb::new(255, 255, 0),
+        link_hover: Rgb::new(0, 255, 255),
     }
 }
 
@@ -30,6 +37,39 @@ fn render(name: &str) -> DisplayList {
         false,
     )
     .painted
+}
+
+#[test]
+fn stateful_render_reuses_one_page_load_and_restores_hover_style() {
+    let mut load = PageLoad::new(
+        "<!doctype html><style>a:hover { color: red }</style><a href=/>target</a>",
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            viewport: Size { cols: 40, rows: 24 },
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+            text_rendering: TextRendering::Cell,
+        },
+    );
+    let first = load.force_render();
+    let link = first.painted.links[0].node;
+    assert_eq!(first.styles.get(link).color, Some(palette().link.into()));
+    let hovered = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(link),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(hovered.painted.links[0].node, link);
+    assert_eq!(
+        hovered.styles.get(link).color,
+        Some(Rgb::new(255, 0, 0).into())
+    );
+    let restored = load.set_dynamic_state(DynamicState::INERT).unwrap();
+    assert_eq!(restored.styles.get(link).color, Some(palette().link.into()));
 }
 
 fn golden(name: &str) -> String {

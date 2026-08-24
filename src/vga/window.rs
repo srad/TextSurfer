@@ -12,7 +12,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ratatui::Terminal;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -22,22 +21,20 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::app::App;
 use crate::app::net::Navigate;
-use crate::core::event::{MouseEvent, MouseKind};
+use crate::core::event::{InputBatch, InputEvent, MouseEvent, MouseKind, ResizePhase};
+use crate::core::frame::{FrameDamage, FrameScheduler, RowDamage};
 use crate::core::geom::{Point, Size};
-use crate::core::style::Rgb;
-use crate::core::style::TextRendering;
+use crate::core::style::{Cursor, Rgb, TextRendering};
 use crate::layout::LayoutRect;
 use crate::ui::chrome;
+use crate::ui::frame::FrameComposer;
 use crate::ui::mouse::WHEEL_ROWS;
 use crate::ui::theme::{NORTON, rgb_of};
 
 use super::backend::{VgaBackend, cell_at, grid_for, pixel_size};
-use super::font::CELL_H;
+use super::font::{CELL_H, CELL_W};
 use super::input::{WheelAccumulator, from_window_button, from_window_key};
 use super::surface::SurfaceConfig;
-
-/// Matches the terminal frontend's poll interval, so both pump `App::step` alike.
-const TICK: Duration = Duration::from_millis(50);
 
 /// How the framebuffer frontend should start up.
 #[derive(Clone, Copy, Debug)]
@@ -83,10 +80,16 @@ struct Presented {
     window: Rc<Window>,
     surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
     _context: softbuffer::Context<Rc<Window>>,
+    size: Option<PhysicalSize<u32>>,
+    damage_history: Vec<Vec<softbuffer::Rect>>,
 }
 
-struct VgaApp {
-    terminal: Terminal<VgaBackend>,
+pub(super) struct VgaApp {
+    backend: VgaBackend,
+    composer: FrameComposer,
+    pending_damage: FrameDamage,
+    scheduler: FrameScheduler,
+    pending_size: Option<Size>,
     app: App,
     options: VgaOptions,
     started: Instant,
@@ -95,7 +98,7 @@ struct VgaApp {
     /// position of their own.
     pointer: Option<Point>,
     wheel: WheelAccumulator,
-    cursor_icon: CursorIcon,
+    cursor: CursorPresentation,
     background: Rgb,
     presented: Option<Presented>,
     /// The first error to escape a callback. `ApplicationHandler` cannot return one,
@@ -104,7 +107,11 @@ struct VgaApp {
 }
 
 impl VgaApp {
-    fn new(net: Arc<dyn Navigate>, options: VgaOptions, url: Option<String>) -> io::Result<Self> {
+    pub(super) fn new(
+        net: Arc<dyn Navigate>,
+        options: VgaOptions,
+        url: Option<String>,
+    ) -> io::Result<Self> {
         let background = rgb_of(NORTON.bg);
         let backend = VgaBackend::new(SurfaceConfig {
             cols: options.cells.cols,
@@ -119,14 +126,26 @@ impl VgaApp {
             app.submit_url(&url);
         }
         Ok(Self {
-            terminal: Terminal::new(backend)?,
+            backend,
+            composer: FrameComposer::new(ratatui::layout::Rect::new(
+                0,
+                0,
+                options.cells.cols,
+                options.cells.rows,
+            )),
+            pending_damage: FrameDamage::default(),
+            scheduler: FrameScheduler::default(),
+            pending_size: None,
             app,
             options,
             started: Instant::now(),
             modifiers: ModifiersState::empty(),
             pointer: None,
             wheel: WheelAccumulator::default(),
-            cursor_icon: CursorIcon::Default,
+            cursor: CursorPresentation {
+                visible: true,
+                icon: CursorIcon::Default,
+            },
             background,
             presented: None,
             failure: None,
@@ -140,8 +159,24 @@ impl VgaApp {
     /// results, so a loop that merely waits for input would leave every page load
     /// hanging in the channel. Splitting it out lets that be driven — and asserted —
     /// without a window.
-    pub(super) fn tick(&mut self) -> Tick {
-        self.app.step(self.started.elapsed());
+    pub(super) fn tick_at(&mut self, now: Duration) -> Tick {
+        let mut advanced = false;
+        if let Some(input) = self.scheduler.take_due(now) {
+            if let Some(size) = self.pending_size.take() {
+                self.backend.resize(size);
+            }
+            self.app.advance(&input, now);
+            advanced = true;
+        } else if self.app.next_wake().is_some_and(|deadline| deadline <= now) {
+            self.app.advance(&InputBatch::new(), now);
+            advanced = true;
+        }
+        let damage = self.app.take_damage();
+        let changed = !damage.is_empty();
+        self.pending_damage.merge(damage);
+        if advanced || changed {
+            self.sync_cursor_icon();
+        }
         if self.app.should_quit() {
             return Tick {
                 quit: true,
@@ -150,7 +185,7 @@ impl VgaApp {
         }
         Tick {
             quit: false,
-            redraw: self.app.take_dirty(),
+            redraw: !self.pending_damage.is_empty(),
         }
     }
 
@@ -158,18 +193,20 @@ impl VgaApp {
     /// a cursor request per pointer move would be a round trip to the window system for
     /// nothing.
     fn sync_cursor_icon(&mut self) {
-        let wanted = if self.app.hovers_link() {
-            CursorIcon::Pointer
-        } else {
-            CursorIcon::Default
-        };
-        if self.cursor_icon == wanted {
+        let wanted = cursor_presentation(self.app.pointer_cursor());
+        let update = cursor_update(self.cursor, wanted);
+        if update == CursorUpdate::default() {
             return;
         }
-        self.cursor_icon = wanted;
         if let Some(presented) = self.presented.as_ref() {
-            presented.window.set_cursor(wanted);
+            if let Some(visible) = update.visible {
+                presented.window.set_cursor_visible(visible);
+            }
+            if let Some(icon) = update.icon {
+                presented.window.set_cursor(icon);
+            }
         }
+        self.cursor = wanted;
     }
 
     /// Record the first failure and ask the loop to stop.
@@ -181,24 +218,53 @@ impl VgaApp {
     }
 
     /// Re-derive the cell grid from a physical window size.
-    fn resize(&mut self, physical: PhysicalSize<u32>) {
+    pub(super) fn resize(&mut self, physical: PhysicalSize<u32>) {
         let cells = grid_for(physical.width, physical.height, self.options.scale);
-        if cells == self.terminal.backend().surface().size() {
+        if cells
+            == self
+                .pending_size
+                .unwrap_or_else(|| self.backend.surface().size())
+        {
             return;
         }
-        self.terminal.backend_mut().resize(cells);
-        self.app.on_resize(cells);
+        self.pending_size = Some(cells);
+        self.scheduler.push(
+            InputEvent::Resize {
+                size: cells,
+                phase: ResizePhase::Preview,
+            },
+            self.started.elapsed(),
+        );
+    }
+
+    pub(super) fn move_pointer(&mut self, at: Point) -> bool {
+        if self.pointer == Some(at) {
+            return false;
+        }
+        self.pointer = Some(at);
+        self.scheduler.push(
+            InputEvent::Mouse(MouseEvent {
+                kind: MouseKind::Move,
+                at,
+            }),
+            self.started.elapsed(),
+        );
+        true
     }
 
     /// Draw the chrome, then copy the pixels into the window.
-    fn redraw(&mut self) -> io::Result<()> {
+    pub(super) fn redraw(&mut self) -> io::Result<()> {
+        let damage = std::mem::take(&mut self.pending_damage);
+        if damage.is_empty() {
+            return Ok(());
+        }
+        let content_changed = damage.content.full
+            || damage.content.scroll_rows != 0
+            || damage.content.repaint != RowDamage::None;
+        let reset_overlay = damage.content.full || damage.content.repaint != RowDamage::None;
         let view = self.app.chrome_view();
-        let area = ratatui::layout::Rect::new(
-            0,
-            0,
-            self.terminal.size()?.width,
-            self.terminal.size()?.height,
-        );
+        let size = self.backend.surface().size();
+        let area = ratatui::layout::Rect::new(0, 0, size.cols, size.rows);
         let scaled = view.content.painted.scaled_text.clone();
         let scroll = view.content.scroll;
         let content = chrome::content_rect(&view, area);
@@ -206,10 +272,33 @@ impl VgaApp {
             .into_iter()
             .map(layout_rect)
             .collect::<Vec<_>>();
-        self.terminal.backend_mut().clear_scaled_overlay();
-        self.terminal.draw(|frame| chrome::draw(frame, &view))?;
-        if let Some(content) = content {
-            self.terminal.backend_mut().draw_scaled_text(
+        if reset_overlay {
+            self.backend.clear_scaled_overlay();
+        }
+        self.composer.present(&mut self.backend, &view, &damage)?;
+        let scaled = if damage.content.scroll_rows != 0
+            && !damage.content.full
+            && damage.content.repaint == RowDamage::None
+        {
+            let height = content.map_or(0, |rect| usize::from(rect.height));
+            let amount = damage.content.scroll_rows.unsigned_abs() as usize;
+            let exposed = if damage.content.scroll_rows > 0 {
+                scroll.saturating_add(height.saturating_sub(amount))..scroll.saturating_add(height)
+            } else {
+                scroll..scroll.saturating_add(amount.min(height))
+            };
+            scaled
+                .into_iter()
+                .filter(|run| {
+                    run.rect.row < exposed.end
+                        && run.rect.row.saturating_add(run.rect.height) > exposed.start
+                })
+                .collect::<Vec<_>>()
+        } else {
+            scaled
+        };
+        if content_changed && let Some(content) = content {
+            self.backend.draw_scaled_text(
                 &scaled,
                 (content.x, content.y),
                 scroll,
@@ -239,9 +328,18 @@ impl VgaApp {
             // Minimised: nothing to present, and softbuffer rejects a zero size.
             return Ok(());
         };
-        presented.surface.resize(width, height).map_err(into_io)?;
+        let resized = presented.size != Some(physical);
+        if resized {
+            presented.surface.resize(width, height).map_err(into_io)?;
+            presented.size = Some(physical);
+            presented.damage_history.clear();
+        }
 
-        let backend_surface = self.terminal.backend().surface();
+        let damage = self.backend.surface_mut().take_damage_regions();
+        if damage.is_empty() {
+            return Ok(());
+        }
+        let backend_surface = self.backend.surface();
         let (grid_width, grid_height) = backend_surface.pixel_size();
         let pixels = backend_surface.pixels();
         let fill = (u32::from(self.background.r) << 16)
@@ -250,14 +348,125 @@ impl VgaApp {
 
         let window_width = width.get() as usize;
         let mut buffer = presented.surface.buffer_mut().map_err(into_io)?;
-        buffer.fill(fill);
-        let copied_width = grid_width.min(window_width);
-        for row in 0..grid_height.min(height.get() as usize) {
-            let from = row * grid_width;
-            let to = row * window_width;
-            buffer[to..to + copied_width].copy_from_slice(&pixels[from..from + copied_width]);
+        let age = usize::from(buffer.age());
+        let full = resized || age == 0 || age.saturating_sub(1) > presented.damage_history.len();
+        let current_damage = if full {
+            vec![softbuffer::Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            }]
+        } else {
+            damage
+                .into_iter()
+                .map(|damage| softbuffer::Rect {
+                    x: damage.x.min(u32::MAX as usize) as u32,
+                    y: damage.y.min(u32::MAX as usize) as u32,
+                    width: NonZeroU32::new(damage.width.min(u32::MAX as usize) as u32)
+                        .expect("surface damage has width"),
+                    height: NonZeroU32::new(damage.height.min(u32::MAX as usize) as u32)
+                        .expect("surface damage has height"),
+                })
+                .collect()
+        };
+        let mut repair = current_damage.clone();
+        repair.extend(
+            presented
+                .damage_history
+                .iter()
+                .take(age.saturating_sub(1))
+                .flatten()
+                .copied(),
+        );
+        if full {
+            buffer.fill(fill);
         }
-        buffer.present().map_err(into_io)
+        let copied_width = grid_width.min(window_width);
+        for damage in &repair {
+            let first_row = damage.y as usize;
+            let last_row = first_row
+                .saturating_add(damage.height.get() as usize)
+                .min(grid_height)
+                .min(height.get() as usize);
+            for row in first_row..last_row {
+                let from = row * grid_width;
+                let to = row * window_width;
+                let first_col = (damage.x as usize).min(copied_width);
+                let last_col = first_col
+                    .saturating_add(damage.width.get() as usize)
+                    .min(copied_width);
+                buffer[to + first_col..to + last_col]
+                    .copy_from_slice(&pixels[from + first_col..from + last_col]);
+            }
+        }
+        presented.damage_history.insert(0, current_damage);
+        presented.damage_history.truncate(8);
+        buffer.present_with_damage(&repair).map_err(into_io)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CursorPresentation {
+    pub(super) visible: bool,
+    pub(super) icon: CursorIcon,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct CursorUpdate {
+    pub(super) visible: Option<bool>,
+    pub(super) icon: Option<CursorIcon>,
+}
+
+pub(super) fn cursor_presentation(cursor: Cursor) -> CursorPresentation {
+    let visible = cursor != Cursor::None;
+    let icon = match cursor {
+        Cursor::Auto | Cursor::Default | Cursor::None => CursorIcon::Default,
+        Cursor::ContextMenu => CursorIcon::ContextMenu,
+        Cursor::Help => CursorIcon::Help,
+        Cursor::Pointer => CursorIcon::Pointer,
+        Cursor::Progress => CursorIcon::Progress,
+        Cursor::Wait => CursorIcon::Wait,
+        Cursor::Cell => CursorIcon::Cell,
+        Cursor::Crosshair => CursorIcon::Crosshair,
+        Cursor::Text => CursorIcon::Text,
+        Cursor::VerticalText => CursorIcon::VerticalText,
+        Cursor::Alias => CursorIcon::Alias,
+        Cursor::Copy => CursorIcon::Copy,
+        Cursor::Move => CursorIcon::Move,
+        Cursor::NoDrop => CursorIcon::NoDrop,
+        Cursor::NotAllowed => CursorIcon::NotAllowed,
+        Cursor::Grab => CursorIcon::Grab,
+        Cursor::Grabbing => CursorIcon::Grabbing,
+        Cursor::EResize => CursorIcon::EResize,
+        Cursor::NResize => CursorIcon::NResize,
+        Cursor::NeResize => CursorIcon::NeResize,
+        Cursor::NwResize => CursorIcon::NwResize,
+        Cursor::SResize => CursorIcon::SResize,
+        Cursor::SeResize => CursorIcon::SeResize,
+        Cursor::SwResize => CursorIcon::SwResize,
+        Cursor::WResize => CursorIcon::WResize,
+        Cursor::EwResize => CursorIcon::EwResize,
+        Cursor::NsResize => CursorIcon::NsResize,
+        Cursor::NeswResize => CursorIcon::NeswResize,
+        Cursor::NwseResize => CursorIcon::NwseResize,
+        Cursor::ColResize => CursorIcon::ColResize,
+        Cursor::RowResize => CursorIcon::RowResize,
+        Cursor::AllScroll => CursorIcon::AllScroll,
+        Cursor::ZoomIn => CursorIcon::ZoomIn,
+        Cursor::ZoomOut => CursorIcon::ZoomOut,
+    };
+    CursorPresentation { visible, icon }
+}
+
+pub(super) fn cursor_update(
+    current: CursorPresentation,
+    wanted: CursorPresentation,
+) -> CursorUpdate {
+    CursorUpdate {
+        visible: (current.visible != wanted.visible).then_some(wanted.visible),
+        icon: (wanted.visible && (!current.visible || current.icon != wanted.icon))
+            .then_some(wanted.icon),
     }
 }
 
@@ -270,6 +479,26 @@ fn layout_rect(rect: ratatui::layout::Rect) -> LayoutRect {
     }
 }
 
+#[cfg(test)]
+pub(super) fn union_damage(left: softbuffer::Rect, right: softbuffer::Rect) -> softbuffer::Rect {
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    let far_x = left
+        .x
+        .saturating_add(left.width.get())
+        .max(right.x.saturating_add(right.width.get()));
+    let far_y = left
+        .y
+        .saturating_add(left.height.get())
+        .max(right.y.saturating_add(right.height.get()));
+    softbuffer::Rect {
+        x,
+        y,
+        width: NonZeroU32::new(far_x - x).expect("damage union has width"),
+        height: NonZeroU32::new(far_y - y).expect("damage union has height"),
+    }
+}
+
 impl ApplicationHandler for VgaApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.presented.is_some() {
@@ -278,7 +507,11 @@ impl ApplicationHandler for VgaApp {
         let (width, height) = pixel_size(self.options.cells, self.options.scale);
         let attributes = Window::default_attributes()
             .with_title("TextSurfer")
-            .with_inner_size(PhysicalSize::new(width as u32, height as u32));
+            .with_inner_size(PhysicalSize::new(width as u32, height as u32))
+            .with_resize_increments(PhysicalSize::new(
+                (CELL_W * self.options.scale.max(1)) as u32,
+                (CELL_H * self.options.scale.max(1)) as u32,
+            ));
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Rc::new(window),
             Err(error) => return self.fail(event_loop, into_io(error)),
@@ -295,8 +528,13 @@ impl ApplicationHandler for VgaApp {
             window,
             surface,
             _context: context,
+            size: None,
+            damage_history: Vec::new(),
         });
-        if let Err(error) = self.redraw() {
+        let tick = self.tick_at(self.started.elapsed());
+        if tick.redraw
+            && let Err(error) = self.redraw()
+        {
             self.fail(event_loop, error);
         }
     }
@@ -308,23 +546,18 @@ impl ApplicationHandler for VgaApp {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(key) = from_window_key(&event.logical_key, event.state, self.modifiers)
                 {
-                    self.app.handle_key(key);
+                    self.scheduler
+                        .push(InputEvent::Key(key), self.started.elapsed());
                 }
-                self.sync_cursor_icon();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let at = cell_at(position, self.options.scale);
-                self.pointer = Some(at);
-                self.app.handle_mouse(MouseEvent {
-                    kind: MouseKind::Move,
-                    at,
-                });
-                self.sync_cursor_icon();
+                self.move_pointer(at);
             }
             WindowEvent::CursorLeft { .. } => {
                 self.pointer = None;
-                self.app.pointer_left();
-                self.sync_cursor_icon();
+                self.scheduler
+                    .push(InputEvent::PointerLeft, self.started.elapsed());
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 // A press before any `CursorMoved` has no position to aim at; aiming it
@@ -332,20 +565,22 @@ impl ApplicationHandler for VgaApp {
                 if let Some(at) = self.pointer
                     && let Some(event) = from_window_button(button, state, at)
                 {
-                    self.app.handle_mouse(event);
-                    self.sync_cursor_icon();
+                    self.scheduler
+                        .push(InputEvent::Mouse(event), self.started.elapsed());
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let notch = (CELL_H * self.options.scale.max(1)) as f64 * f64::from(WHEEL_ROWS);
                 if let Some(at) = self.pointer
-                    && let Some(direction) = self.wheel.push(delta, notch)
+                    && let Some(rows) = self.wheel.push(delta, notch)
                 {
-                    self.app.handle_mouse(MouseEvent {
-                        kind: MouseKind::Wheel(direction),
-                        at,
-                    });
-                    self.sync_cursor_icon();
+                    self.scheduler.push(
+                        InputEvent::Mouse(MouseEvent {
+                            kind: MouseKind::Wheel { rows },
+                            at,
+                        }),
+                        self.started.elapsed(),
+                    );
                 }
             }
             // Both carry a new physical size; the scale-factor case also arrives when a
@@ -366,7 +601,8 @@ impl ApplicationHandler for VgaApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let tick = self.tick();
+        let now = self.started.elapsed();
+        let tick = self.tick_at(now);
         if tick.quit {
             event_loop.exit();
             return;
@@ -376,7 +612,12 @@ impl ApplicationHandler for VgaApp {
         {
             presented.window.request_redraw();
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + TICK));
+        match self.scheduler.next_deadline(self.app.next_wake()) {
+            Some(deadline) => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(self.started + deadline));
+            }
+            None => event_loop.set_control_flow(ControlFlow::Wait),
+        }
     }
 }
 

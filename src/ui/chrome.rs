@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
+use ratatui::widgets::Widget;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -33,18 +35,22 @@ pub struct ChromeView<'a> {
 
 pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
     let area = frame.area();
+    if let Some(cursor) = compose(area, frame.buffer_mut(), view) {
+        frame.set_cursor_position(cursor);
+    }
+}
+
+pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option<Position> {
     let layout = view.geometry.layout(area);
     let frame_style = Style::default().fg(view.theme.frame);
-    frame
-        .buffer_mut()
-        .set_style(area, Style::default().bg(view.theme.bg));
+    buffer.set_style(area, Style::default().bg(view.theme.bg));
 
-    let divider = |frame: &mut Frame<'_>, rect: Rect| {
+    let divider = |buffer: &mut Buffer, rect: Rect| {
         let width = rect.width;
-        buf_set_string(frame, rect, 0, "├", frame_style);
-        buf_set_string(frame, rect, width - 1, "┤", frame_style);
+        buf_set_string(buffer, rect, 0, "├", frame_style);
+        buf_set_string(buffer, rect, width - 1, "┤", frame_style);
         buf_set_string(
-            frame,
+            buffer,
             rect,
             1,
             &"─".repeat(usize::from(width.saturating_sub(2))),
@@ -52,15 +58,15 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
         );
     };
 
-    let divider_with_opening = |frame: &mut Frame<'_>, rect: Rect, opening: Option<(u16, u16)>| {
+    let divider_with_opening = |buffer: &mut Buffer, rect: Rect, opening: Option<(u16, u16)>| {
         let width = rect.width;
         let left_rail = if opening.is_some_and(|(left, _)| left == 1) {
             "│"
         } else {
             "├"
         };
-        buf_set_string(frame, rect, 0, left_rail, frame_style);
-        buf_set_string(frame, rect, width - 1, "┤", frame_style);
+        buf_set_string(buffer, rect, 0, left_rail, frame_style);
+        buf_set_string(buffer, rect, width - 1, "┤", frame_style);
         for col in 1..width.saturating_sub(1) {
             let glyph = match opening {
                 Some((left, _)) if col == left => "┘",
@@ -68,29 +74,25 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
                 Some((left, right)) if col > left && col < right => continue,
                 _ => "─",
             };
-            buf_set_string(frame, rect, col, glyph, frame_style);
+            buf_set_string(buffer, rect, col, glyph, frame_style);
         }
     };
 
     if let Some(rect) = layout.menu {
-        frame.render_widget(
-            MenuBar {
-                active: view.menu_active,
-                open: view.menu_open,
-                theme: &view.theme,
-            },
-            rect,
-        );
+        MenuBar {
+            active: view.menu_active,
+            open: view.menu_open,
+            theme: &view.theme,
+        }
+        .render(rect, buffer);
     }
     if let Some(rect) = layout.tabs {
-        frame.render_widget(
-            TabBar {
-                tabs: &view.tabs,
-                active: view.active_tab,
-                theme: &view.theme,
-            },
-            rect,
-        );
+        TabBar {
+            tabs: &view.tabs,
+            active: view.active_tab,
+            theme: &view.theme,
+        }
+        .render(rect, buffer);
     }
     let opening = if let (Some(tabs), Some(divider)) = (layout.tabs, layout.tab_divider)
         && tabs.width >= 2
@@ -102,58 +104,51 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
         None
     };
     if let Some(rect) = layout.tab_divider {
-        divider_with_opening(frame, rect, opening);
+        divider_with_opening(buffer, rect, opening);
     }
     if let Some(rect) = layout.toolbar {
-        frame.render_widget(
-            Toolbar {
-                address: &view.address,
-                focused: view.address_focused,
-                back_enabled: view.can_back,
-                forward_enabled: view.can_forward,
-                theme: &view.theme,
-            },
-            rect,
-        );
+        Toolbar {
+            address: &view.address,
+            focused: view.address_focused,
+            back_enabled: view.can_back,
+            forward_enabled: view.can_forward,
+            theme: &view.theme,
+        }
+        .render(rect, buffer);
     }
     if let Some(rect) = layout.toolbar_divider {
-        divider(frame, rect);
+        divider(buffer, rect);
     }
     if let Some(rect) = layout.content.filter(|rect| rect.width >= 2) {
-        frame.render_widget(
-            Content {
-                lines: &view.content,
-                theme: &view.theme,
-            },
-            rect,
-        );
+        Content {
+            lines: &view.content,
+            theme: &view.theme,
+        }
+        .render(rect, buffer);
     }
     if let Some(rect) = layout.status {
-        frame.render_widget(
-            StatusBar {
-                view: &view.status,
-                theme: &view.theme,
-            },
-            rect,
-        );
+        StatusBar {
+            view: &view.status,
+            theme: &view.theme,
+        }
+        .render(rect, buffer);
     }
 
     if view.menu_open {
-        frame.render_widget(
-            MenuPopup {
-                menu: view.menu_active,
-                selected: view.menu_item,
-                theme: &view.theme,
-            },
-            area,
-        );
+        MenuPopup {
+            menu: view.menu_active,
+            selected: view.menu_item,
+            theme: &view.theme,
+        }
+        .render(area, buffer);
     }
 
     if view.address_focused
         && let Some(toolbar) = layout.toolbar
     {
-        frame.set_cursor_position(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
+        return Some(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
     }
+    None
 }
 
 pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
@@ -165,6 +160,61 @@ pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
     })
 }
 
+pub fn compose_status(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    let rect = view.geometry.layout(area).status?;
+    clear_rect(buffer, rect, Style::default().bg(view.theme.bar_bg));
+    StatusBar {
+        view: &view.status,
+        theme: &view.theme,
+    }
+    .render(rect, buffer);
+    Some(rect)
+}
+
+pub fn cursor_position(view: &ChromeView<'_>, area: Rect) -> Option<Position> {
+    if view.address_focused
+        && let Some(toolbar) = view.geometry.layout(area).toolbar
+    {
+        return Some(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
+    }
+    None
+}
+
+pub fn compose_content_rows(
+    buffer: &mut Buffer,
+    view: &ChromeView<'_>,
+    area: Rect,
+    rows: std::ops::Range<u16>,
+) -> Option<Rect> {
+    let content = view.geometry.layout(area).content?;
+    let start = rows.start.min(content.height);
+    let end = rows.end.min(content.height);
+    if start >= end {
+        return None;
+    }
+    let rect = Rect::new(content.x, content.y + start, content.width, end - start);
+    clear_rect(buffer, rect, Style::default().bg(view.theme.bg));
+    let lines = ContentLines {
+        painted: view.content.painted,
+        scroll: view.content.scroll + usize::from(start),
+    };
+    Content {
+        lines: &lines,
+        theme: &view.theme,
+    }
+    .render(rect, buffer);
+    Some(rect)
+}
+
+fn clear_rect(buffer: &mut Buffer, rect: Rect, style: Style) {
+    for row in rect.y..rect.bottom() {
+        for col in rect.x..rect.right() {
+            buffer[(col, row)] = ratatui::buffer::Cell::default();
+            buffer[(col, row)].set_style(style);
+        }
+    }
+}
+
 pub fn occlusion_rects(view: &ChromeView<'_>, area: Rect) -> Vec<Rect> {
     if view.menu_open {
         vec![popup_rect(area, area, view.menu_active)]
@@ -173,10 +223,8 @@ pub fn occlusion_rects(view: &ChromeView<'_>, area: Rect) -> Vec<Rect> {
     }
 }
 
-fn buf_set_string(frame: &mut Frame<'_>, rect: Rect, col: u16, text: &str, style: Style) {
-    frame
-        .buffer_mut()
-        .set_string(rect.x + col, rect.y, text, style);
+fn buf_set_string(buffer: &mut Buffer, rect: Rect, col: u16, text: &str, style: Style) {
+    buffer.set_string(rect.x + col, rect.y, text, style);
 }
 
 /// The grapheme index a click at `col` selects in an address field `toolbar_width` wide.

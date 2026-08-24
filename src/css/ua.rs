@@ -3,22 +3,29 @@
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId, attr_value};
 use crate::core::style::{
-    BorderSpacing, ComputedStyle, CssMargin, Display, FontSize, ListStyleType, Palette, Rgba,
-    TextAlign, VerticalAlign, WhiteSpace,
+    BorderSpacing, ComputedStyle, CssMargin, Cursor, Display, FontSize, ListStyleType, Palette,
+    Rgba, TextAlign, VerticalAlign, WhiteSpace,
 };
 
 use super::values::parse_list_style_type;
+
+#[derive(Clone, Copy)]
+pub(super) struct UaContext {
+    pub(super) palette: Palette,
+    pub(super) state: crate::css::DynamicState,
+}
 
 pub(super) fn ua_style(
     document: &Document,
     id: NodeId,
     parent_style: Option<ComputedStyle>,
-    palette: Palette,
+    context: UaContext,
 ) -> ComputedStyle {
     let inherited = parent_style.unwrap_or_default();
     let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
         return ComputedStyle {
             color: inherited.color,
+            cursor: inherited.cursor,
             bold: inherited.bold,
             underline: inherited.underline,
             strike: inherited.strike,
@@ -36,6 +43,7 @@ pub(super) fn ua_style(
     if *ns != ElementNs::Html {
         return ComputedStyle {
             color: inherited.color,
+            cursor: inherited.cursor,
             bold: inherited.bold,
             underline: inherited.underline,
             strike: inherited.strike,
@@ -107,6 +115,7 @@ pub(super) fn ua_style(
     let mut style = ComputedStyle {
         display,
         white_space: inherited.white_space,
+        cursor: inherited.cursor,
         color: inherited.color,
         bold: inherited.bold,
         underline: inherited.underline,
@@ -164,8 +173,14 @@ pub(super) fn ua_style(
             .iter()
             .any(|attr| attr.ns == AttrNs::None && attr.name == "href")
     {
-        style.color = Some(Rgba::opaque(palette.link));
+        let hovered = on_chain(document, id, context.state.hover);
+        style.color = Some(Rgba::opaque(if hovered {
+            context.palette.link_hover
+        } else {
+            context.palette.link
+        }));
         style.underline = true;
+        style.cursor = Cursor::Pointer;
     }
     if matches!(name.as_str(), "b" | "strong" | "th") {
         style.bold = true;
@@ -201,6 +216,16 @@ pub(super) fn ua_style(
         style.margin.left = CssMargin::Cells(2);
     }
     style
+}
+
+fn on_chain(document: &Document, id: NodeId, mut target: Option<NodeId>) -> bool {
+    while let Some(node) = target {
+        if node == id {
+            return true;
+        }
+        target = document.parent(node);
+    }
+    false
 }
 
 /// Real UA sheets step the bullet through disc, circle and square as unordered lists nest.

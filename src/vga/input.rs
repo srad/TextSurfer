@@ -9,10 +9,9 @@
 use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 
-use crate::core::event::{
-    Key, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseKind, WheelDirection,
-};
+use crate::core::event::{Key, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseKind};
 use crate::core::geom::Point;
+use crate::ui::mouse::WHEEL_ROWS;
 
 /// Translate a window key event, or `None` if it carries nothing the app can use.
 ///
@@ -85,7 +84,7 @@ pub struct WheelAccumulator {
 }
 
 impl WheelAccumulator {
-    pub fn push(&mut self, delta: MouseScrollDelta, notch_pixels: f64) -> Option<WheelDirection> {
+    pub fn push(&mut self, delta: MouseScrollDelta, notch_pixels: f64) -> Option<i32> {
         let notches = match delta {
             MouseScrollDelta::LineDelta(_, lines) => f64::from(lines),
             MouseScrollDelta::PixelDelta(position) => position.y / notch_pixels.max(1.0),
@@ -97,15 +96,10 @@ impl WheelAccumulator {
             self.notches = 0.0;
         }
         self.notches += notches;
-        if self.notches >= 1.0 {
-            self.notches -= 1.0;
-            Some(WheelDirection::Up)
-        } else if self.notches <= -1.0 {
-            self.notches += 1.0;
-            Some(WheelDirection::Down)
-        } else {
-            None
-        }
+        let whole = self.notches.trunc();
+        self.notches -= whole;
+        let rows = -(whole as i32).saturating_mul(WHEEL_ROWS);
+        (rows != 0).then_some(rows)
     }
 }
 

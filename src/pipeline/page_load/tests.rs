@@ -1,6 +1,7 @@
 use encoding_rs::UTF_8;
 
 use super::*;
+use crate::css::{DynamicState, FocusSource, FocusedNode};
 use crate::net::FetchError;
 
 fn load(source: &str) -> PageLoad {
@@ -320,6 +321,99 @@ fn import_depth_is_bounded_to_eight_edges() {
     }
     assert!(load.take_commands().is_empty());
     assert!(load.is_settled());
+}
+
+#[test]
+fn dynamic_state_restyles_only_when_author_or_ua_rules_can_observe_it() {
+    let mut inert = load("<!doctype html><p id=x>x</p>");
+    inert.force_render();
+    let x = inert.document.borrow().element_by_id("x").unwrap();
+    assert!(
+        inert
+            .set_dynamic_state(DynamicState {
+                hover: Some(x),
+                ..Default::default()
+            })
+            .is_none()
+    );
+
+    let mut authored = load("<!doctype html><style>#x:hover { color: red }</style><p id=x>x</p>");
+    authored.force_render();
+    let x = authored.document.borrow().element_by_id("x").unwrap();
+    let progress = (
+        authored.first_painted,
+        authored.final_painted,
+        authored.dirty,
+    );
+    assert!(
+        authored
+            .set_dynamic_state(DynamicState {
+                hover: Some(x),
+                ..Default::default()
+            })
+            .is_some()
+    );
+    assert_eq!(
+        (
+            authored.first_painted,
+            authored.final_painted,
+            authored.dirty
+        ),
+        progress
+    );
+}
+
+#[test]
+fn ua_link_hover_uses_the_ancestor_chain_and_suppresses_same_link_rehits() {
+    let mut load = load("<!doctype html><a id=link href=/><span id=span>target</span></a>");
+    load.force_render();
+    let document = load.document.borrow();
+    let link = document.element_by_id("link").unwrap();
+    let span = document.element_by_id("span").unwrap();
+    let text = document.first_child(span).unwrap();
+    drop(document);
+    assert!(
+        load.set_dynamic_state(DynamicState {
+            hover: Some(text),
+            ..Default::default()
+        })
+        .is_some()
+    );
+    assert!(
+        load.set_dynamic_state(DynamicState {
+            hover: Some(link),
+            ..Default::default()
+        })
+        .is_none()
+    );
+}
+
+#[test]
+fn prepaint_state_is_retained_and_focus_source_changes_are_observable() {
+    let mut load = load(
+        "<!doctype html><style>#x:focus-visible { color: red }</style><button id=x>x</button>",
+    );
+    let x = load.document.borrow().element_by_id("x").unwrap();
+    assert!(
+        load.set_dynamic_state(DynamicState {
+            focus: Some(FocusedNode {
+                node: x,
+                source: FocusSource::Pointer,
+            }),
+            ..Default::default()
+        })
+        .is_none()
+    );
+    let first = load.force_render();
+    assert_eq!(first.styles.get(x).color, None);
+    let keyboard = load.set_dynamic_state(DynamicState {
+        focus: Some(FocusedNode {
+            node: x,
+            source: FocusSource::Keyboard,
+        }),
+        ..Default::default()
+    });
+    assert!(keyboard.is_some());
 }
 
 #[test]

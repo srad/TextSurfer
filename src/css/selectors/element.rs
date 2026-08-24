@@ -55,6 +55,42 @@ impl DomElement<'_> {
         ns == ElementNs::Html && name == "option" && self.has_attribute("selected")
     }
 
+    fn is_text_entry_control(&self) -> bool {
+        let (name, ns, attrs) = self.element();
+        if ns != ElementNs::Html
+            || attrs
+                .iter()
+                .any(|attr| attr.ns == AttrNs::None && attr.name == "disabled")
+        {
+            return false;
+        }
+        if name == "textarea" {
+            return true;
+        }
+        if name != "input" {
+            return false;
+        }
+        attrs
+            .iter()
+            .find(|attr| attr.ns == AttrNs::None && attr.name == "type")
+            .is_none_or(|attr| {
+                matches!(
+                    attr.value.to_ascii_lowercase().as_str(),
+                    "text" | "search" | "url" | "tel" | "email" | "password" | "number"
+                )
+            })
+    }
+
+    fn is_on_chain(&self, mut node: Option<NodeId>) -> bool {
+        while let Some(candidate) = node {
+            if candidate == self.id {
+                return true;
+            }
+            node = self.document.parent(candidate);
+        }
+        false
+    }
+
     fn sibling_element(&self, mut id: Option<NodeId>, next: bool) -> Option<Self> {
         while let Some(candidate) = id {
             if matches!(self.document.node(candidate), Some(Node::Element { .. })) {
@@ -180,9 +216,19 @@ impl Element for DomElement<'_> {
         match pseudo {
             DynamicPseudoClass::Link | DynamicPseudoClass::AnyLink => self.is_link(),
             DynamicPseudoClass::Visited => false,
-            DynamicPseudoClass::Hover => self.state.hover == Some(self.id),
-            DynamicPseudoClass::Focus => self.state.focus == Some(self.id),
-            DynamicPseudoClass::Active => self.state.active == Some(self.id),
+            DynamicPseudoClass::Hover => self.is_on_chain(self.state.hover),
+            DynamicPseudoClass::Focus => {
+                self.state.focus.is_some_and(|focus| focus.node == self.id)
+            }
+            DynamicPseudoClass::FocusVisible => self.state.focus.is_some_and(|focus| {
+                focus.node == self.id
+                    && (focus.source == super::pseudo::FocusSource::Keyboard
+                        || self.is_text_entry_control())
+            }),
+            DynamicPseudoClass::FocusWithin => {
+                self.is_on_chain(self.state.focus.map(|focus| focus.node))
+            }
+            DynamicPseudoClass::Active => self.is_on_chain(self.state.active),
             DynamicPseudoClass::Checked => self.has_attribute("checked") || self.is_selected(),
             DynamicPseudoClass::Disabled => {
                 self.is_form_control() && self.has_attribute("disabled")

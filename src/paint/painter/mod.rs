@@ -60,6 +60,13 @@ pub struct HitRegion {
     pub node: NodeId,
     pub rect: LayoutRect,
     pub depth: usize,
+    pub kind: HitKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HitKind {
+    Box,
+    Text,
 }
 
 impl DisplayList {
@@ -108,7 +115,7 @@ impl DisplayList {
                     && row >= hit.rect.row
                     && row < hit.rect.row.saturating_add(hit.rect.height)
             })
-            .max_by_key(|hit| hit.depth)
+            .max_by_key(|hit| (hit.depth, hit.kind))
             .map(|hit| hit.node)
     }
 
@@ -233,7 +240,14 @@ impl Painter for BasicPainter {
                     node: layout_box.node,
                     rect: layout_box.border_rect,
                     depth: layout_box.depth,
+                    kind: HitKind::Box,
                 })
+                .chain(box_tree.fragments.iter().map(|fragment| HitRegion {
+                    node: fragment.node,
+                    rect: fragment.rect(),
+                    depth: fragment.depth,
+                    kind: HitKind::Text,
+                }))
                 .collect(),
             links: box_tree
                 .links

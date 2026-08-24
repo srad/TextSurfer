@@ -9,6 +9,7 @@ mod tests;
 
 use cssparser::{Parser, ParserInput, StyleSheetParser};
 
+use crate::css::selectors::{StateDeps, uses_dynamic_state};
 use ast::rule_has_content;
 use sheet::SheetParser;
 
@@ -33,10 +34,27 @@ impl CssParser for CssparserParser {
         let mut input = Parser::new(&mut input);
         let mut diagnostics = CssDiagnostics::default();
         let mut parser = SheetParser::new(&mut diagnostics);
-        let rules = StyleSheetParser::new(&mut input, &mut parser)
+        let rules: Vec<CssRule> = StyleSheetParser::new(&mut input, &mut parser)
             .filter_map(Result::ok)
             .filter(rule_has_content)
             .collect();
-        StyleSheet { rules, diagnostics }
+        let state_deps = rules.iter().fold(StateDeps::default(), |deps, rule| {
+            deps.union(rule_state_deps(rule))
+        });
+        StyleSheet {
+            rules,
+            diagnostics,
+            state_deps,
+        }
+    }
+}
+
+fn rule_state_deps(rule: &CssRule) -> StateDeps {
+    match rule {
+        CssRule::Style(rule) => uses_dynamic_state(&rule.selectors),
+        CssRule::Media(rule) => rule.rules.iter().fold(StateDeps::default(), |deps, rule| {
+            deps.union(rule_state_deps(rule))
+        }),
+        CssRule::Import(_) => StateDeps::default(),
     }
 }

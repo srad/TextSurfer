@@ -1,5 +1,6 @@
 use crate::core::event::{Key, KeyEvent};
 use crate::core::focus::Focus;
+use crate::core::frame::ChromeDamage;
 use crate::ui::keymap::{Action, DefaultKeymap, Keymap};
 use crate::ui::widgets::menu::MENUS;
 
@@ -11,6 +12,9 @@ impl App {
             Some(action) => self.apply(action),
             None => self.edit(event),
         }
+        if self.sync_dynamic_state() {
+            self.touch();
+        }
     }
 
     pub(super) fn apply(&mut self, action: Action) {
@@ -21,11 +25,15 @@ impl App {
             Action::NextTab => {
                 self.tabs.next();
                 self.activate_current();
+                self.pressed = None;
+                self.refresh_hover();
                 self.touch();
             }
             Action::PrevTab => {
                 self.tabs.prev();
                 self.activate_current();
+                self.pressed = None;
+                self.refresh_hover();
                 self.touch();
             }
             Action::FocusAddress => {
@@ -147,11 +155,15 @@ impl App {
 
     pub(super) fn pending(&mut self, notice: &str) {
         self.tabs.active_mut().message = notice.to_string();
-        self.touch();
+        self.touch_status();
     }
 
     pub(super) fn touch(&mut self) {
-        self.dirty = true;
+        self.damage.repaint_all();
+    }
+
+    pub(super) fn touch_status(&mut self) {
+        self.damage.damage_chrome(ChromeDamage::Status);
     }
 }
 

@@ -2,6 +2,7 @@ use url::Url;
 
 use crate::core::dom::SharedDocument;
 use crate::core::style::StyleTree;
+use crate::css::FocusedNode;
 use crate::paint::DisplayList;
 use crate::pipeline::page_load::PageLoad;
 
@@ -24,7 +25,9 @@ pub struct Tab {
     pub document: Option<SharedDocument>,
     pub styles: Option<StyleTree>,
     pub load: Option<PageLoad>,
+    pub document_pending: bool,
     pub render_dirty: bool,
+    pub(crate) dom_focus: Option<FocusedNode>,
 }
 
 impl Tab {
@@ -60,7 +63,9 @@ impl Tab {
             document: None,
             styles: None,
             load: None,
+            document_pending: false,
             render_dirty: false,
+            dom_focus: None,
         }
     }
 

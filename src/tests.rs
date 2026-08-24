@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::VecDeque;
 
 fn terminal_key(kind: KeyEventKind) -> event::KeyEvent {
     event::KeyEvent::new_with_kind(KeyCode::Char('g'), KeyModifiers::NONE, kind)
@@ -59,7 +60,7 @@ fn mouse_reports_map_onto_domain_events() {
         from_terminal_mouse(terminal_mouse(event::MouseEventKind::ScrollUp))
             .unwrap()
             .kind,
-        MouseKind::Wheel(WheelDirection::Up)
+        MouseKind::Wheel { rows: -WHEEL_ROWS }
     );
 }
 
@@ -138,4 +139,155 @@ fn compiled_frontend_is_the_interactive_default() {
     assert_eq!(frontend_choice(&cli).unwrap(), FrontendChoice::Vga);
     #[cfg(not(feature = "vga"))]
     assert_eq!(frontend_choice(&cli).unwrap(), FrontendChoice::Terminal);
+}
+
+enum ScriptItem {
+    Idle,
+    Event(Event),
+    PollError,
+    ReadError,
+}
+
+struct ScriptedEvents {
+    items: VecDeque<ScriptItem>,
+    ready: Option<io::Result<Event>>,
+    polls: Vec<Duration>,
+}
+
+impl ScriptedEvents {
+    fn new(items: impl IntoIterator<Item = ScriptItem>) -> Self {
+        Self {
+            items: items.into_iter().collect(),
+            ready: None,
+            polls: Vec::new(),
+        }
+    }
+}
+
+impl TerminalEvents for ScriptedEvents {
+    fn poll(&mut self, timeout: Duration) -> io::Result<bool> {
+        self.polls.push(timeout);
+        match self.items.pop_front() {
+            Some(ScriptItem::Idle) => Ok(false),
+            Some(ScriptItem::Event(event)) => {
+                self.ready = Some(Ok(event));
+                Ok(true)
+            }
+            Some(ScriptItem::PollError) => Err(io::Error::other("poll failed")),
+            Some(ScriptItem::ReadError) => {
+                self.ready = Some(Err(io::Error::other("read failed")));
+                Ok(true)
+            }
+            None => Err(io::Error::other("script exhausted before quit")),
+        }
+    }
+
+    fn read(&mut self) -> io::Result<Event> {
+        self.ready
+            .take()
+            .unwrap_or_else(|| Err(io::Error::other("read without ready event")))
+    }
+}
+
+fn terminal_event(code: KeyCode) -> Event {
+    Event::Key(event::KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+fn quit_script() -> [ScriptItem; 3] {
+    [
+        ScriptItem::Event(terminal_event(KeyCode::Esc)),
+        ScriptItem::Event(terminal_event(KeyCode::Char('q'))),
+        ScriptItem::Idle,
+    ]
+}
+
+#[test]
+fn terminal_idle_and_quit_cycles_poll_step_and_draw_only_dirty_states() {
+    let mut script = Vec::from([ScriptItem::Idle]);
+    script.extend(quit_script());
+    let mut events = ScriptedEvents::new(script);
+    let mut app = App::new();
+    let mut steps = 0_u64;
+    let mut draws = 0;
+    run_with(
+        &mut events,
+        &mut app,
+        || {
+            steps += 1;
+            Duration::from_millis(steps * 50)
+        },
+        |_, _| {
+            draws += 1;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        events.polls,
+        vec![IDLE_POLL, IDLE_POLL, Duration::ZERO, Duration::ZERO]
+    );
+    assert!(steps >= 2);
+    assert_eq!(draws, 2);
+}
+
+#[test]
+fn terminal_sustained_mouse_queue_is_one_coalesced_frame_transaction() {
+    let moved = Event::Mouse(terminal_mouse(event::MouseEventKind::Moved));
+    let mut script = Vec::from([ScriptItem::Idle]);
+    script.extend(
+        (0..EVENTS_PER_FRAME - 2)
+            .map(|_| ScriptItem::Event(moved.clone()))
+            .collect::<Vec<_>>(),
+    );
+    script.extend(quit_script());
+    let mut events = ScriptedEvents::new(script);
+    let mut app = App::new();
+    let mut draws = 0;
+    run_with(&mut events, &mut app, Duration::default, |_, _| {
+        draws += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(events.polls.len(), EVENTS_PER_FRAME + 1);
+    assert_eq!(draws, 2);
+}
+
+#[test]
+fn terminal_duplicate_resize_queue_does_not_feed_back_into_draws() {
+    let mut script = Vec::from([ScriptItem::Idle]);
+    script.extend(
+        (0..EVENTS_PER_FRAME - 2)
+            .map(|_| ScriptItem::Event(Event::Resize(80, 24)))
+            .collect::<Vec<_>>(),
+    );
+    script.extend(quit_script());
+    let mut events = ScriptedEvents::new(script);
+    let mut app = App::new();
+    let mut draws = 0;
+    run_with(&mut events, &mut app, Duration::default, |_, _| {
+        draws += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(draws, 2);
+}
+
+#[test]
+fn terminal_poll_read_and_draw_errors_exit_the_loop() {
+    let mut poll = ScriptedEvents::new([ScriptItem::PollError]);
+    let mut app = App::new();
+    assert!(run_with(&mut poll, &mut app, Duration::default, |_, _| Ok(())).is_err());
+
+    let mut read = ScriptedEvents::new([ScriptItem::ReadError]);
+    let mut app = App::new();
+    assert!(run_with(&mut read, &mut app, Duration::default, |_, _| Ok(())).is_err());
+
+    let mut draw = ScriptedEvents::new([ScriptItem::Idle]);
+    let mut app = App::new();
+    assert!(
+        run_with(&mut draw, &mut app, Duration::default, |_, _| Err(
+            io::Error::other("draw failed")
+        ),)
+        .is_err()
+    );
 }

@@ -2,6 +2,7 @@ use super::diagnostics::MAX_RETAINED_DIAGNOSTICS;
 use super::media::MAX_MEDIA_NESTING;
 use super::*;
 use crate::core::style::{CssLength, CssLengthUnit};
+use crate::css::StateDeps;
 
 #[test]
 fn parses_selector_rules_and_declarations() {
@@ -13,6 +14,23 @@ fn parses_selector_rules_and_declarations() {
     };
     assert_eq!(rule.declarations.len(), 2);
     assert_eq!(rule.declarations[0].name, "display");
+}
+
+#[test]
+fn stylesheet_records_dynamic_dependencies_once_across_media_rules() {
+    let sheet = CssparserParser.parse(
+        "main:is(.note, a:hover) span { color: red }
+         @media screen { form:focus-within button:active { display: block } }
+         a:focus-visible {}",
+    );
+    assert_eq!(
+        sheet.state_deps,
+        StateDeps {
+            hover: true,
+            focus: true,
+            active: true,
+        }
+    );
 }
 
 fn css_parser_contract(parser: &dyn CssParser) {

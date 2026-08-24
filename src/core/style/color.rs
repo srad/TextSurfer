@@ -85,6 +85,7 @@ pub struct Palette {
     pub text: Rgb,
     pub background: Rgb,
     pub link: Rgb,
+    pub link_hover: Rgb,
 }
 
 impl Palette {
@@ -92,6 +93,7 @@ impl Palette {
         text: Rgb::WHITE,
         background: Rgb::BLACK,
         link: Rgb::new(0, 0, 238),
+        link_hover: Rgb::new(0, 0, 238),
     };
 }
 

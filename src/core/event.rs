@@ -42,21 +42,112 @@ pub enum MouseButton {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WheelDirection {
-    Up,
-    Down,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseKind {
     Press(MouseButton),
     Release(MouseButton),
     Move,
-    Wheel(WheelDirection),
+    Wheel { rows: i32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseEvent {
     pub kind: MouseKind,
     pub at: crate::core::geom::Point,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResizePhase {
+    Preview,
+    Settled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InputEvent {
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Resize {
+        size: crate::core::geom::Size,
+        phase: ResizePhase,
+    },
+    PointerLeft,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct InputBatch {
+    events: Vec<InputEvent>,
+}
+
+impl InputBatch {
+    pub const fn new() -> Self {
+        Self { events: Vec::new() }
+    }
+
+    pub fn push(&mut self, event: InputEvent) {
+        match (self.events.last_mut(), &event) {
+            (
+                Some(
+                    previous @ InputEvent::Mouse(MouseEvent {
+                        kind: MouseKind::Move,
+                        ..
+                    }),
+                ),
+                InputEvent::Mouse(MouseEvent {
+                    kind: MouseKind::Move,
+                    ..
+                }),
+            ) => *previous = event,
+            (
+                Some(InputEvent::Mouse(MouseEvent {
+                    kind: MouseKind::Wheel { rows: previous },
+                    at: previous_at,
+                })),
+                InputEvent::Mouse(MouseEvent {
+                    kind: MouseKind::Wheel { rows },
+                    at,
+                }),
+            ) if previous_at == at => *previous = previous.saturating_add(*rows),
+            (
+                Some(InputEvent::Resize {
+                    size: previous,
+                    phase: previous_phase,
+                }),
+                InputEvent::Resize { size, phase },
+            ) if previous_phase == phase => *previous = *size,
+            _ => self.events.push(event),
+        }
+    }
+
+    pub fn as_slice(&self) -> &[InputEvent] {
+        &self.events
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn take_prefix(&mut self, limit: usize) -> Self {
+        if self.events.len() <= limit {
+            return std::mem::take(self);
+        }
+        let remaining = self.events.split_off(limit);
+        Self {
+            events: std::mem::replace(&mut self.events, remaining),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.events.clear();
+    }
+}
+
+impl From<InputEvent> for InputBatch {
+    fn from(event: InputEvent) -> Self {
+        let mut batch = Self::new();
+        batch.push(event);
+        batch
+    }
 }

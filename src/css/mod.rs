@@ -12,3 +12,4 @@ pub use parser::{
     MediaBound, MediaComparison, MediaFeature, MediaQuery, MediaQueryList, MediaRule,
     ScriptingValue, StyleRule, StyleSheet, parse_media_queries,
 };
+pub use selectors::{DynamicState, FocusSource, FocusedNode, StateDeps};

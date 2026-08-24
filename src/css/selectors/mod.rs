@@ -1,5 +1,6 @@
 mod atom;
 mod buckets;
+mod dependencies;
 mod element;
 mod matching;
 mod parser;
@@ -9,7 +10,9 @@ mod pseudo;
 mod tests;
 
 pub(crate) use buckets::{BucketKey, bucket_keys};
+pub use dependencies::StateDeps;
+pub(crate) use dependencies::uses_dynamic_state;
 pub(crate) use matching::{MatchTarget, matching_specificity};
 pub(super) use parser::TextSurferSelectorImpl;
 pub(crate) use parser::{ParsedSelectors, parse};
-pub(crate) use pseudo::DynamicState;
+pub use pseudo::{DynamicState, FocusSource, FocusedNode};

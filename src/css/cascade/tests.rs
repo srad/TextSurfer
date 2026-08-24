@@ -4,12 +4,12 @@ use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide, CssMargin,
-    CssPercentage, CssWidth, Display, DisplayInside, DisplayOutside, EdgeSizes, FontSize, Palette,
-    PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign, TextRendering, VerticalAlign,
-    WhiteSpace,
+    CssPercentage, CssWidth, Cursor, Display, DisplayInside, DisplayOutside, EdgeSizes, FontSize,
+    Palette, PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign, TextRendering,
+    VerticalAlign, WhiteSpace,
 };
-use crate::css::values::parse_font_weight;
-use crate::css::{ColorScheme, CssParser, CssparserParser};
+use crate::css::values::{parse_cursor, parse_font_weight};
+use crate::css::{ColorScheme, CssParser, CssparserParser, DynamicState};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::pipeline::render::embedded_style_sheets;
 
@@ -413,6 +413,103 @@ fn font_weight_is_bold_above_five_hundred_only() {
 }
 
 #[test]
+fn cursor_keywords_and_image_fallbacks_follow_css_grammar() {
+    let cases = [
+        ("auto", Cursor::Auto),
+        ("default", Cursor::Default),
+        ("none", Cursor::None),
+        ("context-menu", Cursor::ContextMenu),
+        ("help", Cursor::Help),
+        ("pointer", Cursor::Pointer),
+        ("progress", Cursor::Progress),
+        ("wait", Cursor::Wait),
+        ("cell", Cursor::Cell),
+        ("crosshair", Cursor::Crosshair),
+        ("text", Cursor::Text),
+        ("vertical-text", Cursor::VerticalText),
+        ("alias", Cursor::Alias),
+        ("copy", Cursor::Copy),
+        ("move", Cursor::Move),
+        ("no-drop", Cursor::NoDrop),
+        ("not-allowed", Cursor::NotAllowed),
+        ("grab", Cursor::Grab),
+        ("grabbing", Cursor::Grabbing),
+        ("e-resize", Cursor::EResize),
+        ("n-resize", Cursor::NResize),
+        ("ne-resize", Cursor::NeResize),
+        ("nw-resize", Cursor::NwResize),
+        ("s-resize", Cursor::SResize),
+        ("se-resize", Cursor::SeResize),
+        ("sw-resize", Cursor::SwResize),
+        ("w-resize", Cursor::WResize),
+        ("ew-resize", Cursor::EwResize),
+        ("ns-resize", Cursor::NsResize),
+        ("nesw-resize", Cursor::NeswResize),
+        ("nwse-resize", Cursor::NwseResize),
+        ("col-resize", Cursor::ColResize),
+        ("row-resize", Cursor::RowResize),
+        ("all-scroll", Cursor::AllScroll),
+        ("zoom-in", Cursor::ZoomIn),
+        ("zoom-out", Cursor::ZoomOut),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(parse_cursor(source), Some(expected), "{source}");
+    }
+    assert_eq!(
+        parse_cursor("url(hand.cur) 4 5, pointer"),
+        Some(Cursor::Pointer)
+    );
+    assert_eq!(
+        parse_cursor("image-set(url(hand.cur) 1x), text"),
+        Some(Cursor::Text)
+    );
+    for invalid in [
+        "url(hand.cur)",
+        "url(hand.cur) 4, pointer",
+        "url(hand.cur) pointer",
+        "pointer, wait",
+        "all-resize",
+        "url(\"hand.cur\" junk), pointer",
+        "image-set(), pointer",
+        "image-set(nonsense), pointer",
+    ] {
+        assert_eq!(parse_cursor(invalid), None, "{invalid}");
+    }
+}
+
+#[test]
+fn cursor_inherits_through_elements_and_generated_content_with_css_wide_values() {
+    let mut document = Document::new();
+    let parent = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let inherited = document.insert_element(Some(parent), "span", ElementNs::Html, vec![]);
+    let initial = document.insert_element(Some(parent), "b", ElementNs::Html, vec![]);
+    let unset = document.insert_element(Some(parent), "i", ElementNs::Html, vec![]);
+    let link = document.insert_element(
+        Some(parent),
+        "a",
+        ElementNs::Html,
+        vec![Attr::plain("href", "/")],
+    );
+    let sheet = CssparserParser.parse(
+        "div { cursor: copy } div::before { content: 'x' } b { cursor: initial } i { cursor: unset }",
+    );
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(styles.get(parent).cursor, Cursor::Copy);
+    assert_eq!(styles.get(inherited).cursor, Cursor::Copy);
+    assert_eq!(styles.get(initial).cursor, Cursor::Auto);
+    assert_eq!(styles.get(unset).cursor, Cursor::Copy);
+    assert_eq!(styles.get(link).cursor, Cursor::Pointer);
+    assert_eq!(
+        styles
+            .pseudo(parent, PseudoElement::Before)
+            .unwrap()
+            .style
+            .cursor,
+        Cursor::Copy
+    );
+}
+
+#[test]
 fn unsupported_color_spaces_and_junk_never_override_the_inherited_value() {
     let mut document = Document::new();
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
@@ -451,10 +548,22 @@ fn the_ua_sheet_styles_links_bold_and_struck_text_from_the_palette() {
         text: Rgb::WHITE,
         background: Rgb::new(0, 0, 128),
         link: Rgb::new(255, 255, 0),
+        link_hover: Rgb::new(0, 255, 255),
     };
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen().with_palette(palette));
     assert_eq!(styles.get(link).color, Some(Rgba::new(255, 255, 0, 255)));
     assert!(styles.get(link).underline);
+    let hovered = BasicCascade.apply(
+        &[],
+        &document,
+        MediaContext::screen()
+            .with_palette(palette)
+            .with_state(DynamicState {
+                hover: Some(link),
+                ..Default::default()
+            }),
+    );
+    assert_eq!(hovered.get(link).color, Some(Rgba::new(0, 255, 255, 255)));
     assert_eq!(
         styles.get(anchor).color,
         None,

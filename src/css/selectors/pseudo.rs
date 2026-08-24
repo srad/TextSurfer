@@ -15,6 +15,8 @@ pub enum DynamicPseudoClass {
     Visited,
     Hover,
     Focus,
+    FocusVisible,
+    FocusWithin,
     Active,
     Checked,
     Enabled,
@@ -29,6 +31,8 @@ impl DynamicPseudoClass {
             Self::Visited => "visited",
             Self::Hover => "hover",
             Self::Focus => "focus",
+            Self::FocusVisible => "focus-visible",
+            Self::FocusWithin => "focus-within",
             Self::Active => "active",
             Self::Checked => "checked",
             Self::Enabled => "enabled",
@@ -42,7 +46,9 @@ impl DynamicPseudoClass {
             "any-link" => Some(Self::AnyLink),
             "visited" => Some(Self::Visited),
             "hover" => Some(Self::Hover),
-            "focus" | "focus-visible" | "focus-within" => Some(Self::Focus),
+            "focus" => Some(Self::Focus),
+            "focus-visible" => Some(Self::FocusVisible),
+            "focus-within" => Some(Self::FocusWithin),
             "active" => Some(Self::Active),
             "checked" => Some(Self::Checked),
             "enabled" => Some(Self::Enabled),
@@ -69,14 +75,29 @@ impl NonTSPseudoClass for DynamicPseudoClass {
     }
 
     fn is_user_action_state(&self) -> bool {
-        matches!(self, Self::Active | Self::Hover | Self::Focus)
+        matches!(
+            self,
+            Self::Active | Self::Hover | Self::Focus | Self::FocusVisible | Self::FocusWithin
+        )
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusSource {
+    Pointer,
+    Keyboard,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusedNode {
+    pub node: NodeId,
+    pub source: FocusSource,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DynamicState {
     pub hover: Option<NodeId>,
-    pub focus: Option<NodeId>,
+    pub focus: Option<FocusedNode>,
     pub active: Option<NodeId>,
 }
 
@@ -120,4 +141,8 @@ impl ToCss for SelectorPseudoElement {
 
 impl PseudoElementTrait for SelectorPseudoElement {
     type Impl = TextSurferSelectorImpl;
+
+    fn accepts_state_pseudo_classes(&self) -> bool {
+        true
+    }
 }

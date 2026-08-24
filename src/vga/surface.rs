@@ -73,6 +73,15 @@ pub struct Surface {
     pixels: Vec<u32>,
     cursor: Option<(u16, u16)>,
     overlay_cells: Vec<(u16, u16)>,
+    damage: Vec<PixelRect>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PixelRect {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 impl Surface {
@@ -95,6 +104,7 @@ impl Surface {
             pixels: Vec::new(),
             cursor: None,
             overlay_cells: Vec::new(),
+            damage: Vec::new(),
         };
         surface.resize(Size { cols, rows });
         surface
@@ -151,16 +161,35 @@ impl Surface {
         &self.pixels
     }
 
+    pub fn take_damage(&mut self) -> Option<PixelRect> {
+        let damage = std::mem::take(&mut self.damage);
+        damage.into_iter().reduce(union_pixel_rect)
+    }
+
+    pub fn take_damage_regions(&mut self) -> Vec<PixelRect> {
+        std::mem::take(&mut self.damage)
+    }
+
     /// Resize the grid, discarding contents and repainting to the background.
     pub fn resize(&mut self, size: Size) {
         self.cols = size.cols;
         self.rows = size.rows;
         let (width, height) = self.pixel_size();
-        self.cells = vec![self.blank(); size.cols as usize * size.rows as usize];
-        self.pixels = vec![pack(self.default_bg); width * height];
+        let blank = self.blank();
+        self.cells
+            .resize(size.cols as usize * size.rows as usize, blank);
+        self.cells.fill(blank);
+        self.pixels.resize(width * height, pack(self.default_bg));
+        self.pixels.fill(pack(self.default_bg));
         // The old position may not exist in the new grid; ratatui re-sets it next draw.
         self.cursor = None;
         self.overlay_cells.clear();
+        self.damage = vec![PixelRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }];
     }
 
     /// Reset every cell to blank.
@@ -169,6 +198,13 @@ impl Surface {
         self.cells.fill(blank);
         self.pixels.fill(pack(self.default_bg));
         self.overlay_cells.clear();
+        let (width, height) = self.pixel_size();
+        self.damage = vec![PixelRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }];
         // Filling the buffer wiped the caret; put it back where it was.
         if let Some((col, row)) = self.cursor {
             self.paint_cell(col, row);
@@ -185,13 +221,93 @@ impl Surface {
     ///
     /// The neighbours are what keep a two-cell glyph whole; see the module comment.
     pub fn set_cell(&mut self, col: u16, row: u16, cell: &Cell) {
-        let Some(offset) = self.offset(col, row) else {
-            return;
-        };
-        self.cells[offset] = self.resolve(cell);
-        for neighbour in [col.saturating_sub(1), col, col.saturating_add(1)] {
-            self.paint_cell(neighbour, row);
+        self.set_cells(std::iter::once((col, row, cell)));
+    }
+
+    pub fn set_cells<'a, I>(&mut self, content: I)
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        let mut rows = vec![None::<(u16, u16)>; usize::from(self.rows)];
+        for (col, row, cell) in content {
+            let Some(offset) = self.offset(col, row) else {
+                continue;
+            };
+            let resolved = self.resolve(cell);
+            if self.cells[offset] == resolved {
+                continue;
+            }
+            self.cells[offset] = resolved;
+            let start = col.saturating_sub(1);
+            let end = col.saturating_add(2).min(self.cols);
+            let range = &mut rows[usize::from(row)];
+            *range = Some(match *range {
+                Some((left, right)) => (left.min(start), right.max(end)),
+                None => (start, end),
+            });
         }
+        for (row, range) in rows.into_iter().enumerate() {
+            let Some((start, end)) = range else {
+                continue;
+            };
+            for col in start..end {
+                self.paint_cell(col, row as u16);
+            }
+        }
+    }
+
+    pub fn scroll_rows(&mut self, region: std::ops::Range<u16>, amount: u16, up: bool) {
+        let start = region.start.min(self.rows);
+        let end = region.end.min(self.rows);
+        let amount = amount.min(end.saturating_sub(start));
+        if amount == 0 {
+            return;
+        }
+        let cols = usize::from(self.cols);
+        let cell_start = usize::from(start) * cols;
+        let cell_end = usize::from(end) * cols;
+        let cell_amount = usize::from(amount) * cols;
+        let blank = self.blank();
+        if up {
+            self.cells
+                .copy_within(cell_start + cell_amount..cell_end, cell_start);
+            self.cells[cell_end - cell_amount..cell_end].fill(blank);
+        } else {
+            self.cells
+                .copy_within(cell_start..cell_end - cell_amount, cell_start + cell_amount);
+            self.cells[cell_start..cell_start + cell_amount].fill(blank);
+        }
+        let (pixel_width, _) = self.pixel_size();
+        let row_height = CELL_H * self.scale;
+        let pixel_start = usize::from(start) * row_height * pixel_width;
+        let pixel_end = usize::from(end) * row_height * pixel_width;
+        let pixel_amount = usize::from(amount) * row_height * pixel_width;
+        if up {
+            self.pixels
+                .copy_within(pixel_start + pixel_amount..pixel_end, pixel_start);
+            self.pixels[pixel_end - pixel_amount..pixel_end].fill(pack(self.default_bg));
+        } else {
+            self.pixels.copy_within(
+                pixel_start..pixel_end - pixel_amount,
+                pixel_start + pixel_amount,
+            );
+            self.pixels[pixel_start..pixel_start + pixel_amount].fill(pack(self.default_bg));
+        }
+        let overlays = std::mem::take(&mut self.overlay_cells);
+        self.overlay_cells = overlays
+            .into_iter()
+            .filter_map(|(col, row)| {
+                if row < start || row >= end {
+                    return Some((col, row));
+                }
+                if up {
+                    (row >= start + amount).then_some((col, row - amount))
+                } else {
+                    (row + amount < end).then_some((col, row + amount))
+                }
+            })
+            .collect();
+        self.mark_damage(0, pixel_start, pixel_width, pixel_end - pixel_start);
     }
 
     /// Resolve a ratatui cell into concrete colours and a single character.
@@ -263,6 +379,7 @@ impl Surface {
         // A wide glyph runs past its own cell; clip at the grid's right edge so the
         // final column of a grid that ends mid-glyph does not write out of bounds.
         let span = (shape.width().pixels()).min((self.cols - col) as usize * CELL_W);
+        self.mark_damage(origin_x, origin_y, span * self.scale, CELL_H * self.scale);
 
         for y in 0..CELL_H {
             let lit_row = state.underline && y == UNDERLINE_ROW || state.strike && y == CELL_H / 2;
@@ -366,6 +483,12 @@ impl Surface {
         let pixel_scale = text_scale.saturating_mul(self.scale);
         let origin_x = col.saturating_mul(CELL_W).saturating_mul(self.scale);
         let origin_y = row.saturating_mul(CELL_H).saturating_mul(self.scale);
+        self.mark_damage(
+            origin_x,
+            origin_y,
+            shape.width().pixels().saturating_mul(pixel_scale),
+            CELL_H.saturating_mul(pixel_scale),
+        );
         for y in 0..CELL_H {
             let decorated =
                 style.underline && y == UNDERLINE_ROW || style.strike && y == CELL_H / 2;
@@ -384,6 +507,71 @@ impl Surface {
                 }
             }
         }
+    }
+
+    fn mark_damage(&mut self, x: usize, y: usize, width: usize, height: usize) {
+        let (surface_width, surface_height) = self.pixel_size();
+        let right = x.saturating_add(width).min(surface_width);
+        let bottom = y.saturating_add(height).min(surface_height);
+        if x >= right || y >= bottom {
+            return;
+        }
+        let mut next = PixelRect {
+            x,
+            y,
+            width: right - x,
+            height: bottom - y,
+        };
+        let mut index = 0;
+        while index < self.damage.len() {
+            if pixel_rects_touch(self.damage[index], next) {
+                next = union_pixel_rect(self.damage.swap_remove(index), next);
+            } else {
+                index += 1;
+            }
+        }
+        self.damage.push(next);
+        let covered = self
+            .damage
+            .iter()
+            .map(|rect| rect.width.saturating_mul(rect.height))
+            .sum::<usize>();
+        if self.damage.len() > 32
+            || covered.saturating_mul(2) >= surface_width.saturating_mul(surface_height)
+        {
+            self.damage = vec![PixelRect {
+                x: 0,
+                y: 0,
+                width: surface_width,
+                height: surface_height,
+            }];
+        }
+    }
+}
+
+fn pixel_rects_touch(left: PixelRect, right: PixelRect) -> bool {
+    left.x <= right.x.saturating_add(right.width)
+        && right.x <= left.x.saturating_add(left.width)
+        && left.y <= right.y.saturating_add(right.height)
+        && right.y <= left.y.saturating_add(left.height)
+}
+
+fn union_pixel_rect(left: PixelRect, right: PixelRect) -> PixelRect {
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    let far_x = left
+        .x
+        .saturating_add(left.width)
+        .max(right.x.saturating_add(right.width));
+    let far_y = left
+        .y
+        .saturating_add(left.height)
+        .max(right.y.saturating_add(right.height));
+    PixelRect {
+        x,
+        y,
+        width: far_x - x,
+        height: far_y - y,
     }
 }
 

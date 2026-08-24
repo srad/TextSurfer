@@ -273,6 +273,7 @@ fn scaled_text_lands_on_the_content_rows_the_chrome_reserved() {
             text: FG,
             background: BG,
             link: FG,
+            link_hover: FG,
         },
     );
 

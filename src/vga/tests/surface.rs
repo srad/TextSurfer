@@ -80,6 +80,40 @@ fn setting_a_cell_paints_the_glyph_in_the_foreground() {
 }
 
 #[test]
+fn cell_updates_report_only_the_repainted_pixel_band() {
+    let mut surface = surface();
+    let _ = surface.take_damage();
+    surface.set_cell(1, 1, &cell('A', Style::default()));
+    let damage = surface.take_damage().expect("cell damage");
+    assert_eq!(damage.x, 0);
+    assert_eq!(damage.y, CELL_H);
+    assert_eq!(damage.width, CELL_W * 3);
+    assert_eq!(damage.height, CELL_H);
+    assert!(surface.take_damage().is_none());
+}
+
+#[test]
+fn scrolling_moves_existing_pixels_and_damages_only_the_region() {
+    let mut surface = surface();
+    surface.set_cell(0, 1, &cell('█', Style::default()));
+    let _ = surface.take_damage();
+    surface.scroll_rows(0..2, 1, true);
+    assert!(
+        cell_rows(&surface, 0, 0)
+            .iter()
+            .all(|row| row == "########")
+    );
+    assert!(
+        cell_rows(&surface, 0, 1)
+            .iter()
+            .all(|row| row == "........")
+    );
+    let damage = surface.take_damage().expect("scroll damage");
+    assert_eq!(damage.y, 0);
+    assert_eq!(damage.height, CELL_H * 2);
+}
+
+#[test]
 fn reset_resolves_to_the_theme_rather_than_black() {
     // rgb_of maps Color::Reset to black; using it directly would punch black holes
     // through the DOS field.
@@ -308,6 +342,7 @@ fn scaled_overlay_uses_integer_cells_and_restores_the_shadow_grid() {
             text: FG,
             background: BG,
             link: FG,
+            link_hover: FG,
         },
     );
     assert!(cell_lit(&surface, 1, 1));
@@ -381,6 +416,7 @@ fn partially_scrolled_scaled_glyphs_are_clipped_whole() {
             text: FG,
             background: BG,
             link: FG,
+            link_hover: FG,
         },
     );
     assert!(surface.pixels().iter().all(|pixel| *pixel == packed(BG)));
@@ -417,6 +453,7 @@ fn scaled_overlay_obeys_occlusion_and_repaints_the_cursor_last() {
         text: FG,
         background: BG,
         link: FG,
+        link_hover: FG,
     };
     let mut surface = Surface::new(config(4, 4, 1));
     surface.draw_scaled_text(

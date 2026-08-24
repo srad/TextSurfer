@@ -48,6 +48,10 @@ impl VgaBackend {
         &self.surface
     }
 
+    pub fn surface_mut(&mut self) -> &mut Surface {
+        &mut self.surface
+    }
+
     /// Resize the grid. Contents are discarded; ratatui redraws in full afterwards.
     pub fn resize(&mut self, size: Size) {
         self.surface.resize(size);
@@ -87,9 +91,7 @@ impl Backend for VgaBackend {
     where
         I: Iterator<Item = (u16, u16, &'a Cell)>,
     {
-        for (col, row, cell) in content {
-            self.surface.set_cell(col, row, cell);
-        }
+        self.surface.set_cells(content);
         Ok(())
     }
 
@@ -169,6 +171,24 @@ impl Backend for VgaBackend {
 
     fn flush(&mut self) -> Result<(), Self::Error> {
         // Painting already happened in `draw`; presenting is the window's job.
+        Ok(())
+    }
+
+    fn scroll_region_up(
+        &mut self,
+        region: std::ops::Range<u16>,
+        line_count: u16,
+    ) -> Result<(), Self::Error> {
+        self.surface.scroll_rows(region, line_count, true);
+        Ok(())
+    }
+
+    fn scroll_region_down(
+        &mut self,
+        region: std::ops::Range<u16>,
+        line_count: u16,
+    ) -> Result<(), Self::Error> {
+        self.surface.scroll_rows(region, line_count, false);
         Ok(())
     }
 }

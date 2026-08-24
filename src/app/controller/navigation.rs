@@ -66,6 +66,7 @@ impl App {
                     self.tabs.active_mut().push_history(&fixed);
                 }
                 self.tabs.active_mut().message = format!("loading {fixed}");
+                self.tabs.active_mut().document_pending = true;
                 self.net.submit(
                     self.tabs.active().id,
                     generation,
@@ -94,8 +95,10 @@ impl App {
         tab.document = None;
         tab.styles = None;
         tab.load = None;
+        tab.document_pending = false;
         tab.base = None;
         tab.render_dirty = false;
+        tab.dom_focus = None;
         self.pressed = None;
         self.refresh_hover();
     }

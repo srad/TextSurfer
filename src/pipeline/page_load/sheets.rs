@@ -1,11 +1,14 @@
-use crate::css::{CssRule, MediaQueryList, MediaRule, StyleSheet};
+use crate::css::{CssRule, MediaQueryList, MediaRule, StateDeps, StyleSheet};
 
 use super::super::render::{RenderedPage, render_document};
 use super::{PageLoad, RootSource};
 
 impl PageLoad {
-    pub(super) fn render_page(&self) -> RenderedPage {
+    pub(super) fn render_page(&mut self) -> RenderedPage {
         let sheets = self.ordered_sheets();
+        self.state_deps = sheets.iter().fold(StateDeps::default(), |deps, sheet| {
+            deps.union(sheet.state_deps)
+        });
         render_document(
             self.document.clone(),
             &sheets,
@@ -83,5 +86,6 @@ fn sheet_without_imports(sheet: &StyleSheet, queries: &[MediaQueryList]) -> Styl
     StyleSheet {
         rules,
         diagnostics: sheet.diagnostics.clone(),
+        state_deps: sheet.state_deps,
     }
 }

@@ -9,7 +9,7 @@ use crate::css::Declaration;
 use crate::css::values::{
     assign_border_color, assign_border_colors, assign_border_side, assign_border_style,
     assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
-    consume_block, parse_background_color, parse_border, parse_color, parse_display,
+    consume_block, parse_background_color, parse_border, parse_color, parse_cursor, parse_display,
     parse_font_weight, parse_ident, parse_length_token, parse_lengths, parse_list_style_position,
     parse_list_style_type, parse_text_decoration, parse_width,
 };
@@ -49,6 +49,11 @@ pub(super) fn apply_declaration(
                 })
             {
                 style.white_space = white_space;
+            }
+        }
+        "cursor" => {
+            if let Some(cursor) = parse_cursor(&declaration.value) {
+                style.cursor = cursor;
             }
         }
         "text-align" => {
@@ -317,6 +322,7 @@ fn apply_css_wide(
     match property {
         "display" => style.display = source.display,
         "white-space" => style.white_space = source.white_space,
+        "cursor" => style.cursor = source.cursor,
         "text-align" => {
             style.text_align = source.text_align;
             style.legacy_align = source.legacy_align;
@@ -372,6 +378,7 @@ fn is_inherited(property: &str) -> bool {
     matches!(
         property,
         "white-space"
+            | "cursor"
             | "text-align"
             | "color"
             | "font-weight"

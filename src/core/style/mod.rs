@@ -45,6 +45,47 @@ pub enum WhiteSpace {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Cursor {
+    #[default]
+    Auto,
+    Default,
+    None,
+    ContextMenu,
+    Help,
+    Pointer,
+    Progress,
+    Wait,
+    Cell,
+    Crosshair,
+    Text,
+    VerticalText,
+    Alias,
+    Copy,
+    Move,
+    NoDrop,
+    NotAllowed,
+    Grab,
+    Grabbing,
+    EResize,
+    NResize,
+    NeResize,
+    NwResize,
+    SResize,
+    SeResize,
+    SwResize,
+    WResize,
+    EwResize,
+    NsResize,
+    NeswResize,
+    NwseResize,
+    ColResize,
+    RowResize,
+    AllScroll,
+    ZoomIn,
+    ZoomOut,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextAlign {
     #[default]
     Start,
@@ -76,6 +117,7 @@ pub(crate) enum LegacyAlign {
 pub struct ComputedStyle {
     pub display: Display,
     pub white_space: WhiteSpace,
+    pub cursor: Cursor,
     pub width: CssWidth,
     pub box_sizing: BoxSizing,
     pub margin: MarginEdges,
@@ -105,6 +147,7 @@ impl ComputedStyle {
         Self {
             display,
             white_space: parent.white_space,
+            cursor: parent.cursor,
             list_style_type: parent.list_style_type,
             list_style_position: parent.list_style_position,
             border_collapse: parent.border_collapse,

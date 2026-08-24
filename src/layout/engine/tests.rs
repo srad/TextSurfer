@@ -166,7 +166,7 @@ proptest! {
     }
 
     #[test]
-    fn hit_testing_round_trips_to_the_deepest_engine_box(
+    fn hit_testing_round_trips_to_the_topmost_box_or_text_fragment(
         text in "[a-z ]{1,80}",
         depth in 0usize..5,
         width in 8u16..40,
@@ -178,22 +178,22 @@ proptest! {
             Size { cols: width, rows: 5 },
         );
         let display = BasicPainter.paint(&tree, Palette::default());
-        for layout_box in &tree.boxes {
-            let rect = layout_box.border_rect;
+        for hit in &display.hits {
+            let rect = hit.rect;
             if rect.width == 0 || rect.height == 0 {
                 continue;
             }
-            let deepest = tree
-                .boxes
+            let deepest = display
+                .hits
                 .iter()
                 .filter(|candidate| {
-                    let other = candidate.border_rect;
+                    let other = candidate.rect;
                     rect.col >= other.col
                         && rect.col < other.col + other.width
                         && rect.row >= other.row
                         && rect.row < other.row + other.height
                 })
-                .max_by_key(|candidate| candidate.depth)
+                .max_by_key(|candidate| (candidate.depth, candidate.kind))
                 .unwrap();
             prop_assert_eq!(display.hit_test(rect.col, rect.row), Some(deepest.node));
         }

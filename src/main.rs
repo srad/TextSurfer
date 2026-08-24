@@ -12,13 +12,15 @@ use ratatui::crossterm::event::{
 use textsurfer::app::App;
 use textsurfer::app::net::{Navigate, PoolNet};
 use textsurfer::core::event::{
-    Key, KeyEvent, KeyModifiers as AppKeyModifiers, MouseButton, MouseEvent, MouseKind,
-    WheelDirection,
+    InputBatch, InputEvent, Key, KeyEvent, KeyModifiers as AppKeyModifiers, MouseButton,
+    MouseEvent, MouseKind, ResizePhase,
 };
+use textsurfer::core::frame::{EVENTS_PER_FRAME, FrameDamage, FrameScheduler};
 use textsurfer::core::geom::{Point, Size};
 use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
 use textsurfer::pipeline::dump::dump_lines;
-use textsurfer::ui::chrome;
+use textsurfer::ui::frame::FrameComposer;
+use textsurfer::ui::mouse::WHEEL_ROWS;
 use textsurfer::ui::theme::NORTON;
 
 #[derive(Debug, Parser)]
@@ -174,33 +176,89 @@ fn dump(fetch: Arc<dyn textsurfer::net::Fetch>, url: &str, cols: u16, rows: u16)
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
     let started = Instant::now();
+    let mut events = CrosstermEvents;
+    let area = terminal.size()?;
+    let mut composer = FrameComposer::new(area.into());
+    run_with(
+        &mut events,
+        app,
+        || started.elapsed(),
+        |app, damage| {
+            let view = app.chrome_view();
+            composer.present(terminal.backend_mut(), &view, damage)
+        },
+    )
+}
+
+const IDLE_POLL: Duration = Duration::from_secs(60 * 60);
+
+trait TerminalEvents {
+    fn poll(&mut self, timeout: Duration) -> io::Result<bool>;
+    fn read(&mut self) -> io::Result<Event>;
+}
+
+struct CrosstermEvents;
+
+impl TerminalEvents for CrosstermEvents {
+    fn poll(&mut self, timeout: Duration) -> io::Result<bool> {
+        event::poll(timeout)
+    }
+
+    fn read(&mut self) -> io::Result<Event> {
+        event::read()
+    }
+}
+
+fn run_with<E, N, D>(events: &mut E, app: &mut App, mut now: N, mut draw: D) -> io::Result<()>
+where
+    E: TerminalEvents,
+    N: FnMut() -> Duration,
+    D: FnMut(&App, &FrameDamage) -> io::Result<()>,
+{
+    let mut scheduler = FrameScheduler::default();
     loop {
-        if event::poll(Duration::from_millis(50))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if let Some(event) = from_terminal_key(key) {
-                        app.handle_key(event);
-                    }
-                }
-                Event::Mouse(mouse) => {
-                    if let Some(event) = from_terminal_mouse(mouse) {
-                        app.handle_mouse(event);
-                    }
-                }
-                Event::Resize(cols, rows) => app.on_resize(Size { cols, rows }),
-                _ => {}
-            }
+        let current = now();
+        if let Some(batch) = scheduler.take_due(current) {
+            app.advance(&batch, current);
+        } else if app.next_wake().is_some_and(|deadline| deadline <= current) {
+            app.advance(&InputBatch::new(), current);
         }
-        app.step(started.elapsed());
-        if app.take_dirty() {
-            terminal.draw(|frame| {
-                let view = app.chrome_view();
-                chrome::draw(frame, &view);
-            })?;
+        let damage = app.take_damage();
+        if !damage.is_empty() {
+            draw(app, &damage)?;
         }
         if app.should_quit() {
             return Ok(());
         }
+        let current = now();
+        let timeout = scheduler
+            .next_deadline(app.next_wake())
+            .map_or(IDLE_POLL, |deadline| deadline.saturating_sub(current));
+        if events.poll(timeout)? {
+            push_terminal_event(&mut scheduler, events.read()?, now());
+            for _ in 1..EVENTS_PER_FRAME {
+                if !events.poll(Duration::ZERO)? {
+                    break;
+                }
+                push_terminal_event(&mut scheduler, events.read()?, now());
+            }
+        }
+    }
+}
+
+fn push_terminal_event(scheduler: &mut FrameScheduler, event: Event, now: Duration) {
+    let event = match event {
+        Event::Key(key) => from_terminal_key(key).map(InputEvent::Key),
+        Event::Mouse(mouse) => from_terminal_mouse(mouse).map(InputEvent::Mouse),
+        Event::Resize(cols, rows) => Some(InputEvent::Resize {
+            size: Size { cols, rows },
+            phase: ResizePhase::Preview,
+        }),
+        Event::FocusLost => Some(InputEvent::PointerLeft),
+        _ => None,
+    };
+    if let Some(event) = event {
+        scheduler.push(event, now);
     }
 }
 
@@ -219,8 +277,8 @@ fn from_terminal_mouse(mouse: event::MouseEvent) -> Option<MouseEvent> {
         event::MouseEventKind::Down(pressed) => MouseKind::Press(button(pressed)),
         event::MouseEventKind::Up(released) => MouseKind::Release(button(released)),
         event::MouseEventKind::Moved | event::MouseEventKind::Drag(_) => MouseKind::Move,
-        event::MouseEventKind::ScrollUp => MouseKind::Wheel(WheelDirection::Up),
-        event::MouseEventKind::ScrollDown => MouseKind::Wheel(WheelDirection::Down),
+        event::MouseEventKind::ScrollUp => MouseKind::Wheel { rows: -WHEEL_ROWS },
+        event::MouseEventKind::ScrollDown => MouseKind::Wheel { rows: WHEEL_ROWS },
         event::MouseEventKind::ScrollLeft | event::MouseEventKind::ScrollRight => return None,
     };
     Some(MouseEvent {

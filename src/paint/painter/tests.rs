@@ -138,6 +138,34 @@ fn hit_testing_returns_the_deepest_box() {
 }
 
 #[test]
+fn text_fragments_win_over_a_containing_box_at_equal_depth() {
+    let mut document = Document::new();
+    let paragraph = document.insert_element(None, "p", ElementNs::Html, vec![]);
+    let text = document.insert_text(Some(paragraph), "inline");
+    let rect = LayoutRect {
+        col: 1,
+        row: 0,
+        width: 6,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 8,
+        height: 1,
+        boxes: vec![plain_box(paragraph, rect, 0)],
+        fragments: vec![TextFragment {
+            node: text,
+            col: rect.col,
+            row: rect.row,
+            text: "inline".to_string(),
+            depth: 0,
+            style: CellStyle::default(),
+        }],
+        ..Default::default()
+    };
+    assert_eq!(painted(&tree).hit_test(2, 0), Some(text));
+}
+
+#[test]
 fn overwriting_a_wide_grapheme_never_leaves_an_overwide_row() {
     let mut document = Document::new();
     let back = document.insert_element(None, "div", ElementNs::Html, vec![]);
@@ -433,6 +461,7 @@ fn unreadable_author_colours_are_corrected_towards_the_theme_text() {
         text: Rgb::WHITE,
         background: Rgb::new(0, 0, 128),
         link: Rgb::new(255, 255, 0),
+        link_hover: Rgb::new(255, 255, 0),
     };
     let corrected = legible_foreground(Rgb::BLACK, palette.background, palette);
     assert!(corrected.contrast_ratio(palette.background) >= MIN_CONTRAST);

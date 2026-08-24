@@ -15,6 +15,8 @@ impl App {
         );
         self.address.set_text("");
         self.focus = Focus::Address;
+        self.pressed = None;
+        self.refresh_hover();
         self.touch();
     }
 
@@ -31,6 +33,8 @@ impl App {
         if self.focus == Focus::Address {
             self.address.set_text(&self.tabs.active().url);
         }
+        self.pressed = None;
+        self.refresh_hover();
         self.touch();
     }
 

@@ -2,15 +2,143 @@
 //! a `ComputedStyle` field. A peer of `css::parser`, not part of applying the cascade.
 
 use cssparser::color::clamp_unit_f32;
-use cssparser::{Parser, ParserInput, Token};
+use cssparser::{ParseError, Parser, ParserInput, Token};
 use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
 
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderColor, BorderEdges, BorderLineStyle, BorderSide, CellMetric, CssLength, CssLengthUnit,
-    CssPercentage, CssWidth, Display, DisplayBox, DisplayInternal, DisplayOutside, EdgeSizes,
-    LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
+    CssPercentage, CssWidth, Cursor, Display, DisplayBox, DisplayInternal, DisplayOutside,
+    EdgeSizes, LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
 };
+
+pub(super) fn parse_cursor(source: &str) -> Option<Cursor> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    loop {
+        let start = parser.state();
+        let image = match parser.next().ok()?.clone() {
+            Token::UnquotedUrl(_) => true,
+            Token::Function(name) if name.eq_ignore_ascii_case("url") => {
+                parser.parse_nested_block(parse_quoted_url).is_ok()
+            }
+            Token::Function(name)
+                if name.eq_ignore_ascii_case("image-set")
+                    || name.eq_ignore_ascii_case("-webkit-image-set") =>
+            {
+                parser.parse_nested_block(parse_image_set).is_ok()
+            }
+            _ => false,
+        };
+        if image {
+            if parser.try_parse(|input| input.expect_number()).is_ok()
+                && parser.expect_number().is_err()
+            {
+                return None;
+            }
+            parser.expect_comma().ok()?;
+            continue;
+        }
+        parser.reset(&start);
+        let cursor = match parser
+            .expect_ident_cloned()
+            .ok()?
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "auto" => Cursor::Auto,
+            "default" => Cursor::Default,
+            "none" => Cursor::None,
+            "context-menu" => Cursor::ContextMenu,
+            "help" => Cursor::Help,
+            "pointer" => Cursor::Pointer,
+            "progress" => Cursor::Progress,
+            "wait" => Cursor::Wait,
+            "cell" => Cursor::Cell,
+            "crosshair" => Cursor::Crosshair,
+            "text" => Cursor::Text,
+            "vertical-text" => Cursor::VerticalText,
+            "alias" => Cursor::Alias,
+            "copy" => Cursor::Copy,
+            "move" => Cursor::Move,
+            "no-drop" => Cursor::NoDrop,
+            "not-allowed" => Cursor::NotAllowed,
+            "grab" => Cursor::Grab,
+            "grabbing" => Cursor::Grabbing,
+            "e-resize" => Cursor::EResize,
+            "n-resize" => Cursor::NResize,
+            "ne-resize" => Cursor::NeResize,
+            "nw-resize" => Cursor::NwResize,
+            "s-resize" => Cursor::SResize,
+            "se-resize" => Cursor::SeResize,
+            "sw-resize" => Cursor::SwResize,
+            "w-resize" => Cursor::WResize,
+            "ew-resize" => Cursor::EwResize,
+            "ns-resize" => Cursor::NsResize,
+            "nesw-resize" => Cursor::NeswResize,
+            "nwse-resize" => Cursor::NwseResize,
+            "col-resize" => Cursor::ColResize,
+            "row-resize" => Cursor::RowResize,
+            "all-scroll" => Cursor::AllScroll,
+            "zoom-in" => Cursor::ZoomIn,
+            "zoom-out" => Cursor::ZoomOut,
+            _ => return None,
+        };
+        parser.expect_exhausted().ok()?;
+        return Some(cursor);
+    }
+}
+
+fn parse_quoted_url<'i>(input: &mut Parser<'i, '_>) -> Result<(), ParseError<'i, ()>> {
+    input.expect_string_cloned()?;
+    input.expect_exhausted()?;
+    Ok(())
+}
+
+fn parse_image_set<'i>(input: &mut Parser<'i, '_>) -> Result<(), ParseError<'i, ()>> {
+    let options = input.parse_comma_separated(parse_image_set_option)?;
+    if options.is_empty() {
+        return Err(input.new_custom_error(()));
+    }
+    Ok(())
+}
+
+fn parse_image_set_option<'i>(input: &mut Parser<'i, '_>) -> Result<(), ParseError<'i, ()>> {
+    match input.next()?.clone() {
+        Token::UnquotedUrl(_) | Token::QuotedString(_) => {}
+        Token::Function(name) if name.eq_ignore_ascii_case("url") => {
+            input.parse_nested_block(parse_quoted_url)?;
+        }
+        _ => return Err(input.new_custom_error(())),
+    }
+    let mut resolution = false;
+    let mut media_type = false;
+    while !input.is_exhausted() {
+        match input.next()?.clone() {
+            Token::Dimension { value, unit, .. }
+                if !resolution
+                    && value.is_finite()
+                    && value > 0.0
+                    && matches!(
+                        unit.to_ascii_lowercase().as_str(),
+                        "x" | "dpi" | "dpcm" | "dppx"
+                    ) =>
+            {
+                resolution = true;
+            }
+            Token::Function(name) if !media_type && name.eq_ignore_ascii_case("type") => {
+                input.parse_nested_block(|nested| {
+                    nested.expect_string_cloned()?;
+                    nested.expect_exhausted()?;
+                    Ok(())
+                })?;
+                media_type = true;
+            }
+            _ => return Err(input.new_custom_error(())),
+        }
+    }
+    Ok(())
+}
 
 pub(super) fn parse_display(source: &str) -> Option<Display> {
     enum ParsedInside {

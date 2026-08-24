@@ -1,4 +1,4 @@
-use crate::css::selectors::ParsedSelectors;
+use crate::css::selectors::{ParsedSelectors, StateDeps};
 
 use super::diagnostics::CssDiagnostics;
 use super::media::MediaQueryList;
@@ -41,6 +41,7 @@ pub(super) fn rule_has_content(rule: &CssRule) -> bool {
 pub struct StyleSheet {
     pub rules: Vec<CssRule>,
     pub diagnostics: CssDiagnostics,
+    pub state_deps: StateDeps,
 }
 
 #[derive(Clone, Debug)]

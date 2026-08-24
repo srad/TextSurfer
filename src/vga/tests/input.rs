@@ -2,8 +2,9 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 
-use crate::core::event::{Key, KeyModifiers, MouseButton, MouseKind, WheelDirection};
+use crate::core::event::{Key, KeyModifiers, MouseButton, MouseKind};
 use crate::core::geom::Point;
+use crate::ui::mouse::WHEEL_ROWS;
 use crate::vga::input::{WheelAccumulator, from_window_button, from_window_key};
 
 fn press(key: WinitKey) -> Option<crate::core::event::KeyEvent> {
@@ -160,11 +161,11 @@ fn a_wheel_line_is_one_notch_in_the_direction_it_points() {
     let mut wheel = WheelAccumulator::default();
     assert_eq!(
         wheel.push(MouseScrollDelta::LineDelta(0.0, 1.0), 48.0),
-        Some(WheelDirection::Up)
+        Some(-WHEEL_ROWS)
     );
     assert_eq!(
         wheel.push(MouseScrollDelta::LineDelta(0.0, -1.0), 48.0),
-        Some(WheelDirection::Down)
+        Some(WHEEL_ROWS)
     );
     assert_eq!(
         wheel.push(MouseScrollDelta::LineDelta(0.0, 0.0), 48.0),
@@ -186,7 +187,7 @@ fn trackpad_pixels_accumulate_into_whole_notches() {
     assert_eq!(nudge(&mut wheel, -12.0), None);
     assert_eq!(nudge(&mut wheel, -12.0), None);
     assert_eq!(nudge(&mut wheel, -12.0), None);
-    assert_eq!(nudge(&mut wheel, -12.0), Some(WheelDirection::Down));
+    assert_eq!(nudge(&mut wheel, -12.0), Some(WHEEL_ROWS));
     assert_eq!(nudge(&mut wheel, -12.0), None);
 }
 
@@ -201,5 +202,14 @@ fn reversing_direction_drops_the_abandoned_remainder() {
     };
     assert_eq!(nudge(&mut wheel, 40.0), None);
     assert_eq!(nudge(&mut wheel, -40.0), None, "the upward part is gone");
-    assert_eq!(nudge(&mut wheel, -40.0), Some(WheelDirection::Down));
+    assert_eq!(nudge(&mut wheel, -40.0), Some(WHEEL_ROWS));
+}
+
+#[test]
+fn a_large_wheel_delta_preserves_every_notch() {
+    let mut wheel = WheelAccumulator::default();
+    assert_eq!(
+        wheel.push(MouseScrollDelta::LineDelta(0.0, -4.0), 48.0),
+        Some(WHEEL_ROWS * 4)
+    );
 }

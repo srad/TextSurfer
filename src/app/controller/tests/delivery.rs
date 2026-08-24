@@ -312,3 +312,34 @@ fn zero_css_warnings_preserve_the_existing_acceptance_message() {
         "accepted gen 1 - https://example.com/ (0 parse errors)"
     );
 }
+
+#[test]
+fn one_step_cannot_be_starved_by_an_unending_result_source() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct UnendingNet {
+        polls: AtomicUsize,
+    }
+
+    impl Navigate for UnendingNet {
+        fn submit(&self, _tab_id: u64, _generation: u64, _resource_id: ResourceId, _url: Url) {}
+
+        fn poll_result(&self) -> Option<FetchPayload> {
+            let poll = self.polls.fetch_add(1, Ordering::Relaxed) + 1;
+            assert!(poll <= 256, "one app step exceeded its result budget");
+            Some(FetchPayload {
+                tab_id: u64::MAX,
+                generation: u64::MAX,
+                resource_id: ResourceId::DOCUMENT,
+                result: Err(FetchError::Network("stale".to_string())),
+            })
+        }
+    }
+
+    let net = Arc::new(UnendingNet {
+        polls: AtomicUsize::new(0),
+    });
+    let mut app = App::with_net(net.clone());
+    app.step(Duration::ZERO);
+    assert_eq!(net.polls.load(Ordering::Relaxed), 256);
+}

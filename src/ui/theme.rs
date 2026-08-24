@@ -7,6 +7,7 @@ pub struct Theme {
     pub text: Color,
     pub dim: Color,
     pub accent: Color,
+    pub hover: Color,
     pub bg: Color,
     pub bar_bg: Color,
     pub bar_text: Color,
@@ -23,6 +24,7 @@ impl Theme {
             text: rgb_of(self.text),
             background: rgb_of(self.bg),
             link: rgb_of(self.accent),
+            link_hover: rgb_of(self.hover),
         }
     }
 }
@@ -90,6 +92,7 @@ pub const NORTON: Theme = Theme {
     text: Color::White,
     dim: Color::Cyan,
     accent: Color::Yellow,
+    hover: Color::LightCyan,
     bg: Color::Rgb(0, 0, 128),
     bar_bg: Color::Gray,
     bar_text: Color::Black,
@@ -105,6 +108,9 @@ mod tests {
         assert_ne!(NORTON.frame, NORTON.text);
         assert_ne!(NORTON.text, NORTON.dim);
         assert_ne!(NORTON.accent, NORTON.text);
+        assert_ne!(NORTON.hover, NORTON.text);
+        assert_ne!(NORTON.hover, NORTON.bg);
+        assert_ne!(NORTON.hover, NORTON.accent);
         assert_ne!(NORTON.bg, NORTON.text);
         assert_ne!(NORTON.bar_bg, NORTON.bg);
         assert_ne!(NORTON.bar_text, NORTON.bar_bg);

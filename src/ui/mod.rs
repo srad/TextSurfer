@@ -1,5 +1,6 @@
 pub mod chrome;
 pub mod editing;
+pub mod frame;
 pub mod keymap;
 pub mod mouse;
 pub mod theme;

@@ -72,8 +72,9 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-24): **449 lib · 6 binary · 4 fetch-pipeline · 14 corpus ·
-31 golden** with the default VGA frontend, and **385 lib** with `--no-default-features`.
+Test counts at the last green run (2026-08-24): **536 lib · 13 binary · 4 fetch-pipeline ·
+14 corpus · 32 golden** with the default VGA frontend, and **452 lib · 12 binary** with
+`--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -90,7 +91,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 | ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
 | M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. The pointer path is no longer exposed to the clipping gap — M3 slice 1 bounds-checks a click against the visible content view before converting it — but paint still emits unclipped rectangles, so keyboard link navigation must not assume they are safe |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
-| M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row | Put explicit resource ceilings and sparse-vs-dense evidence behind the perf gate |
+| M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row; inline-precise hover adds roughly one linear-scanned hit region per text fragment | Put explicit resource ceilings, sparse-vs-dense evidence and indexed paint-order hit/activation resolution behind the perf gate |
 | Test infrastructure | `tree_dump` is recursive on untrusted depth; UI clipping walks scalar values rather than grapheme clusters | Add bounded-depth and emoji/ZWJ cases; these do not currently establish a product crash |
 
 Two candidates were closed during the audit: normal-flow `white-space: nowrap` clips rather than
@@ -632,21 +633,45 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       the raw `href`, and same-document fragments deferred to M2's anchor item instead of refetching.
 - [x] Hover *(done)*: status-bar URL preview, repaint only on target change, re-derived after scroll,
       navigation, tab switch and resize; `CursorIcon::Pointer` over links in the window frontend.
-- **Hit-test resolution contract:** targets resolved by NodeId against the live document at dispatch.
-      Slice 1 resolves links in document order via `DisplayList::link_at`, which equals Ladybird's
-      topmost-in-paint-order rule only while nothing overlaps — true until M6 adds positioned, floated
-      and flex/grid boxes. **Trigger:** when M6 lands any of those, switch to depth-ordered resolution
-      over `HitRegion.depth`, which already carries paint depth.
+- **Hit-test resolution contract:** hover targets resolve by depth and text-over-box paint kind against
+      the live document. Link activation remains document-ordered through `DisplayList::link_at`,
+      which equals Ladybird's topmost-in-paint-order rule only while nothing overlaps — true until M6
+      adds positioned, floated and flex/grid boxes. **Trigger:** when M6 lands any of those, switch
+      activation to the same paint-order resolution and index the now-fragment-dense hit list.
 
-**Slice 2 — live dynamic state (open)**
+**Slice 2 — live dynamic state (in progress — interactive launch regression under diagnosis)**
 
-- [ ] `:hover` and `:focus` become live inputs to the dynamic-state evaluation added in M1-B.
-- [ ] Keep `:focus`, `:focus-visible` and `:focus-within` distinct. The parser currently maps all
+- [ ] Replace callback-driven redraws with one cross-frontend frame transaction: coalesced domain
+      input, one final viewport/dynamic-state commit, semantic chrome/content damage, and one
+      presentation opportunity. The event budget is a fairness bound, not a frame-rate limiter.
+      The injected-clock scheduler gives both adapters an immediate idle frame and a 16.667 ms
+      sustained cadence, carries discrete backlog losslessly, and has no wake while idle. *(reopened:
+      the synthetic cadence contract is green, but the latest native smoke still feels loaded and
+      laggy)*
+- [ ] Retain the presented Ratatui buffer and page scene. Pure scrolling moves the content-row
+      region and paints only exposed/damaged rows. Continuous hover state and resize previews defer
+      their conservative full render/reflow fallback until 50 ms quiet, so wheel, pointer and resize
+      streams cannot repeatedly enter cascade or layout. *(reopened: native scrolling and resize
+      remain below the required fluency despite the work-count tests)*
+- [ ] Bound VGA raster and presentation work with batched cell invalidation, retained scaled-text
+      overlays, pixel damage, buffer-age-correct partial copies, and softbuffer resize only when the
+      physical size changes. Damage is retained as at most 32 merged regions with a 50% full-damage
+      threshold; unsolicited redraws reuse the retained surface without composition or copying.
+      *(reopened: the real window still has unresolved movement/resize/input latency)*
+
+- [x] `:hover`, `:active` and pointer focus are live inputs to the dynamic-state evaluation added in
+      M1-B, dependency-gated without changing load progress or status messages.
+- [x] Keep `:focus`, `:focus-visible` and `:focus-within` distinct. The parser previously mapped all
       three to the exact-focus state; ancestor propagation and the keyboard focus-indicator policy
-      need separate selector tests before focus styling becomes live.
-- [ ] Theme extension: hover/selected/search-match states with their own accents. Snapshot goldens.
-- [ ] Honour the CSS `cursor` property, which slice 1 approximates with the UA link default.
-- **Acceptance:** scripted zone tests + goldens with hover states; manual mouse walkthrough.
+      now have separate selector contracts and a pointer/keyboard source ready for M2.
+- [x] Theme extension: a distinct hover accent with snapshot goldens. Selected and search-match
+      accents stay in M2, where keyboard link navigation and in-page search provide their consumers.
+- [x] Honour the inherited CSS `cursor` property, including every predefined cursor winit 0.30.13
+      can represent and `none` through native cursor visibility. Custom cursor images use their
+      mandatory predefined fallback but are not loaded in this slice.
+- **Acceptance:** scripted zone/state, loop-budget and stateful render tests are green, including
+      the layout-changing hover fixed-point regression; native and terminal launch confirmation plus
+      the manual mouse walkthrough remain pending.
 
 ### M4 — JS seam (open)
 
@@ -1159,3 +1184,118 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   the hover URL preview and hand cursor, tab-chip and `+` clicks, address-field caret placement,
   middle-click and `target="_blank"` new tabs, the Back/Forward side buttons, and the terminal
   frontend (`--terminal`) including that the shell is left clean after quitting and after a panic.
+- 2026-08-24 — **M3 slice 2 implementation plan corrected before code.** Hover becomes
+  inline-precise through fragment hit regions; `:hover`/`:active` match ancestor chains and the three
+  focus pseudo-classes stay distinct behind a pointer/keyboard focus source ready for M2. Stateful
+  renders reuse `PageLoad` instead of adding a parallel render request API. Restyles are dependency-
+  gated, preserve load progress and messages, and cap pointer re-hit feedback at one additional
+  render. Only the consumed hover accent lands in M3; selected/search-match colours remain in M2.
+  CSS `cursor` is inherited and covers the full predefined winit 0.30.13 set plus `none`; custom
+  images are syntax-checked and skipped in favour of their mandatory supported fallback. No crate
+  pin changes: selectors 0.40.0, cssparser 0.37.0 and stable winit 0.30.13 remain current for this
+  slice. Baseline gates are green at 492 library · 9 binary · 4 fetch-pipeline · 14 corpus · 31
+  render-golden tests, plus 420 library · 8 binary with `--no-default-features`.
+- 2026-08-24 — **M3 slice 2 delivered; human smoke pending.** Text fragments now contribute
+  depth-ordered `HitRegion::Text` entries above equal-depth boxes, so inline elements receive live
+  hover while link activation deliberately remains on its M6-tracked document-order contract.
+  Selector state distinguishes hover/active chains, exact focus, focus-within and focus-visible with
+  pointer/keyboard sources; parse-time `StateDeps` recursively covers nested selector lists and media
+  rules. The review found one further selectors 0.40.0 requirement and pinned it: generated pseudo-
+  elements must both accept state pseudo-classes and classify all focus variants as user-action
+  states. `PageLoad::set_dynamic_state` stores prepaint state, gates later cascade→layout→paint runs
+  on author or UA dependencies, preserves progress/messages, suppresses same-link UA re-hits and
+  caps render→re-hit feedback at one additional render. Tabs retain pointer DOM focus independently;
+  chrome focus hides it; navigation clears it; primary/middle press tracking keeps CSS active and
+  link activation separate and ignores mismatched releases. The Norton theme supplies a light-cyan
+  hover link accent. Inherited CSS `cursor` covers every standard cursor represented by stable winit
+  0.30.13 plus `none`; cssparser 0.37.0 validates URL/image-set fallback syntax and custom images are
+  skipped, not loaded. Native cursor sync runs after input and periodic fetch delivery, including
+  hidden→visible restoration, without making cursor-only movement dirty the canvas. No dependency
+  changed: selectors 0.40.0, cssparser 0.37.0 and winit 0.30.13 remain pinned. Final gates are green
+  at 513 library · 9 binary · 4 fetch-pipeline · 14 corpus · 32 render-golden tests in default,
+  `js` and `vga` configurations, plus 440 library · 8 binary with `--no-default-features`; no
+  `.snap.new` remains.
+- 2026-08-24 — **M3 slice 2 reopened after an interactive launch freeze.** Both the default window
+  frontend and the `--terminal` frontend can consume one main-thread core and become unresponsive,
+  including on the blank start page, until TextSurfer is force-closed. The earlier conclusion that
+  the terminal frontend remained responsive was disproved by the later live reproduction. Diagnosis
+  proceeds through injected-time, window-free event, tick and redraw budgets before any further
+  native launch. Slice 2 is not done while this regression remains unexplained.
+- 2026-08-24 — **VGA freeze diagnostic tests completed; native cause remains open.** Eight
+  window-free contracts prove that blank launch, a pending URL, 200 injected 50 ms ticks, duplicate
+  physical resize, a headless redraw, 1,000 identical start-page pointer moves and native cursor
+  transitions all reach a bounded clean state. A separate author-page defect is confirmed by an
+  opt-in failing reproducer: `span:hover { display: none }` alternates the hit target on every
+  identical parked-pointer event, so each event performs the capped render/re-hit pair and dirties
+  again. It cannot explain the blank-page freeze, which has no DOM or stylesheet. The reproducer is
+  ignored in ordinary gates while the defect remains open. No native window was launched. Gates are
+  green at 520 passing + 1 ignored library · 9 binary · 4 fetch-pipeline · 14 corpus · 32
+  render-golden tests in default, `js` and `vga`, plus 440 passing + 1 ignored library · 8 binary
+  with `--no-default-features`; the opt-in hover reproducer fails as intended.
+- 2026-08-24 — **Cross-frontend freeze diagnostics expanded.** The existing headless checks do not
+  drive either real interactive loop and therefore cannot exclude an event-intake spin. Both loops
+  will be exercised through scripted event sources with operation-count budgets for dispatch, tick,
+  dynamic restyle and redraw work; duplicate cell motion, sustained event queues, resize/redraw
+  feedback and the parked-pointer hover oscillation are required regression cases.
+- 2026-08-24 — **Cross-frontend event-spin guards implemented; human confirmation pending.** The
+  shared controller now drops duplicate same-cell motion before hit testing or dynamic restyling,
+  which turns the formerly ignored layout-changing hover oscillation into a passing 100,000-event
+  regression. VGA also suppresses duplicate mapped-cell motion at its adapter boundary. The terminal
+  loop is driven through an injected scripted event source in tests, yields for 1 ms after each burst
+  of 64 immediately-ready events, and has controlled poll/read/draw error coverage. A scripted burst
+  exposed a separate terminal feedback defect: 128 duplicate 80x24 resize reports caused 129 draws;
+  unchanged `App::on_resize` calls are now inert and the same script draws only startup and the final
+  focus change. `App::step` caps fetch-result delivery at 256 results so an adversarial source cannot
+  starve either frontend. All gates are green at 522 library · 13 binary · 4 fetch-pipeline · 14
+  corpus · 32 render-golden tests in default, `js` and `vga`, plus 442 library · 12 binary with
+  `--no-default-features`; no ignored tests remain. Native launches were deliberately not run during
+  automated diagnosis.
+- 2026-08-24 — **Retained-frame repair replaces the event-spin workaround.** Live testing still
+  reports heavy/frozen scrolling and resizing in both frontends. The architectural cause is the
+  callback-to-App-to-layout-to-presentation path: a boolean dirty flag cannot preserve scroll,
+  row-paint and full-layout intent, and VGA still rasterizes/copies broad regions per event. The
+  accepted repair owns the retained Ratatui frame, batches input into one App transaction, retains
+  the PageLoad scene by stage, scrolls backend row regions, and presents age-correct pixel damage.
+  Ratatui 0.30.2 and softbuffer 0.4.8 remain current; Ratatui enables `scrolling-regions`. Winit
+  remains on stable 0.30.13 rather than the published 0.31 prerelease. The 64-event/1 ms terminal
+  sleep is removed. M3 slice 2 remains in progress until native VGA and terminal smoke pass.
+- 2026-08-24 — **Retained-frame repair implemented; native confirmation pending.** Both adapters
+  now coalesce continuous input into one controller advance and consume semantic frame damage. A
+  shared retained Ratatui composer scrolls the content region and diffs the resulting buffer; the
+  VGA backend moves existing cell/pixel rows, preserves scaled overlays across pure scrolls, reuses
+  resize allocations, tracks bounded pixel damage, unions intervening damage for older softbuffer
+  back buffers, and resizes softbuffer only when the physical size changes. Status-only link hover
+  no longer invalidates page content, no-op scroll boundaries are inert, and wheel magnitude is
+  preserved. Automated gates are green at 530 library · 13 binary · 4 fetch-pipeline · 14 corpus ·
+  32 render-golden tests in default, `js` and `vga`, plus 446 library · 12 binary with
+  `--no-default-features`; native VGA and terminal smoke remain human-run acceptance work.
+- 2026-08-24 — **Retained-frame claims reopened after continued live latency.** User testing found
+  sustained input, window movement and resize still choppy in both frontends. Inspection confirmed
+  that semantic damage is followed by full Ratatui composition/diff, VGA lifecycle work is driven
+  by every `about_to_wait` wake, resize reports synchronously reflow every tab, dynamic state is
+  committed inside individual event handlers, and VGA cell/pixel damage still expands into broad
+  repeated work. Slice 2 now requires an injected-clock frame scheduler, one controller transaction
+  per rendering opportunity, preview/settled resize, conservative dynamic-selector invalidation and
+  genuinely bounded retained presentation before the three performance claims can be checked again.
+- 2026-08-24 — **Frame-cadence and retained-presentation repair implemented; human smoke pending.**
+  A shared fake-clock-tested scheduler now caps sustained input at 60 Hz, preserves discrete input
+  across a 256-event fairness budget, and leaves both adapters asleep when no input or load is
+  pending. Controller input is one transaction; hover cascade and page resize reflow settle once
+  after 50 ms quiet. Ratatui now mutates and submits only status, exposed scroll rows or explicit
+  content damage. VGA batches cell shadow updates before raster, filters scaled-text scroll work to
+  exposed rows, keeps up to 32 pixel regions and eight frames of buffer-age history, and ignores
+  unsolicited no-damage redraws. Windows resize increments follow the physical 8x16 cell and debug
+  builds use `opt-level = 1`. All format, strict Clippy and default/JS/VGA/no-default gates are green
+  at 536 library tests in the default feature set and 452 without default features, plus 13/12 binary,
+  4 fetch-pipeline, 14 corpus and 32 render-golden tests. Native VGA and terminal responsiveness
+  remain human-run acceptance, so M3 stays in progress.
+- 2026-08-24 — **Post-repair human smoke still fails; work preserved for independent review.** The
+  user reports unresolved lag after the scheduler, resize-settle and retained-presentation repair,
+  so the three performance claims above are reopened even though all synthetic work-count and local
+  feature gates pass. The current attempt is isolated on `review/m3-input-latency` for another agent
+  to inspect before merge. It includes the 60 Hz shared scheduler, one input transaction per frame,
+  50 ms hover/resize settlement, partial Ratatui composition, batched VGA cell raster, bounded pixel
+  regions with buffer-age history, no-damage redraw suppression and debug `opt-level = 1`. No live
+  trace was captured while the problematic process remained open, so the next investigation must
+  measure the running native and terminal processes rather than accepting deterministic tests as a
+  proxy for responsiveness. Do not merge or mark M3 done until both frontends pass the manual smoke.

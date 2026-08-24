@@ -11,24 +11,59 @@ use crate::ui::theme::NORTON;
 use super::super::tab::Tab;
 use super::App;
 
+const FETCH_RESULTS_PER_STEP: usize = 256;
+const LOAD_POLL: Duration = Duration::from_millis(50);
+
 impl App {
+    pub fn next_wake(&self) -> Option<Duration> {
+        let load = self
+            .tabs
+            .tabs()
+            .iter()
+            .any(|tab| {
+                tab.document_pending || tab.load.as_ref().is_some_and(|load| !load.is_settled())
+            })
+            .then_some(self.now.saturating_add(LOAD_POLL));
+        [
+            load,
+            self.pending_resize.map(|(_, deadline)| deadline),
+            self.dynamic_settle,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     pub fn step(&mut self, now: Duration) {
         self.now = now;
-        while let Some(payload) = self.net.poll_result() {
+        self.settle_resize(now);
+        self.settle_dynamic_state(now);
+        for _ in 0..FETCH_RESULTS_PER_STEP {
+            let Some(payload) = self.net.poll_result() else {
+                break;
+            };
             let _ = self.deliver_fetch(payload);
         }
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
-        let active = self.tabs.active_mut();
-        let page = active
-            .load
-            .as_mut()
-            .and_then(|load| load.render_if_ready(now));
-        if let Some(page) = page {
-            let css_warnings = page.css_warnings;
-            let parse_errors = page.parse_errors;
-            apply_rendered_page(active, page, width, rows);
-            update_load_message(active, parse_errors, css_warnings);
+        let display_changed = {
+            let active = self.tabs.active_mut();
+            let page = active
+                .load
+                .as_mut()
+                .and_then(|load| load.render_if_ready(now));
+            if let Some(page) = page {
+                let css_warnings = page.css_warnings;
+                let parse_errors = page.parse_errors;
+                apply_rendered_page(active, page, width, rows);
+                update_load_message(active, parse_errors, css_warnings);
+                true
+            } else {
+                false
+            }
+        };
+        if display_changed {
+            self.refresh_hover();
             self.touch();
         }
     }
@@ -46,11 +81,13 @@ impl App {
         let rows = self.geometry.content_rows();
         let mut commands = Vec::new();
         let mut cancel = false;
-        let mut visible_change = resource_id == ResourceId::DOCUMENT;
+        let mut visible_change;
+        let mut active_display_changed = false;
         let accepted = {
             let Some((index, tab)) = self.tabs.find_load_mut(tab_id, generation) else {
                 return false;
             };
+            visible_change = resource_id == ResourceId::DOCUMENT && index == active_index;
             if resource_id != ResourceId::DOCUMENT {
                 let Some(load) = tab.load.as_mut() else {
                     return false;
@@ -69,11 +106,13 @@ impl App {
                     apply_rendered_page(tab, page, width, rows);
                     update_load_message(tab, parse_errors, css_warnings);
                     visible_change = true;
+                    active_display_changed = true;
                 } else if index != active_index {
                     tab.render_dirty = true;
                 }
                 true
             } else {
+                tab.document_pending = false;
                 match payload.result {
                     Ok(response) => {
                         let kind = response_kind(response.content_type.as_deref());
@@ -111,6 +150,7 @@ impl App {
                                     let css_warnings = page.css_warnings;
                                     apply_rendered_page(tab, page, width, rows);
                                     update_load_message(tab, parse_errors, css_warnings);
+                                    active_display_changed = true;
                                 } else {
                                     tab.render_dirty = index != active_index;
                                     let count =
@@ -132,6 +172,7 @@ impl App {
                                     "accepted gen {} - {} (plain text)",
                                     generation, tab.url
                                 );
+                                active_display_changed = index == active_index;
                             }
                             ResponseKind::Unsupported(content_type) => {
                                 tab.load = None;
@@ -144,6 +185,7 @@ impl App {
                                     format!("  unsupported content type: {content_type}"),
                                 ]);
                                 tab.message = format!("unsupported content type: {content_type}");
+                                active_display_changed = index == active_index;
                             }
                         }
                     }
@@ -158,6 +200,7 @@ impl App {
                             format!("  {error}"),
                         ]);
                         tab.message = format!("accepted gen {generation} - load failed: {error}");
+                        active_display_changed = index == active_index;
                     }
                 }
                 true
@@ -169,6 +212,9 @@ impl App {
         }
         if cancel {
             self.net.cancel(tab_id, generation);
+        }
+        if active_display_changed {
+            self.refresh_hover();
         }
         if visible_change {
             self.touch();
