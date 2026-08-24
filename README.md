@@ -38,7 +38,8 @@ Ready                              https://example.com
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting human smoke;
 M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; M3 slice 1 — mouse navigation
-— done, awaiting human mouse smoke; terminal smoke deferred)**
+— done, with wheel, links, toolbar and menu confirmed by hand in the VGA window; terminal smoke
+deferred)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are

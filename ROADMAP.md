@@ -607,7 +607,9 @@ VGA-first — the window frontend is the default, so winit is the primary adapte
 mapping exists to keep the frozen terminal fallback behaviourally aligned, as `from_window_key` and
 `from_terminal_key` already are.
 
-**Slice 1 — navigation (done — user smoke pending)**
+**Slice 1 — navigation (done — partial user smoke: VGA wheel, links, toolbar, menu confirmed
+2026-08-24; hover preview and hand cursor, tab chips and the `+` box, address caret, middle-click and
+`target="_blank"`, side buttons, and the whole terminal frontend not yet exercised by a human)**
 
 - [x] One content origin shared by paint and hit-testing *(done)*. `chrome::content_rect` insets the content
       band on all four sides, but the `Content` widget draws side rails only, so the VGA scaled-text
@@ -1152,3 +1154,8 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   `vga` configurations, plus 420 library · 8 binary with `--no-default-features`; no `.snap.new`
   remains. Slice 1 is done pending the human mouse smoke; slice 2 (`:hover`/`:focus*` liveness,
   theme states, the CSS `cursor` property) stays open.
+- 2026-08-24 — **M3 slice 1 partial human smoke (user).** In the default VGA window, wheel scrolling,
+  link clicks, toolbar buttons and the menu bar all behave. Not exercised yet, so not claimed:
+  the hover URL preview and hand cursor, tab-chip and `+` clicks, address-field caret placement,
+  middle-click and `target="_blank"` new tabs, the Back/Forward side buttons, and the terminal
+  frontend (`--terminal`) including that the shell is left clean after quitting and after a panic.
