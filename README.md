@@ -37,8 +37,8 @@ Ready                              https://example.com
 ## Features
 
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
-M1-C done, awaiting the human terminal smoke; M1-D in progress — tables and generated content done,
-length units done, outer/inner display modes next)**
+M1-C done, awaiting the human terminal smoke; M1-D in progress — tables, generated content, length
+units and outer/inner display modes done; presentational HTML next)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -65,7 +65,10 @@ length units done, outer/inner display modes next)**
   while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
   and nested-table support; textwrap and Unicode-aware fragments reflow six whitespace modes, and
   sparse paint emits clipped terminal-cell lines and merged borders. Table cells share the normal
-  Unicode/white-space formatter; nested tables retain source order, and captions keep box styling
+  Unicode/white-space formatter; nested tables retain source order, and captions keep box styling.
+  CSS Display outside/inside modes survive cascade: `contents` elides its principal box without
+  losing inheritance or links, inline flow-root/table/flex/grid boxes remain atomic, and
+  misparented table roles receive ownerless anonymous wrappers after contents elision
 - Generated content and list-marker support: `::before`, `::after` and `::marker` match, `content`
   supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped
   stack. Ordered lists number, nested lists number independently, and `list-style-type` covers
@@ -102,8 +105,8 @@ length units done, outer/inner display modes next)**
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): outer/inner display modes,
-followed by presentational HTML, `text-align` and scaled headings. After M1-D: links/forms/search
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): presentational HTML,
+followed by `text-align` and scaled headings. After M1-D: links/forms/search
 (M2), mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
@@ -175,10 +178,11 @@ to DuckDuckGo's lite search for anything that isn't a URL.
   joined by the six layout laws: viewport-width monotonicity, painted-row bounds, disjoint leaf
   glyph cells, laminar per-row box families, engine-backed deepest-hit round trips, and scroll
   clamping as a fixed point under arbitrary key sequences.
-- **Render goldens** — twelve fixture pages cover margins, headings, borders, links, wide
+- **Render goldens** — fixture pages cover margins, headings, borders, links, wide
   characters, `pre`, ordered/nested/reversed lists and their marker alignment, `::before`/`::after`
   with counters and `attr()`, simple and collapsed/spanned tables, nested/captioned tables, and
-  fixed-layout overflow, with assertions for link geometry, colour contrast and `--dump` parity.
+  fixed-layout overflow and outer/inner display modes, with assertions for link geometry, colour
+  contrast and `--dump` parity.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -202,9 +206,8 @@ Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
 style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
-awaiting the human terminal smoke · M1-D tables and generated content/markers implemented, with
-length units implemented and outer/inner display modes, legacy HTML styling and terminal
-typography still open ·
+awaiting the human terminal smoke · M1-D tables, generated content/markers, length units and
+outer/inner display modes implemented, with legacy HTML styling and terminal typography still open ·
 M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries

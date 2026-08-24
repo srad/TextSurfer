@@ -56,28 +56,52 @@ pub(super) struct ColumnTrack {
 }
 
 impl TableFormatter<'_> {
-    pub(super) fn build_model(&self, table: NodeId, limits: TableLimits) -> Option<TableModel> {
+    pub(super) fn atomic_model(&self, node: NodeId) -> TableModel {
+        TableModel {
+            rows: vec![TableRow {
+                node: None,
+                group_node: None,
+            }],
+            cells: vec![TableCell {
+                owner: None,
+                roots: vec![node],
+                row: 0,
+                col: 0,
+                row_span: 1,
+                col_span: 1,
+            }],
+            columns: 1,
+            captions: Vec::new(),
+            column_nodes: vec![ColumnTrack::default()],
+        }
+    }
+
+    pub(super) fn build_model(
+        &self,
+        children: Vec<NodeId>,
+        limits: TableLimits,
+    ) -> Option<TableModel> {
         let mut sections = Vec::new();
         let mut captions = Vec::new();
         let mut column_nodes = Vec::new();
         let mut anonymous_cells = Vec::new();
         let mut anonymous_rows = Vec::new();
         let mut group = 0usize;
-        for child in self.document.children(table) {
+        for child in children {
             match self.styles.get(child).display {
-                Display::TableCaption => {
+                Display::TABLE_CAPTION => {
                     self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     captions.push(child);
                 }
-                Display::TableColumn => {
+                Display::TABLE_COLUMN => {
                     self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     self.expand_column(child, None, &mut column_nodes);
                 }
-                Display::TableColumnGroup => {
+                Display::TABLE_COLUMN_GROUP => {
                     self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     let before = column_nodes.len();
                     for column in self.document.children(child) {
-                        if self.styles.get(column).display == Display::TableColumn {
+                        if self.styles.get(column).display == Display::TABLE_COLUMN {
                             self.expand_column(column, Some(child), &mut column_nodes);
                         }
                     }
@@ -85,22 +109,22 @@ impl TableFormatter<'_> {
                         self.expand_column(child, Some(child), &mut column_nodes);
                     }
                 }
-                Display::TableHeaderGroup => {
+                Display::TABLE_HEADER_GROUP => {
                     self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     sections.push((SectionKind::Header, self.rows_in_group(child, group)));
                     group += 1;
                 }
-                Display::TableFooterGroup => {
+                Display::TABLE_FOOTER_GROUP => {
                     self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     sections.push((SectionKind::Footer, self.rows_in_group(child, group)));
                     group += 1;
                 }
-                Display::TableRowGroup => {
+                Display::TABLE_ROW_GROUP => {
                     self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
                     sections.push((SectionKind::Body, self.rows_in_group(child, group)));
                     group += 1;
                 }
-                Display::TableRow => {
+                Display::TABLE_ROW => {
                     if !anonymous_cells.is_empty() {
                         anonymous_rows.push(RowSeed {
                             node: None,
@@ -111,8 +135,8 @@ impl TableFormatter<'_> {
                     }
                     anonymous_rows.push(self.row_seed(child, group, None));
                 }
-                Display::TableCell => anonymous_cells.push(child),
-                Display::None => {}
+                Display::TABLE_CELL => anonymous_cells.push(child),
+                Display::NONE => {}
                 _ if self.is_ignorable(child) => {}
                 _ => anonymous_cells.push(child),
             }
@@ -219,7 +243,7 @@ impl TableFormatter<'_> {
         let mut cells = Vec::new();
         for child in self.document.children(group_node) {
             match self.styles.get(child).display {
-                Display::TableRow => {
+                Display::TABLE_ROW => {
                     if !cells.is_empty() {
                         rows.push(RowSeed {
                             node: None,
@@ -230,8 +254,8 @@ impl TableFormatter<'_> {
                     }
                     rows.push(self.row_seed(child, group, Some(group_node)));
                 }
-                Display::TableCell => cells.push(child),
-                Display::None => {}
+                Display::TABLE_CELL => cells.push(child),
+                Display::NONE => {}
                 _ if self.is_ignorable(child) => {}
                 _ => cells.push(child),
             }
@@ -273,10 +297,10 @@ impl TableFormatter<'_> {
         let mut anonymous = Vec::new();
         for child in children {
             let display = self.styles.get(child).display;
-            if display == Display::None || self.is_ignorable(child) {
+            if display.is_none() || self.is_ignorable(child) {
                 continue;
             }
-            if display == Display::TableCell {
+            if display == Display::TABLE_CELL {
                 if !anonymous.is_empty() {
                     cells.push(CellSeed {
                         owner: None,

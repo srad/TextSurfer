@@ -139,6 +139,29 @@ fn resource_limit_falls_back_without_losing_text() {
     assert_eq!(limited.plain_text(), "A B");
 
     let outcome = Html5everParser::new(false).parse_document(
+        "<div id=parent><span id=a style='display:table-cell'>A</span><span id=b style='display:table-cell'>B</span></div>",
+    );
+    let document = outcome.document.borrow();
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let parent = document.element_by_id("parent").unwrap();
+    let anonymous = TableFormatter::new(&document, &styles).format_anonymous(
+        vec![
+            document.element_by_id("a").unwrap(),
+            document.element_by_id("b").unwrap(),
+        ],
+        styles.get(parent),
+        false,
+        30,
+        TableLimits {
+            max_columns: 1,
+            ..Default::default()
+        },
+        0,
+    );
+    assert!(anonymous.degraded);
+    assert_eq!(anonymous.plain_text(), "A B");
+
+    let outcome = Html5everParser::new(false).parse_document(
         "<table id=table><tr><td>before<table><tr><td>middle<table><tr><td>deep</td></tr></table>after-middle</td></tr></table>after</td></tr></table>",
     );
     let document = outcome.document.borrow();

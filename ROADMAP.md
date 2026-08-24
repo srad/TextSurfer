@@ -63,15 +63,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content and length units done; outer/inner display modes next) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content, length units and outer/inner display modes done; presentational HTML next) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-23): **353 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
-25 golden**, and **412 lib** with `--features vga` (+59 for the framebuffer frontend).
+Test counts at the last green run (2026-08-24): **367 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
+27 golden**, and **427 lib** with `--features vga` (+60 for the framebuffer frontend).
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -484,12 +484,18 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       merging), six layout tests (shared marker field, hanging indent, inside markers, suppressed
       markers, markers and generated content inside table cells, link rects spanning generated
       content) and the `lists`/`generated` fixture goldens.
-- [ ] **Outer/inner display modes.** `inline-block` is intentionally degraded to block and
-      `display: contents` is not parsed, so both force visible line breaks in simple dump fixtures.
-      Give `inline-block` an atomic inline box, remove the principal box for `contents` while
-      retaining semantics/inheritance, and cover misparented internal table roles with the required
-      anonymous wrappers. Flex/grid remain M6. *Proof:* inline sequence fixtures preserve source
-      order and text flow; anonymous table fixup follows the box-tree parent requirements.
+- [x] **Outer/inner display modes** *(done)* — computed display retains CSS Display's outside,
+      inside, box-generation and table-internal categories, including strict legacy and
+      multi-keyword grammar. The private flow tree elides `contents` principal boxes after cascade
+      inheritance while keeping pseudo content, link ancestry and unusual-element computed-value
+      rules. Inline flow-root/table/flex/grid boxes are atomic, use shrink-to-fit normal-flow
+      content, horizontal margins and a last-content-line baseline; block flow-root/flex/grid use
+      normal flow, with real flex/grid layout still owned by M6. Anonymous table wrappers group
+      consecutive internal roles after `contents` elision, have no fabricated DOM owner, fill
+      missing row/table parents, and preserve text under resource-limit degradation. *Proof:* strict
+      cascade grammar and computed-value tests; formatting-tree tests for box elision, inheritance,
+      link geometry, atomic baseline/margins, normal-flow fallbacks and misparented roles; one public
+      render golden spanning the modes.
 - [x] **Length units and the cell metric** *(done)* — `parse_length_token` previously ignored the unit and the axis, so
       `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell: `padding: 20px` eats a quarter of an
       80-column viewport and `width: 960px` built a 960-cell box. `parse_media_length` had the
@@ -1006,3 +1012,23 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   the shared default matches its real `CELL_W`/`CELL_H` constants. No dependency changed. All six
   local gates are green: 362 library · 4 binary · 4 fetch-pipeline · 14 corpus · 26 render-golden
   tests, plus 422 library tests with `--features vga`; no `.snap.new` file was produced.
+- 2026-08-24 — **M1-D outer/inner display modes started after a green six-gate baseline.** The
+  computed display contract follows CSS Display Level 3's outside/inside, box-generation and
+  table-internal categories. Layout will build a private formatting tree, elide `contents` boxes
+  without changing DOM inheritance or link ancestry, and apply CSS 2.2 anonymous-table fixup after
+  that elision. Ladybird's staged tree builder is the comparison implementation, not a source port.
+  Flex/grid keep their computed inner modes but use normal-flow layout until M6. `cssparser 0.37.0`,
+  Taffy 0.13.0 and textwrap 0.16.2 remain current; no dependency change is planned. Baseline: 362
+  library · 4 binary · 4 fetch-pipeline · 14 corpus · 26 render-golden tests, plus 422 library tests
+  with `--features vga`.
+- 2026-08-24 — **M1-D outer/inner display modes completed.** CSS display values now retain separate
+  outside/inside, box-generation and table-internal categories through cascade and parse strict
+  legacy plus multi-keyword forms. The private flow tree removes `contents` principal boxes without
+  losing inheritance, pseudo content or link ancestry, and applies anonymous-table fixup after that
+  elision without synthetic DOM owners. Inline flow-root/table/flex/grid boxes are atomic with
+  shrink-to-fit normal-flow content, horizontal margins and last-content-line baselines; block
+  flow-root/flex/grid deliberately use normal flow until M6. Bounded anonymous wrappers degrade
+  without dropping their text. No dependency changed; **cssparser 0.37.0**, **Taffy 0.13.0** and
+  **textwrap 0.16.2** remain current. The public display-modes golden was inspected. Final six-gate
+  counts: 367 library · 4 binary · 4 fetch-pipeline · 14 corpus · 27 render-golden tests, plus 427
+  library tests with `--features vga`. M1-D remains in progress; presentational HTML is next.

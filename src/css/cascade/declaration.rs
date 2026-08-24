@@ -2,16 +2,16 @@ use cssparser::{Parser, ParserInput, Token};
 
 use super::MediaContext;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, Display, LengthAxis,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, LengthAxis,
     ListStyleType, TableLayoutMode, WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
     assign_border_color, assign_border_colors, assign_border_side, assign_border_style,
     assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
-    consume_block, parse_background_color, parse_border, parse_color, parse_font_weight,
-    parse_ident, parse_lengths, parse_list_style_position, parse_list_style_type,
-    parse_text_decoration, parse_width,
+    consume_block, parse_background_color, parse_border, parse_color, parse_display,
+    parse_font_weight, parse_ident, parse_lengths, parse_list_style_position,
+    parse_list_style_type, parse_text_decoration, parse_width,
 };
 
 pub(super) fn apply_declaration(
@@ -28,26 +28,7 @@ pub(super) fn apply_declaration(
     }
     match declaration.name.as_str() {
         "display" => {
-            if let Some(display) =
-                parse_ident(&declaration.value).and_then(|value| match value.as_str() {
-                    "none" => Some(Display::None),
-                    "list-item" => Some(Display::ListItem),
-                    "block" | "flow-root" | "flex" | "grid" | "inline-block" | "inline-flex"
-                    | "inline-grid" => Some(Display::Block),
-                    "inline" => Some(Display::Inline),
-                    "table" => Some(Display::Table),
-                    "inline-table" => Some(Display::InlineTable),
-                    "table-header-group" => Some(Display::TableHeaderGroup),
-                    "table-row-group" => Some(Display::TableRowGroup),
-                    "table-footer-group" => Some(Display::TableFooterGroup),
-                    "table-row" => Some(Display::TableRow),
-                    "table-cell" => Some(Display::TableCell),
-                    "table-column" => Some(Display::TableColumn),
-                    "table-column-group" => Some(Display::TableColumnGroup),
-                    "table-caption" => Some(Display::TableCaption),
-                    _ => None,
-                })
-            {
+            if let Some(display) = parse_display(&declaration.value) {
                 style.display = display;
             }
         }

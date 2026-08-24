@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      body, p { margin: 0 }
+      .contents { display: contents; color: #ffff00; background: #ff0000 }
+      .atom { display: inline-block; width: 8ch; margin: 0 1ch; border: solid; padding: 0 }
+      .atom > span { display: block }
+      .cell { display: table-cell; padding: 0 1ch }
+      .inline-host { display: inline }
+      .inline-cell { display: table-cell; padding: 0 }
+      .flow-root { display: flow-root }
+      .flex { display: flex }
+      .grid { display: grid }
+      .inline-flex { display: inline flex; border: solid; padding: 0 }
+      .inline-list { display: inline list-item; list-style: square inside }
+    </style>
+  </head>
+  <body>
+    <p>Before <span class="contents">kept contents</span> after.</p>
+    <p>Left <span class="atom"><span>atom</span></span> right.</p>
+    <div class="cell">A</div><div class="cell">B</div>
+    <p>Inline <span class="inline-host"><span class="inline-cell">cell</span></span> after.</p>
+    <div class="flow-root">Flow root</div>
+    <div class="flex">Flex fallback</div>
+    <div class="grid">Grid fallback</div>
+    <p>Fallback <span class="inline-flex"><span>inline flex</span></span> done.</p>
+    <p>List <span class="inline-list">item</span> end.</p>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 use cssparser::{Parser, ParserInput};
 
 use crate::core::dom::{Document, ElementNs, Node, NodeId, attr_number, has_attr};
-use crate::core::style::{ComputedStyle, Display};
+use crate::core::style::ComputedStyle;
 use crate::css::Declaration;
 use crate::css::values::{is_css_wide_keyword, parse_ident};
 
@@ -190,7 +190,7 @@ fn ua_counter_ops(document: &Document, id: NodeId, style: ComputedStyle) -> Coun
         ops.reset
             .push((LIST_ITEM_COUNTER.to_string(), first.saturating_sub(step)));
     }
-    if style.display == Display::ListItem {
+    if style.display.is_list_item() {
         let reversed = document
             .parent(id)
             .and_then(|parent| document.node(parent))

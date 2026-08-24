@@ -7,7 +7,7 @@ use crate::core::style::{
 };
 use crate::layout::LayoutRect;
 use crate::layout::text_flow::{
-    Atom, Glyph, Piece, format_inline, formatted_height, intrinsic_width, line_height,
+    Atom, Glyph, Piece, format_inline, formatted_height, intrinsic_width, line_metrics,
     min_content_width, normalize_segment_breaks,
 };
 
@@ -127,7 +127,7 @@ impl TableFormatter<'_> {
                 .saturating_sub(edges.left + edges.right + style.padding.left + style.padding.right)
                 .max(1);
             let pieces = resolve_items(&metric.items, |node| {
-                self.format(node, inner, limits, nesting.saturating_add(1))
+                self.format_inline_atom(node, inner, limits, nesting.saturating_add(1))
             });
             let lines = format_inline(&pieces, inner);
             layouts.push(CellLayout { pieces, lines });
@@ -205,7 +205,7 @@ impl TableFormatter<'_> {
                 height: formatted_height(&lines, &pieces),
             }
         } else {
-            let output = self.format(table, limits.max_width, limits, nesting);
+            let output = self.format_inline_atom(table, limits.max_width, limits, nesting);
             MetricAtom {
                 width: output.width,
                 height: output.height,
@@ -255,27 +255,31 @@ impl TableFormatter<'_> {
                 Some(Node::Text { data }) => {
                     let parent = self.document.parent(node).unwrap_or(node);
                     let style = self.styles.get(parent);
+                    let mut cell_style = style.cell_style();
+                    if style.display.is_contents() {
+                        cell_style.bg = None;
+                    }
                     items.push(CellItem::Text(TextRun {
                         node,
                         text: normalize_segment_breaks(data),
                         white_space: style.white_space,
-                        style: style.cell_style(),
+                        style: cell_style,
                     }));
                 }
                 Some(Node::Element { name, ns, attrs }) => {
                     let style = self.styles.get(node);
-                    if style.display == Display::None {
+                    if style.display.is_none() {
                         continue;
                     }
                     if atomize_tables
-                        && matches!(style.display, Display::Table | Display::InlineTable)
-                        && (!root || atomize_roots)
+                        && (style.display.is_table() || style.display.is_atomic_inline())
+                        && (!root || (atomize_roots && style.display.is_table()))
                     {
-                        if style.display == Display::Table {
+                        if style.display == Display::TABLE {
                             items.push(CellItem::Boundary(node, style.cell_style()));
                         }
                         items.push(CellItem::Table(node));
-                        if style.display == Display::Table {
+                        if style.display == Display::TABLE {
                             items.push(CellItem::Boundary(node, style.cell_style()));
                         }
                         continue;
@@ -332,7 +336,11 @@ impl TableFormatter<'_> {
     }
 
     pub(super) fn degraded(&self, table: NodeId, width: usize) -> TableOutput {
-        let items = self.collect_items(&[table], false, false);
+        self.degraded_roots(&[table], width)
+    }
+
+    pub(super) fn degraded_roots(&self, roots: &[NodeId], width: usize) -> TableOutput {
+        let items = self.collect_items(roots, false, false);
         let pieces: Vec<Piece<TableOutput>> = resolve_items(&items, |_| unreachable!());
         let lines = format_inline(&pieces, width.max(1));
         let mut output = TableOutput {
@@ -360,18 +368,7 @@ impl TableFormatter<'_> {
 }
 
 fn is_blockish(display: Display) -> bool {
-    matches!(
-        display,
-        Display::Block
-            | Display::ListItem
-            | Display::Table
-            | Display::TableHeaderGroup
-            | Display::TableRowGroup
-            | Display::TableFooterGroup
-            | Display::TableRow
-            | Display::TableCell
-            | Display::TableCaption
-    )
+    display.is_block_level() || display.is_table_internal()
 }
 
 pub(super) fn resolve_items<A: Atom>(
@@ -503,7 +500,7 @@ pub(super) fn append_cell_content(
         if row >= clip_bottom {
             break;
         }
-        let height = line_height(line, &layout.pieces);
+        let (height, baseline) = line_metrics(line, &layout.pieces);
         let mut col = clip.col;
         for glyph in line {
             if let Some(index) = glyph.atom {
@@ -512,7 +509,7 @@ pub(super) fn append_cell_content(
                         output,
                         table,
                         col,
-                        row.saturating_add(height.saturating_sub(table.height)),
+                        row.saturating_add(baseline.saturating_sub(table.baseline())),
                         clip,
                         depth.saturating_add(layout.pieces[index].depth),
                         merge_base.saturating_add(index),
@@ -523,7 +520,7 @@ pub(super) fn append_cell_content(
                     &mut output.fragments,
                     std::slice::from_ref(glyph),
                     col,
-                    row.saturating_add(height - 1),
+                    row.saturating_add(baseline),
                     clip_right,
                     depth,
                 );

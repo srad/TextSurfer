@@ -75,19 +75,20 @@ pub(super) fn cascade_document(
             apply_declaration(&mut style, parent_style, &declaration, media);
             authored_counters.apply(&declaration);
         }
-        if matches!(
-            style.display,
-            Display::None
-                | Display::Inline
-                | Display::TableHeaderGroup
-                | Display::TableRowGroup
-                | Display::TableFooterGroup
-                | Display::TableRow
-        ) {
+        style.display = computed_display(document, id, style.display);
+        if style.display.is_inline_flow()
+            || matches!(
+                style.display,
+                Display::TABLE_HEADER_GROUP
+                    | Display::TABLE_ROW_GROUP
+                    | Display::TABLE_FOOTER_GROUP
+                    | Display::TABLE_ROW
+            )
+        {
             style.width = CssWidth::Auto;
         }
         tree.insert(id, style);
-        if style.display == Display::None && hidden_depth.is_none() {
+        if style.display.is_none() && hidden_depth.is_none() {
             hidden_depth = Some(depth);
         }
         if hidden_depth.is_some() {
@@ -109,7 +110,7 @@ pub(super) fn cascade_document(
                 tree.insert_pseudo(id, which, pseudo);
             }
         }
-        if style.display == Display::ListItem {
+        if style.display.is_list_item() {
             let fallback = default_marker_text(style.list_style_type, &counters);
             if let Some(marker) = cascade_pseudo(
                 &rules,
@@ -209,10 +210,12 @@ fn cascade_pseudo(
     declarations
         .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
     let inherited = ComputedStyle {
-        display: Display::Inline,
+        display: Display::INLINE,
         white_space: origin.white_space,
         color: origin.color,
-        background: origin.background,
+        background: (!origin.display.is_contents())
+            .then_some(origin.background)
+            .flatten(),
         bold: origin.bold,
         underline: origin.underline,
         strike: origin.strike,
@@ -234,7 +237,7 @@ fn cascade_pseudo(
             content = Some(spec);
         }
     }
-    style.display = Display::Inline;
+    style.display = Display::INLINE;
     let text = match content {
         Some(ContentSpec::None) => return None,
         Some(ContentSpec::Pieces(pieces)) => resolve_content(&pieces, document, id, counters),
@@ -246,6 +249,49 @@ fn cascade_pseudo(
         return None;
     }
     Some(PseudoBox { text, style })
+}
+
+fn computed_display(document: &Document, id: NodeId, display: Display) -> Display {
+    let display = if display.is_contents()
+        && matches!(
+            document.node(id),
+            Some(Node::Element {
+                ns: ElementNs::Html,
+                name,
+                ..
+            }) if matches!(
+                name.as_str(),
+                "br"
+                    | "wbr"
+                    | "meter"
+                    | "progress"
+                    | "canvas"
+                    | "embed"
+                    | "object"
+                    | "audio"
+                    | "iframe"
+                    | "img"
+                    | "video"
+                    | "frame"
+                    | "frameset"
+                    | "input"
+                    | "textarea"
+                    | "select"
+            )
+        ) {
+        Display::NONE
+    } else {
+        display
+    };
+    if document.parent(id).is_none() {
+        if display.is_contents() {
+            Display::BLOCK
+        } else {
+            display.blockify()
+        }
+    } else {
+        display
+    }
 }
 
 #[derive(Default)]

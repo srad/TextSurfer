@@ -8,8 +8,75 @@ use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderColor, BorderEdges, BorderLineStyle, BorderSide, CellMetric, CssLength, CssLengthUnit,
-    CssPercentage, CssWidth, EdgeSizes, LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
+    CssPercentage, CssWidth, Display, DisplayBox, DisplayInternal, DisplayOutside, EdgeSizes,
+    LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
 };
+
+pub(super) fn parse_display(source: &str) -> Option<Display> {
+    enum ParsedInside {
+        Flow(bool),
+        Table,
+        Flex,
+        Grid,
+    }
+
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut words = Vec::new();
+    while !parser.is_exhausted() {
+        words.push(parser.expect_ident_cloned().ok()?.to_ascii_lowercase());
+    }
+    if words.len() == 1 {
+        return match words[0].as_str() {
+            "none" => Some(Display::Box(DisplayBox::None)),
+            "contents" => Some(Display::Box(DisplayBox::Contents)),
+            "block" | "flow" => Some(Display::BLOCK),
+            "inline" => Some(Display::INLINE),
+            "flow-root" => Some(Display::FLOW_ROOT),
+            "list-item" => Some(Display::LIST_ITEM),
+            "table" => Some(Display::TABLE),
+            "inline-block" => Some(Display::INLINE_BLOCK),
+            "inline-table" => Some(Display::INLINE_TABLE),
+            "flex" => Some(Display::flex(DisplayOutside::Block)),
+            "inline-flex" => Some(Display::flex(DisplayOutside::Inline)),
+            "grid" => Some(Display::grid(DisplayOutside::Block)),
+            "inline-grid" => Some(Display::grid(DisplayOutside::Inline)),
+            "table-header-group" => Some(Display::Internal(DisplayInternal::TableHeaderGroup)),
+            "table-row-group" => Some(Display::Internal(DisplayInternal::TableRowGroup)),
+            "table-footer-group" => Some(Display::Internal(DisplayInternal::TableFooterGroup)),
+            "table-row" => Some(Display::Internal(DisplayInternal::TableRow)),
+            "table-cell" => Some(Display::Internal(DisplayInternal::TableCell)),
+            "table-column" => Some(Display::Internal(DisplayInternal::TableColumn)),
+            "table-column-group" => Some(Display::Internal(DisplayInternal::TableColumnGroup)),
+            "table-caption" => Some(Display::Internal(DisplayInternal::TableCaption)),
+            _ => None,
+        };
+    }
+    let mut outside = None;
+    let mut inside: Option<ParsedInside> = None;
+    let mut list_item = false;
+    for word in words {
+        match word.as_str() {
+            "block" if outside.is_none() => outside = Some(DisplayOutside::Block),
+            "inline" if outside.is_none() => outside = Some(DisplayOutside::Inline),
+            "flow" if inside.is_none() => inside = Some(ParsedInside::Flow(false)),
+            "flow-root" if inside.is_none() => inside = Some(ParsedInside::Flow(true)),
+            "list-item" if !list_item => list_item = true,
+            "table" if inside.is_none() => inside = Some(ParsedInside::Table),
+            "flex" if inside.is_none() => inside = Some(ParsedInside::Flex),
+            "grid" if inside.is_none() => inside = Some(ParsedInside::Grid),
+            _ => return None,
+        }
+    }
+    let outside = outside.unwrap_or(DisplayOutside::Block);
+    match inside.unwrap_or(ParsedInside::Flow(false)) {
+        ParsedInside::Flow(flow_root) => Some(Display::flow(outside, flow_root, list_item)),
+        ParsedInside::Table if !list_item => Some(Display::table(outside)),
+        ParsedInside::Flex if !list_item => Some(Display::flex(outside)),
+        ParsedInside::Grid if !list_item => Some(Display::grid(outside)),
+        ParsedInside::Table | ParsedInside::Flex | ParsedInside::Grid => None,
+    }
+}
 
 pub(super) fn parse_color(source: &str) -> Option<Rgba> {
     let mut input = ParserInput::new(source);

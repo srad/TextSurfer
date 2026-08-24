@@ -38,7 +38,7 @@ fn rendering_html_reports_parse_and_style_diagnostics_with_the_painted_page() {
     assert_eq!(page.css_warnings, 0);
     assert!(
         page.styles.get(page.document.borrow().roots()[0]).display
-            != crate::core::style::Display::None
+            != crate::core::style::Display::NONE
     );
 }
 

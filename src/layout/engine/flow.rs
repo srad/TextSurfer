@@ -6,7 +6,9 @@ use crate::core::style::{
     WhiteSpace,
 };
 use crate::layout::table::{TableFormatter, TableLimits, TableOutput};
-use crate::layout::text_flow::{Piece, format_inline, line_height, normalize_segment_breaks};
+use crate::layout::text_flow::{
+    Atom, Piece, format_inline, line_metrics, normalize_segment_breaks,
+};
 
 use super::tables::append_table_output;
 use super::{BoxTree, TextFragment};
@@ -29,12 +31,15 @@ pub(super) type InlinePiece = Piece<TableOutput>;
 struct InlineContext {
     white_space: WhiteSpace,
     style: CellStyle,
+    computed: ComputedStyle,
     depth: usize,
+    inline_parent: bool,
 }
 
 enum FlowEvent {
     Enter(NodeId, InlineContext),
-    RightEdge(NodeId, ComputedStyle, InlineContext),
+    Exit(NodeId, ComputedStyle, InlineContext, bool),
+    AnonymousTable(Vec<NodeId>, InlineContext),
 }
 
 pub(super) fn build_flow_tree(
@@ -45,7 +50,7 @@ pub(super) fn build_flow_tree(
     let mut flow = vec![FlowBox {
         owner: None,
         style: ComputedStyle {
-            display: Display::Block,
+            display: Display::BLOCK,
             ..Default::default()
         },
         depth: 0,
@@ -65,16 +70,15 @@ pub(super) fn build_flow_tree(
             style: container
                 .map(|node| styles.get(node).cell_style())
                 .unwrap_or_default(),
+            computed: container.map(|node| styles.get(node)).unwrap_or_default(),
             depth,
+            inline_parent: false,
         };
         let roots = container
             .map(|node| document.children(node))
             .unwrap_or_else(|| document.roots().to_vec());
-        let mut events: Vec<_> = roots
-            .into_iter()
-            .rev()
-            .map(|node| FlowEvent::Enter(node, inherited))
-            .collect();
+        let mut events = Vec::new();
+        push_children(&mut events, roots, document, styles, inherited);
         let mut buffer = Vec::new();
         if let Some(node) = container {
             let own = InlineContext {
@@ -99,7 +103,7 @@ pub(super) fn build_flow_tree(
         let mut nested_tasks = Vec::new();
         while let Some(event) = events.pop() {
             match event {
-                FlowEvent::RightEdge(node, style, context) => {
+                FlowEvent::Exit(node, style, context, has_edge) => {
                     append_pseudo(
                         styles,
                         node,
@@ -107,11 +111,54 @@ pub(super) fn build_flow_tree(
                         InlineContext {
                             white_space: style.white_space,
                             style: style.cell_style(),
+                            computed: style,
                             depth: context.depth + 1,
+                            inline_parent: context.inline_parent,
                         },
                         &mut buffer,
                     );
-                    append_edge(node, style, false, context, &mut buffer);
+                    if has_edge {
+                        append_edge(node, style, false, context, &mut buffer);
+                    }
+                }
+                FlowEvent::AnonymousTable(roots, context) => {
+                    let node = roots[0];
+                    let atom = TableFormatter::new(document, styles).format_anonymous(
+                        roots,
+                        context.computed,
+                        context.inline_parent,
+                        viewport_width,
+                        TableLimits::default(),
+                        0,
+                    );
+                    let piece = InlinePiece {
+                        node,
+                        text: String::new(),
+                        white_space: context.white_space,
+                        depth: context.depth,
+                        style: context.style,
+                        atom: Some(atom),
+                    };
+                    if context.inline_parent {
+                        buffer.push(piece);
+                    } else {
+                        flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
+                        let child = flow.len();
+                        flow.push(FlowBox {
+                            owner: None,
+                            style: ComputedStyle::anonymous_inheriting(
+                                context.computed,
+                                Display::BLOCK,
+                            ),
+                            depth: context.depth,
+                            inline: vec![piece],
+                            children: Vec::new(),
+                            rule: false,
+                            table: None,
+                            marker: None,
+                        });
+                        children.push(child);
+                    }
                 }
                 FlowEvent::Enter(node, context) => match document.node(node) {
                     Some(Node::Text { data }) => buffer.push(InlinePiece {
@@ -124,15 +171,41 @@ pub(super) fn build_flow_tree(
                     }),
                     Some(Node::Element { name, ns, attrs }) => {
                         let style = styles.get(node);
-                        if style.display == Display::None {
+                        if style.display.is_none() {
                             continue;
+                        }
+                        let mut inline_style = style.cell_style();
+                        if style.display.is_contents() {
+                            inline_style.bg = None;
                         }
                         let element_context = InlineContext {
                             white_space: style.white_space,
-                            style: style.cell_style(),
+                            style: inline_style,
+                            computed: style,
                             depth: context.depth + 1,
+                            inline_parent: if style.display.is_contents() {
+                                context.inline_parent
+                            } else {
+                                style.display.is_inline_flow()
+                            },
                         };
-                        if style.display == Display::Table {
+                        if style.display.is_contents() {
+                            events.push(FlowEvent::Exit(node, style, context, false));
+                            append_pseudo(
+                                styles,
+                                node,
+                                PseudoElement::Before,
+                                element_context,
+                                &mut buffer,
+                            );
+                            push_children(
+                                &mut events,
+                                document.children(node),
+                                document,
+                                styles,
+                                element_context,
+                            );
+                        } else if style.display == Display::TABLE {
                             flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
                             let child = flow.len();
                             flow.push(FlowBox {
@@ -146,20 +219,29 @@ pub(super) fn build_flow_tree(
                                 marker: None,
                             });
                             children.push(child);
-                        } else if style.display == Display::InlineTable {
+                        } else if style.display.is_atomic_inline() {
+                            append_horizontal_margin(node, style.margin.left, context, &mut buffer);
                             buffer.push(InlinePiece {
                                 node,
                                 text: String::new(),
                                 white_space: context.white_space,
                                 depth: context.depth,
                                 style: style.cell_style(),
-                                atom: Some(TableFormatter::new(document, styles).format(
-                                    node,
-                                    viewport_width,
-                                    TableLimits::default(),
-                                    0,
-                                )),
+                                atom: Some(
+                                    TableFormatter::new(document, styles).format_inline_atom(
+                                        node,
+                                        viewport_width,
+                                        TableLimits::default(),
+                                        0,
+                                    ),
+                                ),
                             });
+                            append_horizontal_margin(
+                                node,
+                                style.margin.right,
+                                context,
+                                &mut buffer,
+                            );
                         } else if style.display.is_block_container() {
                             flush_inline(&mut flow, &mut children, &mut buffer, context.depth);
                             let child = flow.len();
@@ -202,8 +284,20 @@ pub(super) fn build_flow_tree(
                                 });
                             }
                         } else {
+                            if style.display.is_list_item()
+                                && let Some(marker) = styles.marker(node)
+                            {
+                                buffer.push(InlinePiece {
+                                    node,
+                                    text: marker.text.clone(),
+                                    white_space: marker.style.white_space,
+                                    depth: context.depth,
+                                    style: marker.style.cell_style(),
+                                    atom: None,
+                                });
+                            }
                             append_edge(node, style, true, context, &mut buffer);
-                            events.push(FlowEvent::RightEdge(node, style, context));
+                            events.push(FlowEvent::Exit(node, style, context, true));
                             append_pseudo(
                                 styles,
                                 node,
@@ -211,22 +305,24 @@ pub(super) fn build_flow_tree(
                                 element_context,
                                 &mut buffer,
                             );
-                            events.extend(
-                                document
-                                    .children(node)
-                                    .into_iter()
-                                    .rev()
-                                    .map(|child| FlowEvent::Enter(child, element_context)),
+                            push_children(
+                                &mut events,
+                                document.children(node),
+                                document,
+                                styles,
+                                element_context,
                             );
                         }
                     }
-                    Some(Node::DocumentFragment) => events.extend(
-                        document
-                            .children(node)
-                            .into_iter()
-                            .rev()
-                            .map(|child| FlowEvent::Enter(child, context)),
-                    ),
+                    Some(Node::DocumentFragment) => {
+                        push_children(
+                            &mut events,
+                            document.children(node),
+                            document,
+                            styles,
+                            context,
+                        );
+                    }
                     _ => {}
                 },
             }
@@ -248,6 +344,85 @@ pub(super) fn build_flow_tree(
         tasks.extend(nested_tasks.into_iter().rev());
     }
     flow
+}
+
+fn push_children(
+    events: &mut Vec<FlowEvent>,
+    children: Vec<NodeId>,
+    document: &Document,
+    styles: &StyleTree,
+    context: InlineContext,
+) {
+    let mut pending: Vec<_> = children
+        .into_iter()
+        .rev()
+        .map(|node| (node, context))
+        .collect();
+    let mut flattened = Vec::new();
+    while let Some((node, node_context)) = pending.pop() {
+        match document.node(node) {
+            Some(Node::Element { .. })
+                if styles.get(node).display.is_contents()
+                    && styles.pseudo(node, PseudoElement::Before).is_none()
+                    && styles.pseudo(node, PseudoElement::After).is_none() =>
+            {
+                let style = styles.get(node);
+                let mut inline_style = style.cell_style();
+                inline_style.bg = None;
+                let child_context = InlineContext {
+                    white_space: style.white_space,
+                    style: inline_style,
+                    computed: style,
+                    depth: node_context.depth + 1,
+                    inline_parent: node_context.inline_parent,
+                };
+                pending.extend(
+                    document
+                        .children(node)
+                        .into_iter()
+                        .rev()
+                        .map(|child| (child, child_context)),
+                );
+            }
+            Some(Node::DocumentFragment) => pending.extend(
+                document
+                    .children(node)
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, node_context)),
+            ),
+            _ => flattened.push((node, node_context)),
+        }
+    }
+    let mut ordered = Vec::new();
+    let mut table_run = Vec::new();
+    for (child, child_context) in flattened {
+        if styles.get(child).display.is_table_internal() {
+            table_run.push(child);
+        } else {
+            let does_not_generate_a_box = styles.get(child).display.is_none()
+                || matches!(
+                    document.node(child),
+                    Some(Node::Comment { .. } | Node::Pi { .. } | Node::Doctype { .. })
+                )
+                || (!table_run.is_empty()
+                    && matches!(document.node(child), Some(Node::Text { data }) if data.chars().all(char::is_whitespace)));
+            if does_not_generate_a_box {
+                continue;
+            }
+            if !table_run.is_empty() {
+                ordered.push(FlowEvent::AnonymousTable(
+                    std::mem::take(&mut table_run),
+                    context,
+                ));
+            }
+            ordered.push(FlowEvent::Enter(child, child_context));
+        }
+    }
+    if !table_run.is_empty() {
+        ordered.push(FlowEvent::AnonymousTable(table_run, context));
+    }
+    events.extend(ordered.into_iter().rev());
 }
 
 fn flush_inline(
@@ -273,7 +448,7 @@ fn flush_inline(
     flow.push(FlowBox {
         owner: None,
         style: ComputedStyle {
-            display: Display::Block,
+            display: Display::BLOCK,
             ..Default::default()
         },
         depth,
@@ -330,6 +505,24 @@ fn append_edge(
     }
 }
 
+fn append_horizontal_margin(
+    node: NodeId,
+    cells: usize,
+    context: InlineContext,
+    buffer: &mut Vec<InlinePiece>,
+) {
+    if cells > 0 {
+        buffer.push(InlinePiece {
+            node,
+            text: " ".repeat(cells),
+            white_space: WhiteSpace::BreakSpaces,
+            depth: context.depth,
+            style: context.style,
+            atom: None,
+        });
+    }
+}
+
 pub(super) fn append_inline(
     tree: &mut BoxTree,
     pieces: &[InlinePiece],
@@ -340,7 +533,7 @@ pub(super) fn append_inline(
 ) {
     let mut current_row = row;
     for line in format_inline(pieces, width) {
-        let line_height = line_height(&line, pieces);
+        let (line_height, baseline) = line_metrics(&line, pieces);
         let mut current_col = col;
         for glyph in line {
             if let Some(index) = glyph.atom {
@@ -349,7 +542,7 @@ pub(super) fn append_inline(
                         tree,
                         table.clone(),
                         current_col,
-                        current_row + line_height.saturating_sub(table.height),
+                        current_row + baseline.saturating_sub(table.baseline()),
                         pieces[index].depth,
                         merge_base.saturating_mul(1_000).saturating_add(index),
                     );
@@ -357,7 +550,7 @@ pub(super) fn append_inline(
                 current_col = current_col.saturating_add(glyph.width);
                 continue;
             }
-            let baseline = current_row + line_height - 1;
+            let baseline = current_row + baseline;
             if let Some(last) = tree.fragments.last_mut()
                 && last.node == glyph.node
                 && last.row == baseline

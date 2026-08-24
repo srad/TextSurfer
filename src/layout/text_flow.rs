@@ -9,6 +9,10 @@ use crate::core::style::{CellStyle, WhiteSpace};
 pub(super) trait Atom {
     fn width(&self) -> usize;
     fn height(&self) -> usize;
+
+    fn baseline(&self) -> usize {
+        self.height().saturating_sub(1)
+    }
 }
 
 #[derive(Clone)]
@@ -500,12 +504,21 @@ fn finish_min_segment(widest: &mut usize, current: &mut usize) {
 }
 
 pub(super) fn line_height<A: Atom>(line: &[Glyph], pieces: &[Piece<A>]) -> usize {
-    line.iter()
+    line_metrics(line, pieces).0
+}
+
+pub(super) fn line_metrics<A: Atom>(line: &[Glyph], pieces: &[Piece<A>]) -> (usize, usize) {
+    let mut baseline = 0;
+    let mut below = 0;
+    for atom in line
+        .iter()
         .filter_map(|glyph| glyph.atom.and_then(|index| pieces[index].atom.as_ref()))
-        .map(Atom::height)
-        .max()
-        .unwrap_or(1)
-        .max(1)
+    {
+        let atom_baseline = atom.baseline().min(atom.height().saturating_sub(1));
+        baseline = baseline.max(atom_baseline);
+        below = below.max(atom.height().saturating_sub(atom_baseline + 1));
+    }
+    (baseline + below + 1, baseline)
 }
 
 pub(super) fn formatted_height<A: Atom>(lines: &[Vec<Glyph>], pieces: &[Piece<A>]) -> usize {

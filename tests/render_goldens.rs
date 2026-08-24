@@ -129,6 +129,11 @@ fn fixed_table_overflow_golden() {
 }
 
 #[test]
+fn outer_and_inner_display_modes_golden() {
+    insta::assert_snapshot!(golden("display_modes.html"));
+}
+
+#[test]
 fn table_cells_share_normal_word_and_white_space_behavior() {
     let wrapping = render_source(
         "<style>table { border-spacing: 0; table-layout: fixed; width: 6ch; margin: 0 }

@@ -1,21 +1,19 @@
-use crate::core::dom::NodeId;
-
 use super::captions::{layout_captions, natural_width};
 use super::geometry::{TableGeometry, TablePlacement, place_table};
 use super::model::TableModel;
 use super::sizing::size_columns;
-use super::{TableFormatter, TableLimits, TableOutput};
+use super::{TableFormatter, TableLimits, TableOutput, TableRoot};
 
 impl TableFormatter<'_> {
     pub(super) fn layout_model(
         &self,
-        table: NodeId,
+        root: TableRoot,
         model: TableModel,
         available_width: usize,
         limits: TableLimits,
         nesting: usize,
     ) -> TableOutput {
-        let table_style = self.styles.get(table);
+        let table_style = root.style;
         let metrics = self.measure_cells(&model, limits, nesting);
         let geometry = TableGeometry::new(self, table_style, &model);
         let caption_natural = natural_width(self, &model, limits, nesting);
@@ -41,7 +39,7 @@ impl TableFormatter<'_> {
             self,
             &geometry,
             TablePlacement {
-                table,
+                root,
                 model,
                 table_style,
                 columns,

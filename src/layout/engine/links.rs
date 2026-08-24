@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
-use crate::core::style::{Display, StyleTree};
+use crate::core::style::StyleTree;
 
 use super::{BoxTree, LayoutRect, LinkBox};
 
@@ -70,7 +70,7 @@ pub(super) fn collect_links(
 ) {
     let mut stack = vec![id];
     while let Some(id) = stack.pop() {
-        if styles.get(id).display == Display::None {
+        if styles.get(id).display.is_none() {
             continue;
         }
         match document.node(id) {

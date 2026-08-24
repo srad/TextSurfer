@@ -1,5 +1,6 @@
 mod box_model;
 mod color;
+mod display;
 mod length;
 mod list;
 mod table;
@@ -16,34 +17,12 @@ pub use box_model::{
     EdgeSizes,
 };
 pub use color::{CellStyle, Palette, Rgb, Rgba};
+pub use display::{
+    Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside,
+};
 pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
 pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Display {
-    None,
-    #[default]
-    Inline,
-    Block,
-    ListItem,
-    Table,
-    InlineTable,
-    TableHeaderGroup,
-    TableRowGroup,
-    TableFooterGroup,
-    TableRow,
-    TableCell,
-    TableColumn,
-    TableColumnGroup,
-    TableCaption,
-}
-
-impl Display {
-    pub const fn is_block_container(self) -> bool {
-        matches!(self, Self::Block | Self::ListItem)
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PseudoElement {
@@ -87,6 +66,24 @@ pub struct ComputedStyle {
 }
 
 impl ComputedStyle {
+    pub fn anonymous_inheriting(parent: Self, display: Display) -> Self {
+        Self {
+            display,
+            white_space: parent.white_space,
+            list_style_type: parent.list_style_type,
+            list_style_position: parent.list_style_position,
+            border_collapse: parent.border_collapse,
+            border_spacing: parent.border_spacing,
+            caption_side: parent.caption_side,
+            color: parent.color,
+            bold: parent.bold,
+            underline: parent.underline,
+            strike: parent.strike,
+            reverse: parent.reverse,
+            ..Default::default()
+        }
+    }
+
     pub fn cell_style(&self) -> CellStyle {
         CellStyle {
             fg: self.color,

@@ -4,8 +4,8 @@ use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide,
-    CssPercentage, CssWidth, Display, EdgeSizes, Palette, PseudoElement, Rgb, Rgba, StyleTree,
-    TableLayoutMode, WhiteSpace,
+    CssPercentage, CssWidth, Display, DisplayInside, DisplayOutside, EdgeSizes, Palette,
+    PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, WhiteSpace,
 };
 use crate::css::values::parse_font_weight;
 use crate::css::{ColorScheme, CssParser, CssparserParser};
@@ -34,10 +34,10 @@ fn ua_and_author_rules_form_a_computed_style_tree() {
     );
     let sheet = CssparserParser.parse("main > p.note { display: none; margin: 2rem 3ch }");
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    assert_eq!(styles.get(main).display, Display::Block);
-    assert_eq!(styles.get(p).display, Display::None);
+    assert_eq!(styles.get(main).display, Display::BLOCK);
+    assert_eq!(styles.get(p).display, Display::NONE);
     assert_eq!(styles.get(p).margin.left, 3);
-    assert_eq!(styles.get(span).display, Display::Inline);
+    assert_eq!(styles.get(span).display, Display::INLINE);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn important_author_rules_override_normal_inline_declarations() {
     );
     let sheet = CssparserParser.parse("p { display: none !important }");
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    assert_eq!(styles.get(p).display, Display::None);
+    assert_eq!(styles.get(p).display, Display::NONE);
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn table_roles_and_properties_reach_the_computed_style() {
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
 
     let table_style = styles.get(table);
-    assert_eq!(table_style.display, Display::Table);
+    assert_eq!(table_style.display, Display::TABLE);
     assert_eq!(table_style.table_layout, TableLayoutMode::Fixed);
     assert_eq!(table_style.border_collapse, BorderCollapse::Collapse);
     assert_eq!(table_style.border_spacing, BorderSpacing::new(3, 2));
@@ -84,13 +84,13 @@ fn table_roles_and_properties_reach_the_computed_style() {
         table_style.border.top.color,
         BorderColor::Rgb(Rgb::new(255, 0, 0))
     );
-    assert_eq!(styles.get(body).display, Display::TableRowGroup);
-    assert_eq!(styles.get(row).display, Display::TableRow);
-    assert_eq!(styles.get(cell).display, Display::TableCell);
+    assert_eq!(styles.get(body).display, Display::TABLE_ROW_GROUP);
+    assert_eq!(styles.get(row).display, Display::TABLE_ROW);
+    assert_eq!(styles.get(cell).display, Display::TABLE_CELL);
     assert_eq!(styles.get(cell).border.left.width, 0);
     assert_eq!(styles.get(cell).border.left.style, BorderLineStyle::Hidden);
     assert_eq!(styles.get(cell).border.top.color, BorderColor::CurrentColor);
-    assert_eq!(styles.get(caption).display, Display::TableCaption);
+    assert_eq!(styles.get(caption).display, Display::TABLE_CAPTION);
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn comments_are_tokenized_and_invalid_values_do_not_override_ua_defaults() {
     let sheet = CssparserParser
         .parse("p { display: block /**/; border: none /**/ } pre { white-space: invalid }");
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    assert_eq!(styles.get(p).display, Display::Block);
+    assert_eq!(styles.get(p).display, Display::BLOCK);
     assert!(!styles.get(p).border.is_visible());
     assert_eq!(styles.get(pre).white_space, WhiteSpace::Pre);
 }
@@ -318,10 +318,10 @@ fn cascade_contract(cascade: &dyn Cascade) {
         &document,
         MediaContext::screen(),
     );
-    assert_eq!(screen.get(p).display, Display::Block);
+    assert_eq!(screen.get(p).display, Display::BLOCK);
     assert!(screen.get(p).border.is_visible());
     let print = cascade.apply(&[sheet], &document, MediaContext::print());
-    assert_eq!(print.get(p).display, Display::None);
+    assert_eq!(print.get(p).display, Display::NONE);
     assert!(print.get(p).border.is_visible());
 }
 
@@ -343,26 +343,44 @@ fn nested_media_preserves_lexical_source_order() {
          p { border: solid }",
     );
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    assert_eq!(styles.get(p).display, Display::Block);
+    assert_eq!(styles.get(p).display, Display::BLOCK);
     assert!(styles.get(p).border.is_visible());
 }
 
 #[test]
-fn unsupported_layout_modes_follow_the_degradation_contract() {
-    for value in [
-        "inline-block",
-        "flex",
-        "grid",
-        "flow-root",
-        "inline-flex",
-        "inline-grid",
+fn display_modes_preserve_their_computed_outside_and_inside_components() {
+    for (value, outside, inside) in [
+        (
+            "inline-block",
+            DisplayOutside::Inline,
+            DisplayInside::FlowRoot,
+        ),
+        ("flow-root", DisplayOutside::Block, DisplayInside::FlowRoot),
+        ("inline table", DisplayOutside::Inline, DisplayInside::Table),
+        ("flex", DisplayOutside::Block, DisplayInside::Flex),
+        ("inline-flex", DisplayOutside::Inline, DisplayInside::Flex),
+        ("grid inline", DisplayOutside::Inline, DisplayInside::Grid),
     ] {
         let mut document = Document::new();
-        let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
+        let root = document.insert_element(None, "div", ElementNs::Html, vec![]);
+        let p = document.insert_element(Some(root), "p", ElementNs::Html, vec![]);
         let sheet = CssparserParser.parse(&format!("p {{ display: {value} }}"));
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-        assert_eq!(styles.get(p).display, Display::Block, "{value}");
+        assert_eq!(styles.get(p).display.outside(), Some(outside), "{value}");
+        assert_eq!(styles.get(p).display.inside(), Some(inside), "{value}");
     }
+
+    let mut document = Document::new();
+    let root = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let p = document.insert_element(Some(root), "p", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse(
+        "p { display: inline; display: table inline junk; display: inline flow-root list-item }",
+    );
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(
+        styles.get(p).display,
+        Display::flow(DisplayOutside::Inline, true, true)
+    );
 
     let mut document = Document::new();
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
@@ -371,6 +389,37 @@ fn unsupported_layout_modes_follow_the_degradation_contract() {
         CssparserParser.parse("p { position: absolute; inset: 4px; top: 1px; height: 50% }");
     let degraded = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
     assert_eq!(degraded.get(p), baseline.get(p));
+}
+
+#[test]
+fn invalid_display_grammars_do_not_replace_an_earlier_declaration() {
+    for value in [
+        "block block",
+        "inline table list-item",
+        "table inline junk",
+        "run-in",
+        "ruby",
+    ] {
+        let mut document = Document::new();
+        let parent = document.insert_element(None, "div", ElementNs::Html, vec![]);
+        let child = document.insert_element(Some(parent), "span", ElementNs::Html, vec![]);
+        let sheet = CssparserParser.parse(&format!("span {{ display: block; display: {value} }}"));
+        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        assert_eq!(styles.get(child).display, Display::BLOCK, "{value}");
+    }
+}
+
+#[test]
+fn root_and_unusual_element_contents_values_compute_before_layout() {
+    let mut document = Document::new();
+    let root = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let normal = document.insert_element(Some(root), "div", ElementNs::Html, vec![]);
+    let image = document.insert_element(Some(root), "img", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse("html, div, img { display: contents }");
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(styles.get(root).display, Display::BLOCK);
+    assert_eq!(styles.get(normal).display, Display::CONTENTS);
+    assert_eq!(styles.get(image).display, Display::NONE);
 }
 
 #[test]
@@ -539,6 +588,7 @@ fn bucketed_and_naive_cascades_agree_on_the_render_fixture_corpus() {
         include_str!("../../../tests/fixtures/wide.html"),
         include_str!("../../../tests/fixtures/lists.html"),
         include_str!("../../../tests/fixtures/generated.html"),
+        include_str!("../../../tests/fixtures/display_modes.html"),
     ] {
         let outcome = Html5everParser::new(false).parse_document(source);
         let document = outcome.document.borrow();
@@ -570,7 +620,7 @@ fn media_features_use_the_injected_terminal_context() {
             .apply(std::slice::from_ref(&sheet), &document, matching)
             .get(p)
             .display,
-        Display::None
+        Display::NONE
     );
     let narrow = matching.with_viewport(Size { cols: 79, rows: 24 });
     assert_ne!(
@@ -578,7 +628,7 @@ fn media_features_use_the_injected_terminal_context() {
             .apply(&[sheet], &document, narrow)
             .get(p)
             .display,
-        Display::None
+        Display::NONE
     );
 }
 
@@ -594,7 +644,7 @@ fn media_dimensions_compare_in_css_pixels_including_mq4_ranges() {
             .apply(std::slice::from_ref(&sheet), &document, wide)
             .get(p)
             .display,
-        Display::None
+        Display::NONE
     );
     let narrow = wide.with_viewport(Size { cols: 79, rows: 24 });
     assert_ne!(
@@ -602,7 +652,7 @@ fn media_dimensions_compare_in_css_pixels_including_mq4_ranges() {
             .apply(&[sheet], &document, narrow)
             .get(p)
             .display,
-        Display::None
+        Display::NONE
     );
 }
 
@@ -812,7 +862,7 @@ fn an_authored_display_list_item_is_a_real_list_item_not_a_block() {
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
     let sheet = CssparserParser.parse("p { display: list-item }");
     let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    assert_eq!(styles.get(p).display, Display::ListItem);
+    assert_eq!(styles.get(p).display, Display::LIST_ITEM);
 
     // Decimal rather than the initial disc, so the implicit `list-item` step is observable at all.
     assert_eq!(

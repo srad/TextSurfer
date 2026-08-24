@@ -1,0 +1,17 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"display_modes.html\")"
+---
+Before kept contents after.
+      ┌──────┐
+Left  │atom  │  right.
+      └──────┘
+ A  B
+Inline cell after.
+Flow root
+Flex fallback
+Grid fallback
+         ┌───────────┐
+Fallback │inline flex│ done.
+         └───────────┘
+List ▪ item end.

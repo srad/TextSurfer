@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::core::dom::NodeId;
 use crate::core::style::{BorderCollapse, BorderEdges, ComputedStyle};
 use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, LayoutRect};
 
@@ -9,7 +8,7 @@ use super::captions::{CaptionBands, append_captions};
 use super::content::{CellGrid, append_cell_content};
 use super::model::TableModel;
 use super::sizing::ColumnLayout;
-use super::{TableFormatter, TableOutput};
+use super::{TableFormatter, TableOutput, TableRoot};
 
 pub(super) struct TableGeometry {
     pub(super) collapsed: bool,
@@ -93,7 +92,7 @@ impl TableGeometry {
 }
 
 pub(super) struct TablePlacement {
-    pub(super) table: NodeId,
+    pub(super) root: TableRoot,
     pub(super) model: TableModel,
     pub(super) table_style: ComputedStyle,
     pub(super) columns: ColumnLayout,
@@ -107,7 +106,7 @@ pub(super) fn place_table(
     placement: TablePlacement,
 ) -> TableOutput {
     let TablePlacement {
-        table,
+        root,
         model,
         table_style,
         columns,
@@ -138,13 +137,15 @@ pub(super) fn place_table(
         width: columns.table_width,
         height: grid_height,
     };
-    output.boxes.push(LayoutBox {
-        node: table,
-        border_rect: table_rect,
-        content_rect: table_rect,
-        depth: 0,
-        style: table_style.cell_style(),
-    });
+    if let Some(node) = root.owner {
+        output.boxes.push(LayoutBox {
+            node,
+            border_rect: table_rect,
+            content_rect: table_rect,
+            depth: 0,
+            style: table_style.cell_style(),
+        });
+    }
     add_fill(&mut output.fills, table_rect, table_style, 0);
     if !geometry.collapsed && table_style.border.is_visible() {
         output.strokes.push(BorderStroke {
@@ -445,8 +446,8 @@ impl EdgeInsets {
 }
 
 impl TableFormatter<'_> {
-    pub(super) fn empty_table(&self, table: NodeId, model: TableModel) -> TableOutput {
-        let style = self.styles.get(table);
+    pub(super) fn empty_table(&self, root: TableRoot, model: TableModel) -> TableOutput {
+        let style = root.style;
         let rect = LayoutRect {
             col: 0,
             row: 0,
@@ -456,13 +457,17 @@ impl TableFormatter<'_> {
         TableOutput {
             width: 1,
             height: 1,
-            boxes: vec![LayoutBox {
-                node: table,
-                border_rect: rect,
-                content_rect: rect,
-                depth: 0,
-                style: style.cell_style(),
-            }],
+            boxes: root
+                .owner
+                .map(|node| LayoutBox {
+                    node,
+                    border_rect: rect,
+                    content_rect: rect,
+                    depth: 0,
+                    style: style.cell_style(),
+                })
+                .into_iter()
+                .collect(),
             model,
             ..Default::default()
         }

@@ -47,7 +47,7 @@ pub(super) fn ua_style(
         name.as_str(),
         "head" | "base" | "link" | "meta" | "title" | "style" | "script" | "template"
     ) {
-        Display::None
+        Display::NONE
     } else if matches!(
         name.as_str(),
         "html"
@@ -81,21 +81,21 @@ pub(super) fn ua_style(
             | "h6"
             | "hr"
     ) {
-        Display::Block
+        Display::BLOCK
     } else if name == "li" {
-        Display::ListItem
+        Display::LIST_ITEM
     } else {
         match name.as_str() {
-            "table" => Display::Table,
-            "thead" => Display::TableHeaderGroup,
-            "tbody" => Display::TableRowGroup,
-            "tfoot" => Display::TableFooterGroup,
-            "tr" => Display::TableRow,
-            "td" | "th" => Display::TableCell,
-            "col" => Display::TableColumn,
-            "colgroup" => Display::TableColumnGroup,
-            "caption" => Display::TableCaption,
-            _ => Display::Inline,
+            "table" => Display::TABLE,
+            "thead" => Display::TABLE_HEADER_GROUP,
+            "tbody" => Display::TABLE_ROW_GROUP,
+            "tfoot" => Display::TABLE_FOOTER_GROUP,
+            "tr" => Display::TABLE_ROW,
+            "td" | "th" => Display::TABLE_CELL,
+            "col" => Display::TABLE_COLUMN,
+            "colgroup" => Display::TABLE_COLUMN_GROUP,
+            "caption" => Display::TABLE_CAPTION,
+            _ => Display::INLINE,
         }
     };
     let mut style = ComputedStyle {

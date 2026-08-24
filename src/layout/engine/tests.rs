@@ -384,7 +384,7 @@ fn deeply_nested_inline_content_is_walked_iteratively() {
     styles.insert(
         p,
         ComputedStyle {
-            display: Display::Block,
+            display: Display::BLOCK,
             ..Default::default()
         },
     );
@@ -401,7 +401,7 @@ fn bordered_wide_text_keeps_the_right_border_in_its_cell() {
     styles.insert(
         p,
         ComputedStyle {
-            display: Display::Block,
+            display: Display::BLOCK,
             border: BorderEdges::uniform(BorderSide {
                 style: BorderLineStyle::Solid,
                 ..Default::default()
@@ -448,6 +448,188 @@ fn mixed_inline_and_block_children_create_ordered_anonymous_runs() {
         inner_box.border_rect.row + inner_box.border_rect.height
             <= outer_box.content_rect.row + outer_box.content_rect.height
     );
+}
+
+#[test]
+fn display_contents_keeps_order_and_inheritance_without_a_principal_box() {
+    let mut document = Document::new();
+    let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let before = document.insert_text(Some(outer), "before ");
+    let contents = document.insert_element(
+        Some(outer),
+        "a",
+        ElementNs::Html,
+        vec![
+            crate::core::dom::Attr::plain(
+                "style",
+                "display: contents; color: red; background: blue; font-weight: bold; padding: 2ch",
+            ),
+            crate::core::dom::Attr::plain("href", "/kept"),
+        ],
+    );
+    let inside = document.insert_text(Some(contents), "inside");
+    let after = document.insert_text(Some(outer), " after");
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 1 });
+    assert_eq!(
+        tree.fragments
+            .iter()
+            .map(|fragment| fragment.node)
+            .collect::<Vec<_>>(),
+        vec![before, inside, after]
+    );
+    assert!(
+        !tree
+            .boxes
+            .iter()
+            .any(|layout_box| layout_box.node == contents)
+    );
+    let inside_fragment = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.node == inside)
+        .unwrap();
+    assert_eq!(
+        inside_fragment.style.fg,
+        Some(crate::core::style::Rgba::new(255, 0, 0, 255))
+    );
+    assert!(inside_fragment.style.bold);
+    assert_eq!(inside_fragment.style.bg, None);
+    assert_eq!(tree.links.len(), 1);
+    assert_eq!(tree.links[0].node, contents);
+    assert_eq!(tree.links[0].href, "/kept");
+}
+
+#[test]
+fn inline_flow_root_is_an_atomic_inline_box_without_forced_breaks() {
+    let mut document = Document::new();
+    let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let before = document.insert_text(Some(outer), "before ");
+    let atom = document.insert_element(
+        Some(outer),
+        "span",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain(
+            "style",
+            "display: inline-block; width: 6ch; margin: 0 1ch; border: solid",
+        )],
+    );
+    let first_block = document.insert_element(
+        Some(atom),
+        "div",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain("style", "display: flow-root")],
+    );
+    let first_inside = document.insert_text(Some(first_block), "one");
+    let last_block = document.insert_element(
+        Some(atom),
+        "div",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain("style", "display: grid")],
+    );
+    let last_inside = document.insert_text(Some(last_block), "two");
+    let after = document.insert_text(Some(outer), " after");
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 1 });
+    let atom_box = tree
+        .boxes
+        .iter()
+        .find(|layout_box| layout_box.node == atom)
+        .unwrap();
+    assert_eq!(atom_box.border_rect.width, 6);
+    let before_fragment = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.node == before)
+        .unwrap();
+    let first_fragment = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.node == first_inside)
+        .unwrap();
+    let last_fragment = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.node == last_inside)
+        .unwrap();
+    let after_fragment = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.node == after)
+        .unwrap();
+    assert_eq!(before_fragment.row, after_fragment.row);
+    assert!(first_fragment.row < last_fragment.row);
+    assert_eq!(before_fragment.row, last_fragment.row);
+    assert_eq!(atom_box.border_rect.col, 8);
+    assert!(first_fragment.col >= atom_box.content_rect.col);
+    assert!(last_fragment.col >= atom_box.content_rect.col);
+    assert_eq!(
+        after_fragment.col,
+        atom_box.border_rect.col + atom_box.border_rect.width + 1
+    );
+}
+
+#[test]
+fn improper_table_roles_form_block_and_inline_anonymous_tables() {
+    let mut document = Document::new();
+    let outer = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let block_before = document.insert_text(Some(outer), "before");
+    let first_cell = document.insert_element(
+        Some(outer),
+        "span",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain(
+            "style",
+            "display: table-cell; padding: 0",
+        )],
+    );
+    let first_text = document.insert_text(Some(first_cell), "A");
+    let contents = document.insert_element(
+        Some(outer),
+        "span",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain("style", "display: contents")],
+    );
+    let second_cell = document.insert_element(
+        Some(contents),
+        "span",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain(
+            "style",
+            "display: table-cell; padding: 0",
+        )],
+    );
+    let second_text = document.insert_text(Some(second_cell), "B");
+    let block_after = document.insert_text(Some(outer), "after");
+
+    let line = document.insert_element(Some(outer), "p", ElementNs::Html, vec![]);
+    let inline_before = document.insert_text(Some(line), "left ");
+    let host = document.insert_element(Some(line), "span", ElementNs::Html, vec![]);
+    let inline_cell = document.insert_element(
+        Some(host),
+        "span",
+        ElementNs::Html,
+        vec![crate::core::dom::Attr::plain(
+            "style",
+            "display: table-cell; padding: 0",
+        )],
+    );
+    let inline_text = document.insert_text(Some(inline_cell), "cell");
+    let inline_after = document.insert_text(Some(line), " right");
+
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 8 });
+    let fragment = |node| {
+        tree.fragments
+            .iter()
+            .find(|item| item.node == node)
+            .unwrap()
+    };
+    assert!(fragment(block_before).row < fragment(first_text).row);
+    assert_eq!(fragment(first_text).row, fragment(second_text).row);
+    assert!(fragment(second_text).row < fragment(block_after).row);
+    assert_eq!(fragment(inline_before).row, fragment(inline_text).row);
+    assert_eq!(fragment(inline_text).row, fragment(inline_after).row);
 }
 
 #[test]
