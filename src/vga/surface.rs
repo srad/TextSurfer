@@ -9,9 +9,12 @@
 
 use ratatui::buffer::Cell;
 use ratatui::style::{Color, Modifier};
+use unicode_width::UnicodeWidthChar;
 
 use crate::core::geom::Size;
-use crate::core::style::Rgb;
+use crate::core::style::{Palette, Rgb};
+use crate::layout::LayoutRect;
+use crate::paint::{ScaledTextRun, resolve_cell_style};
 use crate::ui::theme::rgb_of;
 
 use super::font::{CELL_H, CELL_W, GlyphWidth, glyph};
@@ -56,6 +59,7 @@ pub struct CellState {
     pub bg: Rgb,
     /// Whether to fill [`UNDERLINE_ROW`].
     pub underline: bool,
+    pub strike: bool,
 }
 
 /// A cell grid backed by a pixel buffer.
@@ -68,6 +72,7 @@ pub struct Surface {
     cells: Vec<CellState>,
     pixels: Vec<u32>,
     cursor: Option<(u16, u16)>,
+    overlay_cells: Vec<(u16, u16)>,
 }
 
 impl Surface {
@@ -89,6 +94,7 @@ impl Surface {
             cells: Vec::new(),
             pixels: Vec::new(),
             cursor: None,
+            overlay_cells: Vec::new(),
         };
         surface.resize(Size { cols, rows });
         surface
@@ -120,6 +126,7 @@ impl Surface {
             fg: self.default_fg,
             bg: self.default_bg,
             underline: false,
+            strike: false,
         }
     }
 
@@ -153,6 +160,7 @@ impl Surface {
         self.pixels = vec![pack(self.default_bg); width * height];
         // The old position may not exist in the new grid; ratatui re-sets it next draw.
         self.cursor = None;
+        self.overlay_cells.clear();
     }
 
     /// Reset every cell to blank.
@@ -160,6 +168,7 @@ impl Surface {
         let blank = self.blank();
         self.cells.fill(blank);
         self.pixels.fill(pack(self.default_bg));
+        self.overlay_cells.clear();
         // Filling the buffer wiped the caret; put it back where it was.
         if let Some((col, row)) = self.cursor {
             self.paint_cell(col, row);
@@ -202,6 +211,9 @@ impl Surface {
         if modifier.contains(Modifier::BOLD) {
             fg = brighten(fg);
         }
+        if modifier.contains(Modifier::DIM) {
+            fg = fg.blend(bg, 0.5);
+        }
         if modifier.contains(Modifier::REVERSED) {
             core::mem::swap(&mut fg, &mut bg);
         }
@@ -210,6 +222,7 @@ impl Surface {
             fg,
             bg,
             underline: modifier.contains(Modifier::UNDERLINED),
+            strike: modifier.contains(Modifier::CROSSED_OUT),
         }
     }
 
@@ -252,7 +265,7 @@ impl Surface {
         let span = (shape.width().pixels()).min((self.cols - col) as usize * CELL_W);
 
         for y in 0..CELL_H {
-            let lit_row = state.underline && y == UNDERLINE_ROW;
+            let lit_row = state.underline && y == UNDERLINE_ROW || state.strike && y == CELL_H / 2;
             for x in 0..span {
                 let colour = if lit_row || shape.pixel(x, y) { fg } else { bg };
                 // Each source pixel becomes a scale x scale block.
@@ -265,6 +278,127 @@ impl Surface {
             }
         }
     }
+
+    pub fn clear_scaled_overlay(&mut self) {
+        let mut cells = std::mem::take(&mut self.overlay_cells);
+        cells.sort_unstable();
+        cells.dedup();
+        for (col, row) in cells {
+            self.paint_cell(col, row);
+        }
+    }
+
+    pub fn draw_scaled_text(
+        &mut self,
+        runs: &[ScaledTextRun],
+        origin: (u16, u16),
+        scroll: usize,
+        clip: LayoutRect,
+        occlusions: &[LayoutRect],
+        palette: Palette,
+    ) {
+        for run in runs {
+            let scale = usize::from(run.style.scale);
+            if scale <= 1 || run.rect.row < scroll {
+                continue;
+            }
+            let screen_row =
+                usize::from(origin.1).saturating_add(run.rect.row.saturating_sub(scroll));
+            let mut screen_col = usize::from(origin.0).saturating_add(run.rect.col);
+            let style = resolve_cell_style(run.style, palette);
+            for ch in run.text.chars() {
+                let shape = glyph(ch);
+                let base_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if base_width == 0 {
+                    continue;
+                }
+                let cell_width = base_width.saturating_mul(scale);
+                let rect = LayoutRect {
+                    col: screen_col,
+                    row: screen_row,
+                    width: cell_width,
+                    height: scale,
+                };
+                if run.ink
+                    && contains(clip, rect)
+                    && !occlusions
+                        .iter()
+                        .any(|occlusion| intersects(*occlusion, rect))
+                {
+                    self.blit_scaled(shape, rect.col, rect.row, scale, style);
+                    for row in rect.row..rect.row.saturating_add(rect.height) {
+                        for col in rect.col..rect.col.saturating_add(rect.width) {
+                            if let (Ok(col), Ok(row)) = (u16::try_from(col), u16::try_from(row)) {
+                                self.overlay_cells.push((col, row));
+                            }
+                        }
+                    }
+                }
+                screen_col = screen_col.saturating_add(cell_width);
+            }
+        }
+        if let Some((col, row)) = self.cursor {
+            self.paint_cell(col, row);
+        }
+    }
+
+    fn blit_scaled(
+        &mut self,
+        shape: super::font::Glyph,
+        col: usize,
+        row: usize,
+        text_scale: usize,
+        style: crate::core::style::CellStyle,
+    ) {
+        let mut fg = style.fg.map_or(self.default_fg, |color| color.rgb);
+        let mut bg = style.bg.unwrap_or(self.default_bg);
+        if style.bold {
+            fg = brighten(fg);
+        }
+        if style.dim {
+            fg = fg.blend(bg, 0.5);
+        }
+        if style.reverse {
+            core::mem::swap(&mut fg, &mut bg);
+        }
+        let fg = pack(fg);
+        let (surface_width, _) = self.pixel_size();
+        let pixel_scale = text_scale.saturating_mul(self.scale);
+        let origin_x = col.saturating_mul(CELL_W).saturating_mul(self.scale);
+        let origin_y = row.saturating_mul(CELL_H).saturating_mul(self.scale);
+        for y in 0..CELL_H {
+            let decorated =
+                style.underline && y == UNDERLINE_ROW || style.strike && y == CELL_H / 2;
+            for x in 0..shape.width().pixels() {
+                if !decorated && !shape.pixel(x, y) {
+                    continue;
+                }
+                for dy in 0..pixel_scale {
+                    let line = (origin_y + y * pixel_scale + dy) * surface_width;
+                    for dx in 0..pixel_scale {
+                        let at = line + origin_x + x * pixel_scale + dx;
+                        if let Some(pixel) = self.pixels.get_mut(at) {
+                            *pixel = fg;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn contains(outer: LayoutRect, inner: LayoutRect) -> bool {
+    inner.col >= outer.col
+        && inner.row >= outer.row
+        && inner.col.saturating_add(inner.width) <= outer.col.saturating_add(outer.width)
+        && inner.row.saturating_add(inner.height) <= outer.row.saturating_add(outer.height)
+}
+
+fn intersects(a: LayoutRect, b: LayoutRect) -> bool {
+    a.col < b.col.saturating_add(b.width)
+        && b.col < a.col.saturating_add(a.width)
+        && a.row < b.row.saturating_add(b.height)
+        && b.row < a.row.saturating_add(a.height)
 }
 
 /// Pack a colour into softbuffer's `0x00RRGGBB` word.

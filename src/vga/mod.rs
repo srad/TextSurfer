@@ -1,6 +1,6 @@
 //! The framebuffer frontend: the chrome rendered into a window with our own font.
 //!
-//! This is a second frontend, not a replacement for the terminal one. It exists
+//! This is the default interactive frontend; the terminal remains a compatibility fallback. It exists
 //! because the DOS look is mostly the *font*, and inside a terminal emulator the font
 //! belongs to the user: `ui::Theme` fixes the palette, but every glyph renders in
 //! whatever face the terminal was configured with. Owning a framebuffer means owning

@@ -3,6 +3,7 @@ mod counters;
 mod declaration;
 mod document;
 mod media;
+mod typography;
 
 #[cfg(test)]
 mod tests;

@@ -17,6 +17,7 @@ use super::content::{ContentSpec, default_marker_text, parse_content, resolve_co
 use super::counters::{AuthoredCounterOps, CounterScopes};
 use super::declaration::apply_declaration;
 use super::media::{MediaContext, active_style_rules};
+use super::typography::apply_font_size;
 
 pub(super) fn cascade_document(
     sheets: &[StyleSheet],
@@ -30,6 +31,7 @@ pub(super) fn cascade_document(
     let mut counters = CounterScopes::default();
     let mut markers: Vec<PendingMarker> = Vec::new();
     let mut hidden_depth: Option<usize> = None;
+    let mut root_font_size = media.root_font_size;
     for (id, depth) in elements_in_document_order(document) {
         counters.enter(depth);
         if hidden_depth.is_some_and(|hidden| depth <= hidden) {
@@ -75,9 +77,25 @@ pub(super) fn cascade_document(
         }
         declarations
             .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
+        for (_, _, _, declaration) in &declarations {
+            apply_font_size(
+                &mut style,
+                parent_style,
+                declaration,
+                media.with_font_sizes(
+                    parent_style.map_or(root_font_size, |parent| parent.font_size),
+                    root_font_size,
+                ),
+            );
+        }
+        if parent_style.is_none() {
+            root_font_size = style.font_size;
+        }
+        style.text_presentation = style.font_size.presentation(media.text_rendering);
+        let element_media = media.with_font_sizes(style.font_size, root_font_size);
         let mut authored_counters = AuthoredCounterOps::default();
         for (_, _, _, declaration) in declarations {
-            apply_declaration(&mut style, parent_style, &declaration, media);
+            apply_declaration(&mut style, parent_style, &declaration, element_media);
             authored_counters.apply(&declaration);
         }
         style.display = computed_display(document, id, style.display);
@@ -106,7 +124,7 @@ pub(super) fn cascade_document(
                 &candidates,
                 document,
                 id,
-                media,
+                element_media,
                 which,
                 style,
                 &counters,
@@ -122,7 +140,7 @@ pub(super) fn cascade_document(
                 &candidates,
                 document,
                 id,
-                media,
+                element_media,
                 PseudoElement::Marker,
                 style,
                 &counters,
@@ -225,6 +243,8 @@ fn cascade_pseudo(
         underline: origin.underline,
         strike: origin.strike,
         reverse: origin.reverse,
+        font_size: origin.font_size,
+        text_presentation: origin.text_presentation,
         list_style_type: origin.list_style_type,
         list_style_position: origin.list_style_position,
         border_collapse: origin.border_collapse,
@@ -236,8 +256,13 @@ fn cascade_pseudo(
     };
     let mut style = inherited;
     let mut content = None;
+    for (_, _, _, declaration) in &declarations {
+        apply_font_size(&mut style, Some(inherited), declaration, media);
+    }
+    style.text_presentation = style.font_size.presentation(media.text_rendering);
+    let pseudo_media = media.with_font_sizes(style.font_size, media.root_font_size);
     for (_, _, _, declaration) in declarations {
-        apply_declaration(&mut style, Some(inherited), &declaration, media);
+        apply_declaration(&mut style, Some(inherited), &declaration, pseudo_media);
         if declaration.name == "content"
             && let Some(spec) = parse_content(&declaration.value)
         {

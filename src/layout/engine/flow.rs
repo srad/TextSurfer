@@ -589,20 +589,27 @@ pub(super) fn append_inline(
                 current_col = current_col.saturating_add(glyph.width);
                 continue;
             }
+            if glyph.style.scale == 0 {
+                continue;
+            }
             let baseline = current_row + baseline;
+            let glyph_row =
+                baseline.saturating_sub(usize::from(glyph.style.scale).saturating_sub(1));
             if let Some(last) = tree.fragments.last_mut()
                 && last.node == glyph.node
-                && last.row == baseline
+                && last.row == glyph_row
                 && last.depth == glyph.depth
                 && last.style == glyph.style
-                && last.col + UnicodeWidthStr::width(last.text.as_str()) == current_col
+                && last.col
+                    + UnicodeWidthStr::width(last.text.as_str()) * usize::from(last.style.scale)
+                    == current_col
             {
                 last.text.push_str(&glyph.text);
             } else {
                 tree.fragments.push(TextFragment {
                     node: glyph.node,
                     col: current_col,
-                    row: baseline,
+                    row: glyph_row,
                     text: glyph.text,
                     depth: glyph.depth,
                     style: glyph.style,

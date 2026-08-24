@@ -510,6 +510,9 @@ fn append_line(
 ) {
     let mut col = start;
     for glyph in line {
+        if glyph.style.scale == 0 {
+            continue;
+        }
         if col.saturating_add(glyph.width) > clip_right {
             break;
         }
@@ -517,7 +520,10 @@ fn append_line(
             Some(fragment)
                 if fragment.node == glyph.node
                     && fragment.row == row
-                    && fragment.col + UnicodeWidthStr::width(fragment.text.as_str()) == col
+                    && fragment.col
+                        + UnicodeWidthStr::width(fragment.text.as_str())
+                            * usize::from(fragment.style.scale)
+                        == col
                     && fragment.style == glyph.style
                     && fragment.clip_right == clip_right =>
             {
@@ -578,7 +584,8 @@ pub(super) fn append_cell_content(
                     &mut output.fragments,
                     std::slice::from_ref(glyph),
                     col,
-                    row.saturating_add(baseline),
+                    row.saturating_add(baseline)
+                        .saturating_sub(usize::from(glyph.style.scale).saturating_sub(1)),
                     clip_right,
                     depth,
                 );

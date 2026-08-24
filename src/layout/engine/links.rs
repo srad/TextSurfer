@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::style::StyleTree;
 
@@ -26,17 +24,16 @@ pub(super) fn assign_link_rects(document: &Document, tree: &mut BoxTree) {
         else {
             continue;
         };
-        let rect = LayoutRect {
-            col: fragment.col,
-            row: fragment.row,
-            width: UnicodeWidthStr::width(fragment.text.as_str()),
-            height: 1,
-        };
+        let rect = fragment.rect();
         if rect.width == 0 {
             continue;
         }
         match rects[index].last_mut() {
-            Some(last) if last.row == rect.row && last.col + last.width == rect.col => {
+            Some(last)
+                if last.row == rect.row
+                    && last.height == rect.height
+                    && last.col + last.width == rect.col =>
+            {
                 last.width += rect.width;
             }
             _ => rects[index].push(rect),

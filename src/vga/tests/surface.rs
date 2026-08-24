@@ -1,8 +1,11 @@
 use ratatui::buffer::Cell;
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
-use crate::core::style::Rgb;
+use crate::core::style::{CellStyle, Palette, Rgb, Rgba};
+use crate::layout::LayoutRect;
+use crate::paint::ScaledTextRun;
 
 use crate::vga::font::{CELL_H, CELL_W, CP437_TO_UNICODE, GlyphWidth, glyph};
 use crate::vga::{Surface, SurfaceConfig};
@@ -265,4 +268,171 @@ fn replacing_a_wide_glyph_clears_its_second_cell() {
     surface.set_cell(0, 0, &cell('.', Style::default()));
     assert!(cell_lit(&surface, 0, 0), "the narrow glyph is there");
     assert!(!cell_lit(&surface, 1, 0), "the old right half is gone");
+}
+
+#[test]
+fn scaled_overlay_uses_integer_cells_and_restores_the_shadow_grid() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let mut surface = Surface::new(config(6, 4, 1));
+    let run = ScaledTextRun {
+        node,
+        rect: LayoutRect {
+            col: 1,
+            row: 1,
+            width: 2,
+            height: 2,
+        },
+        text: "A".to_string(),
+        style: CellStyle {
+            fg: Some(Rgba::opaque(FG)),
+            bg: Some(BG),
+            scale: 2,
+            ..Default::default()
+        },
+        depth: 0,
+        ink: true,
+    };
+    surface.draw_scaled_text(
+        &[run],
+        (0, 0),
+        0,
+        LayoutRect {
+            col: 0,
+            row: 0,
+            width: 6,
+            height: 4,
+        },
+        &[],
+        Palette {
+            text: FG,
+            background: BG,
+            link: FG,
+        },
+    );
+    assert!(cell_lit(&surface, 1, 1));
+    assert!(cell_lit(&surface, 2, 2));
+    let dump = (CELL_H..CELL_H * 3)
+        .map(|y| {
+            let row = (CELL_W..CELL_W * 3)
+                .map(|x| {
+                    if pixel_at(&surface, x, y) == packed(FG) {
+                        '#'
+                    } else {
+                        '.'
+                    }
+                })
+                .collect::<String>();
+            format!("{row}\n")
+        })
+        .collect::<String>();
+    insta::assert_snapshot!(dump);
+    surface.clear_scaled_overlay();
+    assert!(surface.pixels().iter().all(|pixel| *pixel == packed(BG)));
+}
+
+#[test]
+fn dim_blends_before_reverse_and_strike_reaches_the_surface() {
+    let surface = surface();
+    let style = Style::default()
+        .fg(Color::Rgb(200, 200, 200))
+        .bg(Color::Rgb(0, 0, 100))
+        .add_modifier(Modifier::DIM | Modifier::REVERSED | Modifier::CROSSED_OUT);
+    let state = surface.resolve(&cell(' ', style));
+    assert_eq!(state.fg, Rgb::new(0, 0, 100));
+    assert_eq!(state.bg, Rgb::new(100, 100, 150));
+    assert!(state.strike);
+}
+
+#[test]
+fn partially_scrolled_scaled_glyphs_are_clipped_whole() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let mut surface = Surface::new(config(4, 3, 1));
+    let run = ScaledTextRun {
+        node,
+        rect: LayoutRect {
+            col: 0,
+            row: 0,
+            width: 2,
+            height: 2,
+        },
+        text: "A".to_string(),
+        style: CellStyle {
+            fg: Some(Rgba::opaque(FG)),
+            scale: 2,
+            ..Default::default()
+        },
+        depth: 0,
+        ink: true,
+    };
+    surface.draw_scaled_text(
+        &[run],
+        (0, 0),
+        1,
+        LayoutRect {
+            col: 0,
+            row: 0,
+            width: 4,
+            height: 3,
+        },
+        &[],
+        Palette {
+            text: FG,
+            background: BG,
+            link: FG,
+        },
+    );
+    assert!(surface.pixels().iter().all(|pixel| *pixel == packed(BG)));
+}
+
+#[test]
+fn scaled_overlay_obeys_occlusion_and_repaints_the_cursor_last() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let run = ScaledTextRun {
+        node,
+        rect: LayoutRect {
+            col: 1,
+            row: 1,
+            width: 2,
+            height: 2,
+        },
+        text: "A".to_string(),
+        style: CellStyle {
+            fg: Some(Rgba::opaque(FG)),
+            scale: 2,
+            ..Default::default()
+        },
+        depth: 0,
+        ink: true,
+    };
+    let clip = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 4,
+        height: 4,
+    };
+    let palette = Palette {
+        text: FG,
+        background: BG,
+        link: FG,
+    };
+    let mut surface = Surface::new(config(4, 4, 1));
+    surface.draw_scaled_text(
+        std::slice::from_ref(&run),
+        (0, 0),
+        0,
+        clip,
+        &[run.rect],
+        palette,
+    );
+    assert!(surface.pixels().iter().all(|pixel| *pixel == packed(BG)));
+    surface.set_cursor(Some((1, 1)));
+    surface.draw_scaled_text(std::slice::from_ref(&run), (0, 0), 0, clip, &[], palette);
+    for y in CELL_H..CELL_H * 2 {
+        for x in CELL_W..CELL_W * 2 {
+            assert_eq!(pixel_at(&surface, x, y), packed(FG));
+        }
+    }
 }

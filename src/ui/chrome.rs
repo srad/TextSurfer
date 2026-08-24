@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::Theme;
 use crate::ui::widgets::content::{Content, ContentLines};
-use crate::ui::widgets::menu::{MenuBar, MenuPopup};
+use crate::ui::widgets::menu::{MenuBar, MenuPopup, popup_rect};
 use crate::ui::widgets::status::{StatusBar, StatusView};
 use crate::ui::widgets::tabs::{TabBar, TabChip, active_span};
 use crate::ui::widgets::toolbar::{FIELD_TEXT, Toolbar};
@@ -153,6 +153,25 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
         && let Some(toolbar) = layout.toolbar
     {
         frame.set_cursor_position(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
+    }
+}
+
+pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    view.geometry.layout(area).content.and_then(|rect| {
+        (rect.width >= 2 && rect.height >= 2).then_some(Rect {
+            x: rect.x + 1,
+            y: rect.y + 1,
+            width: rect.width - 2,
+            height: rect.height - 2,
+        })
+    })
+}
+
+pub fn occlusion_rects(view: &ChromeView<'_>, area: Rect) -> Vec<Rect> {
+    if view.menu_open {
+        vec![popup_rect(area, area, view.menu_active)]
+    } else {
+        Vec::new()
     }
 }
 

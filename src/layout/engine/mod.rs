@@ -78,6 +78,18 @@ pub struct TextFragment {
     pub style: CellStyle,
 }
 
+impl TextFragment {
+    pub fn rect(&self) -> LayoutRect {
+        LayoutRect {
+            col: self.col,
+            row: self.row,
+            width: UnicodeWidthStr::width(self.text.as_str())
+                .saturating_mul(usize::from(self.style.scale)),
+            height: usize::from(self.style.scale),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkBox {
     pub node: NodeId,

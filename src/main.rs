@@ -24,14 +24,16 @@ struct Cli {
     user_agent: Option<String>,
     #[arg(long, value_enum, default_value_t = JsMode::Auto)]
     js: JsMode,
-    /// Render the page to stdout and exit instead of opening the terminal UI.
+    /// Render the page to stdout and exit instead of opening an interactive frontend.
     #[arg(long)]
     dump: bool,
-    /// Open a window with a CP437 8x16 face instead of using the host terminal.
+    /// Explicitly select the window with its CP437/Unifont 8x16 faces.
     /// Requires the `vga` feature.
     #[arg(long)]
     vga: bool,
-    /// Integer pixel multiplier for `--vga`, so the 8x16 cell stays legible on a
+    #[arg(long)]
+    terminal: bool,
+    /// Integer pixel multiplier for VGA, so the 8x16 cell stays legible on a
     /// high-density display.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=8))]
     vga_scale: u8,
@@ -49,6 +51,35 @@ enum JsMode {
     Auto,
     On,
     Off,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrontendChoice {
+    Terminal,
+    Vga,
+}
+
+fn frontend_choice(cli: &Cli) -> io::Result<FrontendChoice> {
+    if cli.terminal && (cli.vga || cli.vga_scale != 1) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "--terminal conflicts with --vga and a non-default --vga-scale",
+        ));
+    }
+    if cli.terminal {
+        return Ok(FrontendChoice::Terminal);
+    }
+    if cli.vga || cli.vga_scale != 1 {
+        return Ok(FrontendChoice::Vga);
+    }
+    #[cfg(feature = "vga")]
+    {
+        Ok(FrontendChoice::Vga)
+    }
+    #[cfg(not(feature = "vga"))]
+    {
+        Ok(FrontendChoice::Terminal)
+    }
 }
 
 fn main() -> io::Result<()> {
@@ -75,7 +106,7 @@ fn main() -> io::Result<()> {
         };
         return dump(fetch, url, cli.cols, cli.rows);
     }
-    if cli.vga {
+    if frontend_choice(&cli)? == FrontendChoice::Vga {
         return run_vga(fetch, &cli);
     }
     ratatui::run(|terminal| {

@@ -24,6 +24,17 @@ pub fn title_x(menu: usize) -> u16 {
     x
 }
 
+pub fn popup_rect(area: Rect, bounds: Rect, menu: usize) -> Rect {
+    let items = MENUS[menu];
+    let max_item = items.iter().map(|item| width(item)).max().unwrap_or(1);
+    Rect {
+        x: area.x + title_x(menu),
+        y: area.y + 1,
+        width: (max_item + 5).min(bounds.width.saturating_sub(area.x + title_x(menu))),
+        height: (items.len() as u16 + 2).min(bounds.height.saturating_sub(area.y + 1)),
+    }
+}
+
 pub struct MenuBar<'a> {
     pub active: usize,
     pub open: bool,
@@ -86,13 +97,7 @@ pub struct MenuPopup<'a> {
 impl Widget for MenuPopup<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let items = MENUS[self.menu];
-        let max_item = items.iter().map(|item| width(item)).max().unwrap_or(1);
-        let rect = Rect {
-            x: area.x + title_x(self.menu),
-            y: area.y + 1,
-            width: (max_item + 5).min(buf.area.width.saturating_sub(area.x + title_x(self.menu))),
-            height: (items.len() as u16 + 2).min(buf.area.height.saturating_sub(area.y + 1)),
-        };
+        let rect = popup_rect(area, buf.area, self.menu);
         if rect.width < 2 || rect.height < 2 {
             return;
         }

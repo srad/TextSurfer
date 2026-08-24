@@ -15,7 +15,7 @@ use url::Url;
 
 use crate::core::dom::SharedDocument;
 use crate::core::geom::Size;
-use crate::core::style::Palette;
+use crate::core::style::{Palette, TextRendering};
 use crate::css::{ColorScheme, MediaContext, MediaQueryList, StyleSheet};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::net::{FetchResponse, ResourceId};
@@ -40,6 +40,7 @@ pub struct PageLoadOptions {
     pub scripting: bool,
     pub color_scheme: ColorScheme,
     pub started: Duration,
+    pub text_rendering: TextRendering,
 }
 
 enum RootSource {
@@ -113,6 +114,7 @@ impl PageLoad {
             scripting,
             color_scheme,
             started,
+            text_rendering,
         } = options;
         let outcome = Html5everParser::new(scripting).parse_document(source);
         let effective_base = outcome
@@ -142,7 +144,8 @@ impl PageLoad {
                 .with_palette(palette)
                 .with_scripting(scripting)
                 .with_color_scheme(color_scheme)
-                .with_viewport(viewport),
+                .with_viewport(viewport)
+                .with_text_rendering(text_rendering),
             palette,
             deadline: started.saturating_add(STYLESHEET_DEADLINE),
             first_painted: false,

@@ -117,6 +117,31 @@ proptest! {
     }
 
     #[test]
+    fn scaled_text_rectangles_never_overlap(
+        text in "[a-z ]{0,80}",
+        width in 8u16..60,
+    ) {
+        let mut document = Document::new();
+        let heading = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+        document.insert_text(Some(heading), &text);
+        let styles = BasicCascade.apply(
+            &[],
+            &document,
+            MediaContext::screen().with_text_rendering(crate::core::style::TextRendering::ScaledBitmap),
+        );
+        let tree = TaffyLayoutEngine.layout(
+            &document,
+            &styles,
+            Size { cols: width, rows: 20 },
+        );
+        for (index, left) in tree.fragments.iter().enumerate() {
+            for right in tree.fragments.iter().skip(index + 1) {
+                prop_assert!(disjoint(left.rect(), right.rect()));
+            }
+        }
+    }
+
+    #[test]
     fn boxes_form_a_laminar_family(
         text in "[a-z ]{0,80}",
         depth in 0usize..6,

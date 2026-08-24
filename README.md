@@ -36,9 +36,8 @@ Ready                              https://example.com
 
 ## Features
 
-**Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting the human terminal smoke;
-M1-C done, awaiting the human terminal smoke; M1-D in progress — tables, generated content, length
-units, outer/inner display modes and presentational HTML done; terminal typography next)**
+**Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting human smoke;
+M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; terminal smoke deferred)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -93,26 +92,26 @@ units, outer/inner display modes and presentational HTML done; terminal typograp
   behavior remain M2/M3 work
 - `--dump` renders a page to stdout and exits through the same stylesheet loader and painter the TUI
   uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
-- **A second, optional frontend** behind the non-default `vga` feature: `--vga` opens a window and
+- **The default VGA frontend** behind the default `vga` feature opens a window and
   renders the same chrome with **our own CP437 8x16 face** instead of the host terminal's font. The
   DOS look is mostly the font, and inside a terminal the font belongs to the user — owning a
   framebuffer is the only way to own the face, the cell metric and the palette together. It also
   doubles the usable columns (1280x800 is 160x50). Glyphs come from CP437 first, so the chrome stays
   authentically DOS, then GNU Unifont for the rest of the BMP — curly quotes, dashes and non-Latin
   scripts fall outside the code page and would otherwise render as replacement boxes. Both faces are
-  8x16, with Unifont's wide glyphs spanning exactly two cells. The terminal build remains the
-  default and gains no dependencies
+  8x16, with Unifont's wide glyphs spanning exactly two cells. The terminal fallback is selected
+  with `--terminal`; `--vga` remains a compatibility alias. A
+  `--no-default-features` build keeps the terminal-only dependency profile
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): terminal typography and
-scaled headings. After M1-D: links/forms/search
-(M2), mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): links/forms/search (M2),
+then mouse (M3), and the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 
 ```
- main.rs — terminal adapter: CLI · event loop · crossterm→core events
+ main.rs — frontend adapter: CLI · VGA/terminal selection · event mapping and loops
    ▼
  app — I/O-free composition root · controller · tabs · Navigate adapter · start page
    ├──────────────► ui — ratatui chrome and widgets
@@ -137,12 +136,12 @@ uses OS-native certificate roots.
 
 ```console
 $ cargo build --release
-$ cargo run --release            # start page
-$ cargo run -- --url https://example.com
+$ cargo run --release            # VGA window and start page
+$ cargo run --release -- --terminal   # frozen terminal compatibility frontend
+$ cargo run -- --url https://example.com   # VGA window at a URL
 $ cargo run -- --user-agent TextSurferDev/1 --js off
 $ cargo run -- --dump --cols 60 --rows 24 --url https://example.com   # render to stdout, no TUI
-$ cargo run --features vga -- --vga --url https://example.com         # window, CP437 8x16 face
-$ cargo run --features vga -- --vga --vga-scale 2                     # 2x pixels, for HiDPI
+$ cargo run --release -- --vga-scale 2                                # 2x pixels, for HiDPI
 ```
 
 Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurfer falls back
@@ -190,9 +189,11 @@ Gates are local-only (no CI) and must be green before anything is marked done:
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --no-default-features --all-targets -- -D warnings
 cargo test
 cargo test --features js
 cargo test --features vga
+cargo test --no-default-features
 ```
 
 The suite covers unit, integration, corpus and binary-boundary behavior without network access or
@@ -206,8 +207,7 @@ Status, decisions, acceptance criteria and the updates log live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Milestones: M0
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
 style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
-awaiting the human terminal smoke · M1-D tables, generated content/markers, length units and
-outer/inner display modes implemented, with legacy HTML styling and terminal typography still open ·
+awaiting human smoke · M1-D layout completeness implemented, awaiting the human VGA smoke ·
 M2 tabs/keyboard/forms · M3 mouse · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries

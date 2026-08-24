@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::core::style::{CellStyle, Palette, Rgb, Rgba};
+use crate::core::style::{CellStyle, Palette, Rgb};
 use crate::layout::LayoutRect;
 
-use super::contrast::{legible_foreground, merge_style};
+use super::contrast::{merge_style, resolve_cell_style};
 use super::{PaintedRow, PaintedSpan};
 
 pub(super) struct RowBuffer {
@@ -35,6 +35,10 @@ impl RowBuffer {
         );
     }
 
+    pub(super) fn style_at(&self, col: usize) -> Option<CellStyle> {
+        self.styles.get(col).copied()
+    }
+
     fn fill_background(&mut self, from: usize, to: usize, background: Rgb) {
         for index in from..to.min(self.styles.len()) {
             self.styles[index].bg = Some(background);
@@ -49,23 +53,13 @@ impl RowBuffer {
                 continue;
             }
             let mut text = cell.clone();
-            let mut style = self.styles[index];
-            if let Some(foreground) = style.fg {
-                let background = style.bg.unwrap_or(palette.background);
-                if foreground.alpha == 0 {
-                    text = " ".repeat(UnicodeWidthStr::width(text.as_str()));
-                    style.fg = None;
-                    style.bold = false;
-                    style.underline = false;
-                    style.strike = false;
-                    style.reverse = false;
-                } else {
-                    style.fg = Some(Rgba::opaque(legible_foreground(
-                        foreground.composite_over(background),
-                        background,
-                        palette,
-                    )));
-                }
+            let source_style = self.styles[index];
+            let style = resolve_cell_style(source_style, palette);
+            if source_style
+                .fg
+                .is_some_and(|foreground| foreground.alpha == 0)
+            {
+                text = " ".repeat(UnicodeWidthStr::width(text.as_str()));
             }
             let blank = text.chars().all(char::is_whitespace) && style == CellStyle::default();
             match spans.last_mut() {

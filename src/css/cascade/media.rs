@@ -1,5 +1,5 @@
 use crate::core::geom::Size;
-use crate::core::style::{CellMetric, LengthAxis, Palette};
+use crate::core::style::{CellMetric, CssLength, FontSize, LengthAxis, Palette, TextRendering};
 use crate::css::StyleSheet;
 use crate::css::parser::{
     ColorScheme, CssRule, DimensionCondition, MediaAxis, MediaBound, MediaComparison, MediaFeature,
@@ -22,6 +22,9 @@ pub struct MediaContext {
     pub color_scheme: ColorScheme,
     pub viewport: Size,
     pub cell_metric: CellMetric,
+    pub text_rendering: TextRendering,
+    pub font_size: FontSize,
+    pub root_font_size: FontSize,
 }
 
 impl MediaContext {
@@ -34,6 +37,9 @@ impl MediaContext {
             color_scheme: ColorScheme::Dark,
             viewport: Size { cols: 80, rows: 24 },
             cell_metric: CellMetric::DEFAULT,
+            text_rendering: TextRendering::Cell,
+            font_size: FontSize::INITIAL,
+            root_font_size: FontSize::INITIAL,
         }
     }
 
@@ -46,6 +52,9 @@ impl MediaContext {
             color_scheme: ColorScheme::Dark,
             viewport: Size { cols: 80, rows: 24 },
             cell_metric: CellMetric::DEFAULT,
+            text_rendering: TextRendering::Cell,
+            font_size: FontSize::INITIAL,
+            root_font_size: FontSize::INITIAL,
         }
     }
 
@@ -76,6 +85,47 @@ impl MediaContext {
         Self {
             cell_metric,
             ..self
+        }
+    }
+
+    pub fn with_text_rendering(self, text_rendering: TextRendering) -> Self {
+        Self {
+            text_rendering,
+            ..self
+        }
+    }
+
+    pub fn with_font_sizes(self, font_size: FontSize, root_font_size: FontSize) -> Self {
+        Self {
+            font_size,
+            root_font_size,
+            ..self
+        }
+    }
+
+    pub fn css_pixels_for_font_size(self, length: CssLength, parent: FontSize) -> f64 {
+        self.cell_metric.css_pixels_with_fonts(
+            length,
+            self.viewport,
+            parent.px(),
+            self.root_font_size.px(),
+        )
+    }
+
+    pub fn resolve_cells(self, length: CssLength, axis: LengthAxis) -> usize {
+        let (font, root) = self.layout_font_sizes();
+        self.cell_metric
+            .resolve_cells_with_fonts(length, axis, self.viewport, font, root)
+    }
+
+    pub(super) fn layout_font_sizes(self) -> (f64, f64) {
+        if self.text_rendering == TextRendering::Cell {
+            (
+                f64::from(self.cell_metric.root_font_px()),
+                f64::from(self.cell_metric.root_font_px()),
+            )
+        } else {
+            (self.font_size.px(), self.root_font_size.px())
         }
     }
 }

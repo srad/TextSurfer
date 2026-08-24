@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use crate::core::focus::Focus;
 use crate::core::geom::Size;
+use crate::core::style::TextRendering;
 use crate::ui::editing::EditBuffer;
 use crate::ui::mouse::ChromeGeometry;
 
@@ -38,6 +39,7 @@ pub struct App {
     menu_item: usize,
     focus_before_menu: Focus,
     now: Duration,
+    text_rendering: TextRendering,
 }
 
 impl Default for App {
@@ -52,6 +54,10 @@ impl App {
     }
 
     pub fn with_net(net: Arc<dyn Navigate>) -> Self {
+        Self::with_net_and_rendering(net, TextRendering::Cell)
+    }
+
+    pub fn with_net_and_rendering(net: Arc<dyn Navigate>, text_rendering: TextRendering) -> Self {
         let geometry = ChromeGeometry::for_size(DEFAULT_SIZE);
         Self {
             focus: Focus::Address,
@@ -70,6 +76,7 @@ impl App {
             menu_item: 0,
             focus_before_menu: Focus::Address,
             now: Duration::ZERO,
+            text_rendering,
         }
     }
 

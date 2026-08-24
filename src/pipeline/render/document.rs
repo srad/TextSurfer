@@ -1,6 +1,6 @@
 use crate::core::dom::{Document, SharedDocument};
 use crate::core::geom::Size;
-use crate::core::style::{Palette, StyleTree};
+use crate::core::style::{Palette, StyleTree, TextRendering};
 use crate::css::{BasicCascade, Cascade, ColorScheme, MediaContext, StyleSheet};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
@@ -14,6 +14,16 @@ pub fn render_html(
     palette: Palette,
     scripting: bool,
 ) -> RenderedPage {
+    render_html_with_text_rendering(source, viewport, palette, scripting, TextRendering::Cell)
+}
+
+pub fn render_html_with_text_rendering(
+    source: &str,
+    viewport: Size,
+    palette: Palette,
+    scripting: bool,
+    text_rendering: TextRendering,
+) -> RenderedPage {
     let base = url::Url::parse("about:blank").expect("the static synthetic base parses");
     let mut load = PageLoad::new(
         source,
@@ -25,6 +35,7 @@ pub fn render_html(
             scripting,
             color_scheme: ColorScheme::Dark,
             started: std::time::Duration::ZERO,
+            text_rendering,
         },
     );
     load.force_render()

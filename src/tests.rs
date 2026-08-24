@@ -43,3 +43,29 @@ fn cli_parses_the_start_url_and_rejects_unknown_flags() {
     assert_eq!(cli.rows, 31);
     assert!(Cli::try_parse_from(["textsurfer", "--unknown"]).is_err());
 }
+
+#[test]
+fn frontend_selection_honors_overrides_and_rejects_conflicts() {
+    let terminal = Cli::try_parse_from(["textsurfer", "--terminal"]).unwrap();
+    assert_eq!(
+        frontend_choice(&terminal).unwrap(),
+        FrontendChoice::Terminal
+    );
+    let vga = Cli::try_parse_from(["textsurfer", "--vga"]).unwrap();
+    assert_eq!(frontend_choice(&vga).unwrap(), FrontendChoice::Vga);
+    let scaled = Cli::try_parse_from(["textsurfer", "--vga-scale", "2"]).unwrap();
+    assert_eq!(frontend_choice(&scaled).unwrap(), FrontendChoice::Vga);
+    let conflict = Cli::try_parse_from(["textsurfer", "--terminal", "--vga"]).unwrap();
+    assert!(frontend_choice(&conflict).is_err());
+    let scale = Cli::try_parse_from(["textsurfer", "--terminal", "--vga-scale", "2"]).unwrap();
+    assert!(frontend_choice(&scale).is_err());
+}
+
+#[test]
+fn compiled_frontend_is_the_interactive_default() {
+    let cli = Cli::try_parse_from(["textsurfer"]).unwrap();
+    #[cfg(feature = "vga")]
+    assert_eq!(frontend_choice(&cli).unwrap(), FrontendChoice::Vga);
+    #[cfg(not(feature = "vga"))]
+    assert_eq!(frontend_choice(&cli).unwrap(), FrontendChoice::Terminal);
+}

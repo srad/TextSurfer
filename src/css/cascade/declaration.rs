@@ -20,6 +20,10 @@ pub(super) fn apply_declaration(
     declaration: &Declaration,
     media: MediaContext,
 ) {
+    if declaration.name == "font-size" {
+        return;
+    }
+    let (font_px, root_font_px) = media.layout_font_sizes();
     if let Some(keyword) = parse_ident(&declaration.value)
         && matches!(keyword.as_str(), "initial" | "inherit" | "unset")
     {
@@ -88,8 +92,13 @@ pub(super) fn apply_declaration(
             }
         }
         "width" => {
-            if let Some(width) = parse_width(&declaration.value, media.cell_metric, media.viewport)
-            {
+            if let Some(width) = parse_width(
+                &declaration.value,
+                media.cell_metric,
+                media.viewport,
+                font_px,
+                root_font_px,
+            ) {
                 style.width = width;
             }
         }
@@ -116,6 +125,8 @@ pub(super) fn apply_declaration(
                     &values,
                     media.cell_metric,
                     media.viewport,
+                    font_px,
+                    root_font_px,
                 );
             }
         }
@@ -149,6 +160,8 @@ pub(super) fn apply_declaration(
             LengthAxis::Vertical,
             media.cell_metric,
             media.viewport,
+            font_px,
+            root_font_px,
         ),
         "padding-right" => assign_one(
             &mut style.padding.right,
@@ -156,6 +169,8 @@ pub(super) fn apply_declaration(
             LengthAxis::Horizontal,
             media.cell_metric,
             media.viewport,
+            font_px,
+            root_font_px,
         ),
         "padding-bottom" => assign_one(
             &mut style.padding.bottom,
@@ -163,6 +178,8 @@ pub(super) fn apply_declaration(
             LengthAxis::Vertical,
             media.cell_metric,
             media.viewport,
+            font_px,
+            root_font_px,
         ),
         "padding-left" => assign_one(
             &mut style.padding.left,
@@ -170,6 +187,8 @@ pub(super) fn apply_declaration(
             LengthAxis::Horizontal,
             media.cell_metric,
             media.viewport,
+            font_px,
+            root_font_px,
         ),
         "border" => {
             if let Some(border) = parse_border(&declaration.value) {
@@ -243,15 +262,10 @@ pub(super) fn apply_declaration(
                 && let [horizontal] | [horizontal, _] = values.as_slice()
             {
                 style.border_spacing = BorderSpacing::new(
-                    media.cell_metric.resolve_cells(
-                        *horizontal,
-                        LengthAxis::Horizontal,
-                        media.viewport,
-                    ),
-                    media.cell_metric.resolve_cells(
+                    media.resolve_cells(*horizontal, LengthAxis::Horizontal),
+                    media.resolve_cells(
                         values.get(1).copied().unwrap_or(*horizontal),
                         LengthAxis::Vertical,
-                        media.viewport,
                     ),
                 );
             }
@@ -387,11 +401,7 @@ fn parse_margins(source: &str, media: MediaContext) -> Option<MarginEdges> {
             } else {
                 LengthAxis::Horizontal
             };
-            CssMargin::Cells(
-                media
-                    .cell_metric
-                    .resolve_cells(length, axis, media.viewport),
-            )
+            CssMargin::Cells(media.resolve_cells(length, axis))
         };
         values.push(value);
     }
@@ -424,11 +434,7 @@ fn assign_margin(target: &mut CssMargin, source: &str, axis: LengthAxis, media: 
     }) else {
         return;
     };
-    *target = CssMargin::Cells(
-        media
-            .cell_metric
-            .resolve_cells(length, axis, media.viewport),
-    );
+    *target = CssMargin::Cells(media.resolve_cells(length, axis));
 }
 
 /// `list-style` sets type, position and image; `none` may stand for either type or image, and an

@@ -24,6 +24,8 @@ use crate::app::App;
 use crate::app::net::Navigate;
 use crate::core::geom::Size;
 use crate::core::style::Rgb;
+use crate::core::style::TextRendering;
+use crate::layout::LayoutRect;
 use crate::ui::chrome;
 use crate::ui::theme::{NORTON, rgb_of};
 
@@ -103,7 +105,7 @@ impl VgaApp {
             default_fg: rgb_of(NORTON.text),
             default_bg: background,
         });
-        let mut app = App::with_net(net);
+        let mut app = App::with_net_and_rendering(net, TextRendering::ScaledBitmap);
         app.on_resize(options.cells);
         if let Some(url) = url {
             app.submit_url(&url);
@@ -162,7 +164,31 @@ impl VgaApp {
     /// Draw the chrome, then copy the pixels into the window.
     fn redraw(&mut self) -> io::Result<()> {
         let view = self.app.chrome_view();
+        let area = ratatui::layout::Rect::new(
+            0,
+            0,
+            self.terminal.size()?.width,
+            self.terminal.size()?.height,
+        );
+        let scaled = view.content.painted.scaled_text.clone();
+        let scroll = view.content.scroll;
+        let content = chrome::content_rect(&view, area);
+        let occlusions = chrome::occlusion_rects(&view, area)
+            .into_iter()
+            .map(layout_rect)
+            .collect::<Vec<_>>();
+        self.terminal.backend_mut().clear_scaled_overlay();
         self.terminal.draw(|frame| chrome::draw(frame, &view))?;
+        if let Some(content) = content {
+            self.terminal.backend_mut().draw_scaled_text(
+                &scaled,
+                (content.x, content.y),
+                scroll,
+                layout_rect(content),
+                &occlusions,
+                NORTON.palette(),
+            );
+        }
         self.present()
     }
 
@@ -203,6 +229,15 @@ impl VgaApp {
             buffer[to..to + copied_width].copy_from_slice(&pixels[from..from + copied_width]);
         }
         buffer.present().map_err(into_io)
+    }
+}
+
+fn layout_rect(rect: ratatui::layout::Rect) -> LayoutRect {
+    LayoutRect {
+        col: usize::from(rect.x),
+        row: usize::from(rect.y),
+        width: usize::from(rect.width),
+        height: usize::from(rect.height),
     }
 }
 

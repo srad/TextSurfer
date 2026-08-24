@@ -108,7 +108,7 @@ fn append_text_glyphs(
         Glyph {
             node,
             text: text.to_string(),
-            width: UnicodeWidthStr::width(text),
+            width: UnicodeWidthStr::width(text).saturating_mul(usize::from(style.scale)),
             depth,
             white_space,
             style,
@@ -118,7 +118,8 @@ fn append_text_glyphs(
 }
 
 pub(super) fn format_inline<A: Atom>(pieces: &[Piece<A>], width: usize) -> Vec<Vec<Glyph>> {
-    let glyphs = flatten_glyphs(pieces);
+    let mut glyphs = flatten_glyphs(pieces);
+    apply_scale_caps(&mut glyphs, width);
     let mode = glyphs.first().map(|glyph| glyph.white_space);
     if glyphs.iter().all(|glyph| Some(glyph.white_space) == mode) {
         match mode.unwrap_or_default() {
@@ -133,6 +134,57 @@ pub(super) fn format_inline<A: Atom>(pieces: &[Piece<A>], width: usize) -> Vec<V
     }
 }
 
+fn apply_scale_caps(glyphs: &mut [Glyph], width: usize) {
+    let mut start = 0usize;
+    for index in 0..glyphs.len() {
+        if forced_break(&glyphs[index]) {
+            apply_scale_cap(&mut glyphs[start..index], width);
+            start = index + 1;
+        }
+    }
+    apply_scale_cap(&mut glyphs[start..], width);
+}
+
+fn apply_scale_cap(glyphs: &mut [Glyph], width: usize) {
+    let cap = scale_cap(glyphs, width);
+    for glyph in glyphs {
+        if glyph.atom.is_none() {
+            glyph.style.scale = glyph.style.scale.min(cap);
+            glyph.width = UnicodeWidthStr::width(glyph.text.as_str())
+                .saturating_mul(usize::from(glyph.style.scale));
+        }
+    }
+}
+
+fn scale_cap(glyphs: &[Glyph], width: usize) -> u8 {
+    for cap in (1..=4).rev() {
+        let mut current = 0usize;
+        for glyph in glyphs {
+            if glyph.atom.is_some() {
+                current = current.saturating_add(glyph.width);
+            } else {
+                current = current.saturating_add(
+                    UnicodeWidthStr::width(glyph.text.as_str())
+                        .saturating_mul(usize::from(glyph.style.scale.min(cap))),
+                );
+            }
+        }
+        if current <= width {
+            return cap;
+        }
+    }
+    1
+}
+
+fn forced_break(glyph: &Glyph) -> bool {
+    glyph.atom.is_none()
+        && glyph.text == "\n"
+        && matches!(
+            glyph.white_space,
+            WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::PreLine | WhiteSpace::BreakSpaces
+        )
+}
+
 fn format_collapsed(glyphs: &[Glyph], width: usize, wrap: bool) -> Vec<Vec<Glyph>> {
     let mut words = Vec::new();
     let mut current = Vec::new();
@@ -142,7 +194,7 @@ fn format_collapsed(glyphs: &[Glyph], width: usize, wrap: bool) -> Vec<Vec<Glyph
             if !current.is_empty() {
                 let mut space = glyph.clone();
                 space.text = " ".to_string();
-                space.width = 1;
+                space.width = usize::from(space.style.scale);
                 whitespace = Some(space);
             }
         } else {
@@ -270,7 +322,7 @@ fn format_mixed(glyphs: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
             } else if has_content {
                 let mut space = glyph.clone();
                 space.text = " ".to_string();
-                space.width = 1;
+                space.width = usize::from(space.style.scale);
                 pending = Some(space);
             }
             continue;
@@ -329,7 +381,7 @@ fn layout_items(items: Vec<LineItem>, width: usize) -> Vec<Vec<Glyph>> {
                 for _ in 0..count {
                     let mut space = glyph.clone();
                     space.text = " ".to_string();
-                    space.width = 1;
+                    space.width = usize::from(space.style.scale);
                     push_glyph(space, wrap, false, width, &mut state);
                 }
             }
@@ -428,12 +480,25 @@ pub(super) fn intrinsic_width<A: Atom>(pieces: &[Piece<A>]) -> usize {
 }
 
 pub(super) fn min_content_width<A: Atom>(pieces: &[Piece<A>]) -> usize {
-    let glyphs = flatten_glyphs(pieces);
+    let mut glyphs = flatten_glyphs(pieces);
+    for glyph in &mut glyphs {
+        if glyph.atom.is_none() {
+            glyph.width = if glyph.style.scale == 0 {
+                0
+            } else {
+                UnicodeWidthStr::width(glyph.text.as_str())
+            };
+        }
+    }
     let mode = glyphs.first().map(|glyph| glyph.white_space);
     if glyphs.iter().all(|glyph| Some(glyph.white_space) == mode)
         && matches!(mode, Some(WhiteSpace::NoWrap | WhiteSpace::Pre))
     {
-        return intrinsic_width(pieces);
+        return glyphs
+            .split(|glyph| glyph.atom.is_none() && glyph.text == "\n")
+            .map(|line| line.iter().map(|glyph| glyph.width).sum())
+            .max()
+            .unwrap_or(0);
     }
 
     let mut widest = 0usize;
@@ -517,6 +582,10 @@ pub(super) fn line_metrics<A: Atom>(line: &[Glyph], pieces: &[Piece<A>]) -> (usi
         let atom_baseline = atom.baseline().min(atom.height().saturating_sub(1));
         baseline = baseline.max(atom_baseline);
         below = below.max(atom.height().saturating_sub(atom_baseline + 1));
+    }
+    for glyph in line.iter().filter(|glyph| glyph.atom.is_none()) {
+        let height = usize::from(glyph.style.scale);
+        baseline = baseline.max(height.saturating_sub(1));
     }
     (baseline + below + 1, baseline)
 }

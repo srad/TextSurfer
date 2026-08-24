@@ -1,4 +1,4 @@
-use crate::core::style::{CellStyle, Palette, Rgb};
+use crate::core::style::{CellStyle, Palette, Rgb, Rgba};
 
 pub(super) const MIN_CONTRAST: f32 = 3.0;
 
@@ -28,4 +28,24 @@ pub(super) fn merge_style(under: CellStyle, over: CellStyle) -> CellStyle {
         bg: over.bg.or(under.bg),
         ..over
     }
+}
+
+pub fn resolve_cell_style(mut style: CellStyle, palette: Palette) -> CellStyle {
+    if let Some(foreground) = style.fg {
+        let background = style.bg.unwrap_or(palette.background);
+        if foreground.alpha == 0 {
+            style.fg = None;
+            style.bold = false;
+            style.underline = false;
+            style.strike = false;
+            style.reverse = false;
+        } else {
+            style.fg = Some(Rgba::opaque(legible_foreground(
+                foreground.composite_over(background),
+                background,
+                palette,
+            )));
+        }
+    }
+    style
 }

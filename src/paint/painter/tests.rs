@@ -39,6 +39,74 @@ fn paints_wide_graphemes_without_exceeding_the_cell_width() {
 }
 
 #[test]
+fn scaled_text_is_reserved_and_emitted_as_an_explicit_run() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "a", ElementNs::Html, vec![]);
+    let style = CellStyle {
+        fg: Some(Rgba::opaque(Rgb::WHITE)),
+        bg: Some(Rgb::new(0, 0, 128)),
+        scale: 2,
+        underline: true,
+        strike: true,
+        ..Default::default()
+    };
+    let rect = LayoutRect {
+        col: 1,
+        row: 1,
+        width: 2,
+        height: 2,
+    };
+    let tree = BoxTree {
+        width: 5,
+        height: 4,
+        fragments: vec![TextFragment {
+            node,
+            col: rect.col,
+            row: rect.row,
+            text: "A".to_string(),
+            depth: 3,
+            style,
+        }],
+        links: vec![crate::layout::LinkBox {
+            node,
+            href: "https://example.com".to_string(),
+            rects: vec![rect],
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    assert_eq!(display.scaled_text.len(), 1);
+    assert_eq!(display.scaled_text[0].rect, rect);
+    assert!(
+        display.rows[1]
+            .spans
+            .iter()
+            .any(|span| span.style.bg == style.bg)
+    );
+    assert!(
+        display.rows[2]
+            .spans
+            .iter()
+            .any(|span| span.style.bg == style.bg)
+    );
+    assert!(display.link_at(2, 2).is_some());
+    assert!(
+        display.scaled_text[0]
+            .style
+            .fg
+            .is_some_and(|foreground| foreground.alpha == 255)
+    );
+    assert!(display.scaled_text[0].style.underline);
+    assert!(display.scaled_text[0].style.strike);
+    assert!(
+        display.rows[1]
+            .spans
+            .iter()
+            .all(|span| !span.style.underline && !span.style.strike)
+    );
+}
+
+#[test]
 fn hit_testing_returns_the_deepest_box() {
     let mut document = Document::new();
     let parent = document.insert_element(None, "div", ElementNs::Html, vec![]);

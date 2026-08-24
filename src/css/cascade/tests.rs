@@ -4,8 +4,9 @@ use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide, CssMargin,
-    CssPercentage, CssWidth, Display, DisplayInside, DisplayOutside, EdgeSizes, Palette,
-    PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign, VerticalAlign, WhiteSpace,
+    CssPercentage, CssWidth, Display, DisplayInside, DisplayOutside, EdgeSizes, FontSize, Palette,
+    PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign, TextRendering, VerticalAlign,
+    WhiteSpace,
 };
 use crate::css::values::parse_font_weight;
 use crate::css::{ColorScheme, CssParser, CssparserParser};
@@ -99,6 +100,100 @@ fn authored_alignment_and_auto_margins_parse_and_inherit() {
     assert_eq!(styles.get(parent).margin.bottom, CssMargin::Cells(1));
     assert_eq!(styles.get(child).text_align, TextAlign::Right);
     assert_eq!(styles.get(child).vertical_align, VerticalAlign::Top);
+}
+
+#[test]
+fn font_size_computes_before_font_relative_lengths() {
+    let mut document = Document::new();
+    let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
+    let child = document.insert_element(Some(root), "div", ElementNs::Html, vec![]);
+    let sheet = CssparserParser
+        .parse("main { font-size: 20px } div { padding-left: 1em; width: 10rem; font-size: 200% }");
+    let media = MediaContext::screen().with_text_rendering(TextRendering::ScaledBitmap);
+    let styles = BasicCascade.apply(&[sheet], &document, media);
+    assert_eq!(styles.get(root).font_size, FontSize::from_px(20.0).unwrap());
+    assert_eq!(
+        styles.get(child).font_size,
+        FontSize::from_px(40.0).unwrap()
+    );
+    assert_eq!(styles.get(child).padding.left, 5);
+    assert_eq!(styles.get(child).width, CssWidth::Cells(25));
+    assert_eq!(styles.get(child).text_presentation.scale, 4);
+}
+
+#[test]
+fn font_size_keywords_css_wide_values_and_invalid_winners_are_deterministic() {
+    let mut document = Document::new();
+    let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
+    let larger = document.insert_element(Some(root), "div", ElementNs::Html, vec![]);
+    let inherited = document.insert_element(Some(larger), "span", ElementNs::Html, vec![]);
+    let invalid = document.insert_element(Some(root), "p", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse(
+        "main { font-size: x-large } div { font-size: larger } span { font-size: unset } p { font-size: 24px; font-size: -1px }",
+    );
+    let styles = BasicCascade.apply(
+        &[sheet],
+        &document,
+        MediaContext::screen().with_text_rendering(TextRendering::ScaledBitmap),
+    );
+    assert_eq!(styles.get(root).font_size, FontSize::from_px(24.0).unwrap());
+    assert!((styles.get(larger).font_size.px() - 28.8).abs() < 0.001);
+    assert_eq!(
+        styles.get(inherited).font_size,
+        styles.get(larger).font_size
+    );
+    assert_eq!(
+        styles.get(invalid).font_size,
+        FontSize::from_px(24.0).unwrap()
+    );
+}
+
+#[test]
+fn ua_headings_scale_only_in_the_bitmap_rendering_profile() {
+    let mut document = Document::new();
+    let h1 = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let h3 = document.insert_element(None, "h3", ElementNs::Html, vec![]);
+    let cell = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let bitmap = BasicCascade.apply(
+        &[],
+        &document,
+        MediaContext::screen().with_text_rendering(TextRendering::ScaledBitmap),
+    );
+    assert_eq!(cell.get(h1).text_presentation.scale, 1);
+    assert_eq!(bitmap.get(h1).text_presentation.scale, 4);
+    assert_eq!(bitmap.get(h3).text_presentation.scale, 2);
+}
+
+#[test]
+fn generated_content_inherits_bitmap_typography() {
+    let mut document = Document::new();
+    let heading = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse("h1::before { content: 'lead' }");
+    let styles = BasicCascade.apply(
+        &[sheet],
+        &document,
+        MediaContext::screen().with_text_rendering(TextRendering::ScaledBitmap),
+    );
+    let pseudo = styles.pseudo(heading, PseudoElement::Before).unwrap();
+    assert_eq!(pseudo.style.font_size, styles.get(heading).font_size);
+    assert_eq!(pseudo.style.text_presentation.scale, 4);
+}
+
+#[test]
+fn cell_profile_keeps_fixed_length_metrics_after_font_size_computes() {
+    let mut document = Document::new();
+    let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
+    let child = document.insert_element(Some(root), "div", ElementNs::Html, vec![]);
+    let sheet = CssparserParser
+        .parse("main { font-size: 20px } div { font-size: 200%; padding-left: 1em; width: 10rem }");
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(
+        styles.get(child).font_size,
+        FontSize::from_px(40.0).unwrap()
+    );
+    assert_eq!(styles.get(child).padding.left, 2);
+    assert_eq!(styles.get(child).width, CssWidth::Cells(20));
+    assert_eq!(styles.get(child).text_presentation.scale, 1);
 }
 
 #[test]

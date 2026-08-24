@@ -106,6 +106,21 @@ impl CellMetric {
     }
 
     pub fn css_pixels(self, length: CssLength, viewport: Size) -> f64 {
+        self.css_pixels_with_fonts(
+            length,
+            viewport,
+            f64::from(self.root_font_px),
+            f64::from(self.root_font_px),
+        )
+    }
+
+    pub fn css_pixels_with_fonts(
+        self,
+        length: CssLength,
+        viewport: Size,
+        font_px: f64,
+        root_font_px: f64,
+    ) -> f64 {
         let width = self.viewport_css_pixels(LengthAxis::Horizontal, viewport);
         let height = self.viewport_css_pixels(LengthAxis::Vertical, viewport);
         let scale = match length.unit() {
@@ -116,8 +131,9 @@ impl CellMetric {
             CssLengthUnit::Q => 96.0 / 101.6,
             CssLengthUnit::Pt => 96.0 / 72.0,
             CssLengthUnit::Pc => 16.0,
-            CssLengthUnit::Em | CssLengthUnit::Rem => f64::from(self.root_font_px),
-            CssLengthUnit::Ex | CssLengthUnit::Ch => f64::from(self.root_font_px) / 2.0,
+            CssLengthUnit::Em => font_px,
+            CssLengthUnit::Rem => root_font_px,
+            CssLengthUnit::Ex | CssLengthUnit::Ch => font_px / 2.0,
             CssLengthUnit::Vw => width / 100.0,
             CssLengthUnit::Vh => height / 100.0,
             CssLengthUnit::Vmin => width.min(height) / 100.0,
@@ -127,11 +143,28 @@ impl CellMetric {
     }
 
     pub fn resolve_cells(self, length: CssLength, axis: LengthAxis, viewport: Size) -> usize {
+        self.resolve_cells_with_fonts(
+            length,
+            axis,
+            viewport,
+            f64::from(self.root_font_px),
+            f64::from(self.root_font_px),
+        )
+    }
+
+    pub fn resolve_cells_with_fonts(
+        self,
+        length: CssLength,
+        axis: LengthAxis,
+        viewport: Size,
+        font_px: f64,
+        root_font_px: f64,
+    ) -> usize {
         let cell_px = match axis {
             LengthAxis::Horizontal => self.column_px,
             LengthAxis::Vertical => self.row_px,
         };
-        (self.css_pixels(length, viewport) / f64::from(cell_px))
+        (self.css_pixels_with_fonts(length, viewport, font_px, root_font_px) / f64::from(cell_px))
             .max(0.0)
             .round()
             .min(MAX_LAYOUT_CELLS) as usize

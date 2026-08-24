@@ -96,6 +96,7 @@ impl App {
                                         scripting: false,
                                         color_scheme: ColorScheme::Dark,
                                         started: self.now,
+                                        text_rendering: self.text_rendering,
                                     },
                                 );
                                 commands = load.take_commands();

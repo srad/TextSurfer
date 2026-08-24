@@ -14,6 +14,7 @@ fn load(source: &str) -> PageLoad {
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
+            text_rendering: crate::core::style::TextRendering::Cell,
         },
     )
 }
@@ -62,6 +63,7 @@ fn a_local_page_may_still_load_its_own_local_stylesheets() {
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
+            text_rendering: crate::core::style::TextRendering::Cell,
         },
     );
     let commands = load.take_commands();

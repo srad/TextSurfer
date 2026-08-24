@@ -57,6 +57,8 @@ fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
         underline,
         strike,
         reverse,
+        dim,
+        scale: _,
     } = span.style;
     let mut style = Style::default()
         .fg(fg.map_or(theme.text, |color| {
@@ -74,6 +76,9 @@ fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
     }
     if reverse {
         style = style.add_modifier(Modifier::REVERSED);
+    }
+    if dim {
+        style = style.add_modifier(Modifier::DIM);
     }
     style
 }

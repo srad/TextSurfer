@@ -4,6 +4,7 @@ mod display;
 mod length;
 mod list;
 mod table;
+mod typography;
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +24,7 @@ pub use display::{
 pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
 pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
+pub use typography::{FontSize, TextPresentation, TextRendering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PseudoElement {
@@ -94,6 +96,8 @@ pub struct ComputedStyle {
     pub underline: bool,
     pub strike: bool,
     pub reverse: bool,
+    pub font_size: FontSize,
+    pub text_presentation: TextPresentation,
 }
 
 impl ComputedStyle {
@@ -113,6 +117,8 @@ impl ComputedStyle {
             underline: parent.underline,
             strike: parent.strike,
             reverse: parent.reverse,
+            font_size: parent.font_size,
+            text_presentation: parent.text_presentation,
             ..Default::default()
         }
     }
@@ -125,6 +131,8 @@ impl ComputedStyle {
             underline: self.underline,
             strike: self.strike,
             reverse: self.reverse,
+            dim: self.text_presentation.dim,
+            scale: self.text_presentation.scale,
         }
     }
 }

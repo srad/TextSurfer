@@ -101,7 +101,7 @@ impl Default for Palette {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellStyle {
     pub fg: Option<Rgba>,
     pub bg: Option<Rgb>,
@@ -109,4 +109,21 @@ pub struct CellStyle {
     pub underline: bool,
     pub strike: bool,
     pub reverse: bool,
+    pub dim: bool,
+    pub scale: u8,
+}
+
+impl Default for CellStyle {
+    fn default() -> Self {
+        Self {
+            fg: None,
+            bg: None,
+            bold: false,
+            underline: false,
+            strike: false,
+            reverse: false,
+            dim: false,
+            scale: 1,
+        }
+    }
 }

@@ -17,6 +17,9 @@ use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size as TerminalSize};
 
 use crate::core::geom::Size;
+use crate::core::style::Palette;
+use crate::layout::LayoutRect;
+use crate::paint::ScaledTextRun;
 
 use super::font::{CELL_H, CELL_W};
 use super::surface::{Surface, SurfaceConfig};
@@ -47,6 +50,23 @@ impl VgaBackend {
     pub fn resize(&mut self, size: Size) {
         self.surface.resize(size);
         self.sync_cursor();
+    }
+
+    pub fn clear_scaled_overlay(&mut self) {
+        self.surface.clear_scaled_overlay();
+    }
+
+    pub fn draw_scaled_text(
+        &mut self,
+        runs: &[ScaledTextRun],
+        origin: (u16, u16),
+        scroll: usize,
+        clip: LayoutRect,
+        occlusions: &[LayoutRect],
+        palette: Palette,
+    ) {
+        self.surface
+            .draw_scaled_text(runs, origin, scroll, clip, occlusions, palette);
     }
 
     /// Push the tracked cursor state onto the surface.

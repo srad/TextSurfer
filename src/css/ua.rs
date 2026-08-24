@@ -3,8 +3,8 @@
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId, attr_value};
 use crate::core::style::{
-    BorderSpacing, ComputedStyle, CssMargin, Display, ListStyleType, Palette, Rgba, TextAlign,
-    VerticalAlign, WhiteSpace,
+    BorderSpacing, ComputedStyle, CssMargin, Display, FontSize, ListStyleType, Palette, Rgba,
+    TextAlign, VerticalAlign, WhiteSpace,
 };
 
 use super::values::parse_list_style_type;
@@ -29,6 +29,7 @@ pub(super) fn ua_style(
             caption_side: inherited.caption_side,
             text_align: inherited.text_align,
             legacy_align: inherited.legacy_align,
+            font_size: inherited.font_size,
             ..Default::default()
         };
     };
@@ -43,6 +44,7 @@ pub(super) fn ua_style(
             border_collapse: inherited.border_collapse,
             border_spacing: inherited.border_spacing,
             caption_side: inherited.caption_side,
+            font_size: inherited.font_size,
             ..Default::default()
         };
     }
@@ -116,6 +118,7 @@ pub(super) fn ua_style(
         caption_side: inherited.caption_side,
         text_align: inherited.text_align,
         legacy_align: inherited.legacy_align,
+        font_size: inherited.font_size,
         ..Default::default()
     };
     if name == "pre" {
@@ -183,6 +186,16 @@ pub(super) fn ua_style(
         style.margin.top = CssMargin::Cells(1);
         style.margin.bottom = CssMargin::Cells(1);
         style.bold = true;
+        let ratio = match name.as_str() {
+            "h1" => 2.0,
+            "h2" => 1.5,
+            "h3" => 1.17,
+            "h4" => 1.0,
+            "h5" => 0.83,
+            _ => 0.67,
+        };
+        style.font_size =
+            FontSize::from_px(inherited.font_size.px() * ratio).unwrap_or(FontSize::INITIAL);
     }
     if name == "blockquote" {
         style.margin.left = CssMargin::Cells(2);

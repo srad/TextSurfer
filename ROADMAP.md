@@ -27,6 +27,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `css/cascade/{content,counters}.rs` + `css/values.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
 | Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.13 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | Presentational HTML legacy values (M1-D) | narrow standards adapter | **Custom is correct** — html5ever owns HTML parsing and cssparser/cssparser-color own CSS syntax, but none implements WHATWG's legacy non-negative integer, dimension, or color-value algorithms. Keep these untrusted-value adapters isolated under `css::presentational`; compare structure and edge cases with Ladybird commit `8baf4260d40dd53cd09c21c868d2bd0625a69149`, with WHATWG authoritative |
+| `font-size` computed-value grammar (M1-D) | narrow standards adapter | **Keep narrow adapter** — cssparser owns tokenization, dimensions, percentages, functions and recovery; the adapter maps the supported Fonts/CSS-wide keywords and length-percentage forms onto the frontend-neutral computed typography model. Full font selection and CSS math remain outside the raster-font scope |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ### Prior-art audit (2026-08-22)
@@ -36,7 +37,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 
 | Source | What it establishes | Adopted here |
 |---|---|---|
-| [chawan](https://github.com/sourcehut-mirrors/chawan) (`doc/css.md`) | The terminal CSS contract: author colours **contrast-corrected against the terminal background**; `border-*-width` is **binary**; `font-weight > 500` = bold, `font-size` ignored; `text-decoration` underline/line-through; sub-cell inline margins/padding ignored; overflow-x displays, overflow-y clips, no scrollbars; `::before`/`::after` + counters + `list-style-type` for markers; link markers/hints for keyboard navigation | All locked as decisions below; markers landed in M1-D, link hints scheduled in M2. `font-size` ignored is the one item we depart from: the M1-D typography item replaces it with a half-block glyph ladder |
+| [chawan](https://github.com/sourcehut-mirrors/chawan) (`doc/css.md`) | The terminal CSS contract: author colours **contrast-corrected against the terminal background**; `border-*-width` is **binary**; `font-weight > 500` = bold, `font-size` ignored; `text-decoration` underline/line-through; sub-cell inline margins/padding ignored; overflow-x displays, overflow-y clips, no scrollbars; `::before`/`::after` + counters + `list-style-type` for markers; link markers/hints for keyboard navigation | All locked as decisions below; markers landed in M1-D, link hints scheduled in M2. `font-size` ignored is the one item we depart from: the VGA profile uses cell-aligned integer bitmap scaling while terminal cells remain visually fixed |
 | chawan + [w3m](https://w3m.sourceforge.net/) | A real **table layout** engine (colspan/rowspan) is what separates a usable terminal browser from lynx | M1-D, ahead of flex/grid |
 | lynx · w3m · chawan | Every one ships a **non-interactive dump mode** | `--dump` in M1-B; doubles as the golden-fixture harness |
 | [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer (Parley there, textwrap fragments here) | Confirms the M1-B architecture; no dependency |
@@ -64,15 +65,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
-| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, terminal typography | (in progress — tables, generated content, length units, outer/inner display modes and presentational HTML done; terminal typography next) |
+| M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, VGA-native bitmap typography | (done — user VGA smoke pending; terminal smoke deferred) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (open) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-24): **372 lib · 4 binary · 4 fetch-pipeline · 14 corpus ·
-31 golden**, and **432 lib** with `--features vga` (+60 for the framebuffer frontend).
+Test counts at the last green run (2026-08-24): **449 lib · 6 binary · 4 fetch-pipeline · 14 corpus ·
+31 golden** with the default VGA frontend, and **385 lib** with `--no-default-features`.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
 floor (open: optional local, 80% overall / 90% css·layout·paint) ·
@@ -102,9 +103,11 @@ duplicate policy has no demonstrated current data loss (the API/diagnostic gap r
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --no-default-features --all-targets -- -D warnings
 cargo test
 cargo test --features js          # M4+; must pass, boa feature compiles
-cargo test --features vga         # framebuffer frontend; default build must stay green too
+cargo test --features vga         # explicit framebuffer frontend gate
+cargo test --no-default-features  # frozen terminal compatibility profile
 ```
 
 First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (optional):
@@ -122,7 +125,7 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 ## Architecture (as-built)
 
 ```
- main.rs — terminal adapter only: CLI · event loop · crossterm→core::event key mapping
+ main.rs — frontend adapter only: CLI · VGA/terminal selection · event mapping and loops
    ▼
  ui (ratatui widgets · Focus · keymap · mouse zones) ──┐
    Action (Load, NewTab, ActivateLink, Scroll, …)     │ UiEvent
@@ -166,17 +169,18 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   panels, bordered input field, raised tab strip, Norton-Commander palette on a navy field) around a
   normal browser layout shell — decided by the user; `ui::Theme` centralizes all colors, the painter
   and every widget draw from it; no color literals outside it.
-- Product = UI and terminal frontend rendering; every other layer adopts a mature, latest-version
+- Product = UI, VGA-native bitmap rendering and the terminal compatibility frontend; every other
+  layer adopts a mature, latest-version
   crate: html5ever (HTML parse incl. tree-builder), cssparser + selectors (syntax + selector
   matching), boa_engine (ECMAScript), ureq (HTTP), encoding_rs (decode), ratatui (widgets/TUI),
   Taffy (block box geometry), textwrap + unicode-segmentation/width (inline formatting).
-  In-house scope: Document arena + TreeSink glue, cascade → style tree, layout → terminal grid,
+  In-house scope: Document arena + TreeSink glue, cascade → style tree, layout → cell grid,
   paint/DisplayList, chrome/App/event loop, and table layout (M1-D — audited crates do not integrate
   with a styled CSS box tree).
 - Single crate with modules (not a workspace) — fastest iteration; workspace split trivial later.
   Re-affirmed unchanged by the 2026-08-23 structure pass.
 - **`app` is the composition root only; `pipeline` is the rendering subsystem; `main.rs` is the
-  terminal adapter only.** `PageLoad`'s stylesheet resource graph, the cascade→layout→paint facade
+  frontend adapter only.** `PageLoad`'s stylesheet resource graph, the cascade→layout→paint facade
   and `--dump` are product pipeline stages, not composition wiring — keeping them in `app` forced
   `main`, the golden tests and unit tests in `css`/`layout` to import into the composition root.
   `pipeline` sits above `paint` and below `ui`/`app`; it takes its palette by injection rather than
@@ -186,12 +190,13 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   AGENTS.md "Module structure"; line budgets are a prompt to look for a second responsibility, not
   a defect threshold.
 - Native text renderer (lynx/w3m/chawan family), not embedded-engine (carbonyl/browsh family) — our
-  value is small footprint + terminal-native layout.
+  value is small footprint + cell-native layout.
 - **Two frontends over one engine, behind ratatui's `Backend` trait** (2026-08-23). `ui::chrome::draw`
   takes a backend-agnostic `Frame` and `app` never imports a terminal library, so a second frontend
   costs a `Backend` impl and an event-mapping adapter — nothing in `css`/`layout`/`paint` moves. The
-  terminal frontend stays the default and keeps SSH-shaped distribution; `vga` (non-default feature)
-  opens a window and renders with **our own CP437 8x16 face**.
+  VGA frontend is the active default and owns the native bitmap typography path. The terminal
+  frontend is frozen as a compatibility fallback selected with `--terminal`; it remains available
+  in no-default-feature builds and its existing rendering must stay byte-for-byte stable.
   *Why a window at all:* the DOS look is mostly the font, and inside a terminal emulator the font
   belongs to the user — `ui::Theme` fixes the palette but every glyph renders in whatever face the
   terminal was configured with. Owning a framebuffer is the only way to own the face, the cell metric
@@ -248,14 +253,13 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   earlier "borders ≥2 cells doubled" phrasing, which nothing implemented and which contradicts the
   prior-art model.
 - `font-weight > 500` = bold; `text-decoration` maps to underline/line-through; reverse video is
-  available as a style bit. `font-size` is ignored **pending the M1-D terminal typography item**,
-  which replaces this rule with a half-block glyph ladder — treat it as scheduled for revision, not
-  settled.
+  available as a style bit. `font-size` computes in every frontend. Terminal cell rendering keeps
+  its historical one-cell appearance; VGA uses the computed size for native bitmap scaling.
 - Sub-cell margins and padding are ignored on inline boxes; CSS lengths are capped at 65,535.
-- **Lengths currently ignore their unit** — `parse_length_token` rounds any `<dimension>` straight
-  into a cell count, so `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell. This was never a
-  decision; it is the defect the M1-D length-units item fixes, and the earlier phrasing here ("all
-  CSS lengths are cell-rounded") described it as though it were intended. Corrected 2026-08-23.
+- Supported absolute, font-relative and viewport-relative lengths resolve through the shared 8×16
+  cell metric. The terminal profile keeps the fixed 16px/8px font approximations; the VGA bitmap
+  profile uses the element and root computed font sizes for `em`/`ex`/`ch` and `rem`. Layout rounds
+  per axis while media queries compare unrounded CSS pixels.
 - Overflow: the x axis displays (clipped at the viewport edge), the y axis extends the document, and
   there are no scrollbars.
 - `:visited` parses and **never matches** — page styling must not observe history.
@@ -428,7 +432,7 @@ both viewport dimensions without restoring the blank loading state.
   cascade-order and late-repaint clamp fixtures green; bucketed and naive cascades agree; manual
   Wikipedia smoke renders with external author styles.
 
-### M1-D — Layout completeness (in progress)
+### M1-D — Layout completeness (done — user VGA smoke pending)
 
 Sequenced after M1-C and before M2: a terminal browser is judged on whether real pages are readable,
 and tables are what separate w3m from lynx. Flex/grid stay in M6.
@@ -526,15 +530,19 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       direct-table association for derived cell hints. `table[align=center]` uses auto margins;
       left/right table floats stay in M6. Preserve compact HTML-table spacing and binary terminal
       borders. *Proof:* focused parser/cascade/layout cases plus a style-aware old-school fixture.
-- [ ] **Terminal typography** — heading and `font-size` scale drawn from bitmap glyph fonts into
-      half-block cells (two vertical pixels per cell, as `app/startpage.rs` already does for the
-      logo): 3×4 at two rows, 4×6 at three, 5×7 at four. Ladder ≥2em → 4 rows, ≥1.5em → 3,
-      ≥1.17em → 2, 1em → normal, <1em → dim, fed by UA heading sizes — which is why it follows the
-      unit work. Degrade-to-fit when a scaled line will not fit (a four-row heading holds six
-      characters at 40 columns), a normal-cell fallback for characters the font does not cover, and
-      rules for link rects, hit-testing and search highlight inside scaled runs. Revises the locked
-      "`font-size` is ignored" decision. *Proof:* ladder goldens per size, a degrade-to-fit golden,
-      hit-test and link-rect round trips through a scaled heading.
+- [x] **VGA-native bitmap typography** *(done)* — compute inherited `font-size` from the
+      supported length/percentage grammar, absolute and relative keywords, CSS-wide keywords and UA
+      heading sizes. VGA rasterizes the existing CP437/Unifont faces at integer 1×/2×/3×/4× cell
+      scales; terminal and dump keep their historical one-cell output. Thresholds are 32px, 24px,
+      18.72px and 16px; positive smaller text stays 1× and dim, while zero has no glyph or advance.
+      Scaled layout owns full-cell rectangles, bottom-aligns mixed runs, degrades a common line scale
+      until definite widths fit, wraps at 1×, clips whole graphemes and shares the same rules in
+      normal and table flow. VGA restores old overlays from shadow cells, performs the ratatui draw,
+      rasterizes scaled runs in depth order, repaints the cursor last, and clips against content,
+      scroll, window and menu occlusion. *Proof:* computed-value/cascade cases; block/table sizing,
+      clipping, hit and link laws; paint reservation/alpha/contrast cases; headless VGA pixel goldens
+      for scale, decoration, occlusion, stale-overlay restoration and cursor ordering; pure CLI
+      frontend-selection tests. No new font, anti-aliasing or fractional rasterization dependency.
 - **Acceptance:** the fixture set above green; manual smoke on a table-heavy page (Wikipedia infobox)
   is readable without horizontal guessing.
 
@@ -1055,3 +1063,26 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   dependency changed. Final six-gate counts: 372 library · 4 binary · 4 fetch-pipeline · 14 corpus ·
   31 render-golden tests, plus 432 library tests with `--features vga`. M1-D remains in progress;
   terminal typography is next.
+- 2026-08-24 — **VGA-first continuation and M1-D typography contract revised before code.** The VGA
+  window is now the active default frontend, with the terminal frozen as an explicit compatibility
+  fallback and `--dump` remaining headless. The rejected half-block terminal ladder is replaced by
+  cell-aligned integer scaling of the existing CP437/Unifont faces over a frontend-neutral computed
+  `font-size` model. Ratatui remains the chrome renderer while VGA owns the richer text compositor.
+  Existing pins remain current except the manifest floor is aligned to the already-locked
+  **winit 0.30.13**; **ratatui 0.30.2**, **softbuffer 0.4.8** and **unifont-bitmap 1.0.0** remain
+  unchanged. Baseline gates were green at 372 library · 4 binary · 4 fetch-pipeline · 14 corpus · 31
+  render-golden tests, plus 432 library tests with VGA.
+- 2026-08-24 — **M1-D VGA-native bitmap typography completed.** `font-size` now computes through a
+  frontend-neutral inherited typography model, including supported lengths, percentages, absolute
+  and relative keywords, CSS-wide keywords and UA heading sizes. Block and table flow share integer
+  1x/2x/3x/4x sizing, per-line fit degradation, Unicode-width advances, full-height link geometry
+  and zero/small-text behavior; terminal and dump preserve their historical cell output. Paint
+  emits background-only shadow-cell reservations plus depth-ordered scaled runs with the existing
+  alpha and contrast rules. VGA restores stale overlays, clips whole glyphs against scroll/window
+  and chrome occlusion, rasterizes CP437/Unifont pixels with dim/reverse/strike support, and repaints
+  the cursor last. VGA is the default feature and frontend; `--terminal` selects the frozen fallback,
+  `--vga` remains compatible, and `--dump` stays headless. The inspected framebuffer snapshot has no
+  `.snap.new` remainder. Final gates are green at 449 library · 6 binary · 4 fetch-pipeline · 14
+  corpus · 31 render-golden tests in the default and `js` configurations, plus 385 library tests in
+  the terminal-only `--no-default-features` configuration. M1-D is done; the human VGA smoke remains
+  pending and the older terminal smoke is deferred while that frontend is paused.

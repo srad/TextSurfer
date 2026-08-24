@@ -16,13 +16,14 @@ use crate::layout::{BoxTree, LayoutRect};
 use row::{RowBuffer, fill_background};
 use strokes::draw_strokes;
 
-pub use contrast::legible_foreground;
+pub use contrast::{legible_foreground, resolve_cell_style};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DisplayList {
     pub rows: Vec<PaintedRow>,
     pub hits: Vec<HitRegion>,
     pub links: Vec<PaintedLink>,
+    pub scaled_text: Vec<ScaledTextRun>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -35,6 +36,16 @@ pub struct PaintedSpan {
     pub col: usize,
     pub text: String,
     pub style: CellStyle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScaledTextRun {
+    pub node: NodeId,
+    pub rect: LayoutRect,
+    pub text: String,
+    pub style: CellStyle,
+    pub depth: usize,
+    pub ink: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,7 +115,10 @@ impl DisplayList {
     pub fn link_at(&self, col: usize, row: usize) -> Option<&PaintedLink> {
         self.links.iter().find(|link| {
             link.rects.iter().any(|rect| {
-                row == rect.row && col >= rect.col && col < rect.col.saturating_add(rect.width)
+                row >= rect.row
+                    && row < rect.row.saturating_add(rect.height)
+                    && col >= rect.col
+                    && col < rect.col.saturating_add(rect.width)
             })
         })
     }
@@ -155,14 +169,56 @@ impl Painter for BasicPainter {
         );
         let mut fragments: Vec<_> = box_tree.fragments.iter().collect();
         fragments.sort_by_key(|fragment| (fragment.depth, fragment.row, fragment.col));
+        let mut scaled_text = Vec::new();
         for fragment in fragments {
             if fragment.row >= box_tree.height || fragment.col >= box_tree.width {
                 continue;
             }
-            let row = rows
-                .entry(fragment.row)
-                .or_insert_with(|| RowBuffer::new(box_tree.width));
-            row.write(fragment.col, &fragment.text, fragment.style);
+            let rect = fragment.rect();
+            if fragment.style.scale > 1 {
+                let mut reservation_style = fragment.style;
+                reservation_style.underline = false;
+                reservation_style.strike = false;
+                for row_index in rect.row..rect.row.saturating_add(rect.height).min(box_tree.height)
+                {
+                    let row = rows
+                        .entry(row_index)
+                        .or_insert_with(|| RowBuffer::new(box_tree.width));
+                    row.write(
+                        rect.col,
+                        &" ".repeat(rect.width.min(box_tree.width.saturating_sub(rect.col))),
+                        reservation_style,
+                    );
+                }
+                scaled_text.push(ScaledTextRun {
+                    node: fragment.node,
+                    rect,
+                    text: fragment.text.clone(),
+                    style: fragment.style,
+                    depth: fragment.depth,
+                    ink: !fragment
+                        .style
+                        .fg
+                        .is_some_and(|foreground| foreground.alpha == 0),
+                });
+            } else if fragment.style.scale == 1 {
+                let row = rows
+                    .entry(fragment.row)
+                    .or_insert_with(|| RowBuffer::new(box_tree.width));
+                row.write(fragment.col, &fragment.text, fragment.style);
+            }
+        }
+        for run in &mut scaled_text {
+            let underline = run.style.underline;
+            let strike = run.style.strike;
+            if let Some(style) = rows
+                .get(&run.rect.row)
+                .and_then(|row| row.style_at(run.rect.col))
+            {
+                run.style = resolve_cell_style(style, palette);
+                run.style.underline = underline;
+                run.style.strike = strike;
+            }
         }
         let mut painted = vec![PaintedRow::default(); box_tree.height];
         for (row, buffer) in rows {
@@ -188,6 +244,7 @@ impl Painter for BasicPainter {
                     rects: link.rects.clone(),
                 })
                 .collect(),
+            scaled_text,
         }
     }
 }

@@ -2,5 +2,5 @@ pub mod painter;
 
 pub use painter::{
     BasicPainter, DisplayList, HitRegion, PaintedLink, PaintedRow, PaintedSpan, Painter,
-    legible_foreground,
+    ScaledTextRun, legible_foreground, resolve_cell_style,
 };

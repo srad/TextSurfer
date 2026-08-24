@@ -393,9 +393,11 @@ pub(super) fn assign_one(
     axis: LengthAxis,
     metric: CellMetric,
     viewport: Size,
+    font_px: f64,
+    root_font_px: f64,
 ) {
     if let Some(value) = parse_length(value) {
-        *target = metric.resolve_cells(value, axis, viewport);
+        *target = metric.resolve_cells_with_fonts(value, axis, viewport, font_px, root_font_px);
     }
 }
 
@@ -404,13 +406,39 @@ pub(super) fn assign_edges(
     values: &[CssLength],
     metric: CellMetric,
     viewport: Size,
+    font_px: f64,
+    root_font_px: f64,
 ) {
     let values = expanded_edges(values).map(|values| {
         [
-            metric.resolve_cells(values[0], LengthAxis::Vertical, viewport),
-            metric.resolve_cells(values[1], LengthAxis::Horizontal, viewport),
-            metric.resolve_cells(values[2], LengthAxis::Vertical, viewport),
-            metric.resolve_cells(values[3], LengthAxis::Horizontal, viewport),
+            metric.resolve_cells_with_fonts(
+                values[0],
+                LengthAxis::Vertical,
+                viewport,
+                font_px,
+                root_font_px,
+            ),
+            metric.resolve_cells_with_fonts(
+                values[1],
+                LengthAxis::Horizontal,
+                viewport,
+                font_px,
+                root_font_px,
+            ),
+            metric.resolve_cells_with_fonts(
+                values[2],
+                LengthAxis::Vertical,
+                viewport,
+                font_px,
+                root_font_px,
+            ),
+            metric.resolve_cells_with_fonts(
+                values[3],
+                LengthAxis::Horizontal,
+                viewport,
+                font_px,
+                root_font_px,
+            ),
         ]
     });
     if let Some([top, right, bottom, left]) = values.as_ref() {
@@ -423,7 +451,13 @@ pub(super) fn assign_edges(
     }
 }
 
-pub(super) fn parse_width(source: &str, metric: CellMetric, viewport: Size) -> Option<CssWidth> {
+pub(super) fn parse_width(
+    source: &str,
+    metric: CellMetric,
+    viewport: Size,
+    font_px: f64,
+    root_font_px: f64,
+) -> Option<CssWidth> {
     if parse_ident(source).as_deref() == Some("auto") {
         return Some(CssWidth::Auto);
     }
@@ -442,8 +476,15 @@ pub(super) fn parse_width(source: &str, metric: CellMetric, viewport: Size) -> O
             (unit_value * 10_000.0).round().min(u32::MAX as f32) as u32,
         )));
     }
-    parse_length(source)
-        .map(|value| CssWidth::Cells(metric.resolve_cells(value, LengthAxis::Horizontal, viewport)))
+    parse_length(source).map(|value| {
+        CssWidth::Cells(metric.resolve_cells_with_fonts(
+            value,
+            LengthAxis::Horizontal,
+            viewport,
+            font_px,
+            root_font_px,
+        ))
+    })
 }
 
 fn parse_length(source: &str) -> Option<CssLength> {
