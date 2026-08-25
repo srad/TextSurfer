@@ -108,3 +108,22 @@ fn css_length_cell_rounding_is_half_up_and_capped_at_u16_max() {
         u16::MAX as usize
     );
 }
+
+#[test]
+fn frontend_render_contexts_keep_geometry_and_text_capability_together() {
+    let viewport = crate::core::geom::Size { cols: 80, rows: 24 };
+    let terminal = RenderContext::terminal(viewport);
+    let vga = RenderContext {
+        viewport,
+        metrics: RenderMetrics::VGA,
+    };
+    assert_eq!(terminal.metrics.cell, CellMetric::DEFAULT);
+    assert_eq!(terminal.metrics.text, TextRendering::Cell);
+    assert_eq!(vga.metrics.cell, CellMetric::DEFAULT);
+    assert_eq!(vga.metrics.text, TextRendering::ScaledBitmap);
+    assert_eq!(
+        vga.with_viewport(crate::core::geom::Size { cols: 40, rows: 12 })
+            .metrics,
+        vga.metrics
+    );
+}

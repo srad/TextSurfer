@@ -194,3 +194,25 @@ fn explicit_lines_degrade_independently() {
             .any(|span| span.text.contains("ABCDE") && span.style.scale == 1)
     );
 }
+
+#[test]
+fn negative_inline_margin_overlaps_and_later_content_paints_on_top() {
+    let page = render_html(
+        "<body style='margin:0'>A<span style='margin-left:-1ch'>B</span></body>",
+        Size { cols: 8, rows: 4 },
+        Palette::default(),
+        false,
+    );
+    assert_eq!(page.painted.text_lines()[0].trim_end(), "B");
+}
+
+#[test]
+fn mixed_css_math_reaches_parent_relative_layout() {
+    let page = render_html(
+        "<body style='margin:0'><div style='width:calc(50% - 1ch)'>X</div></body>",
+        Size { cols: 10, rows: 4 },
+        Palette::default(),
+        false,
+    );
+    assert!(page.painted.hits.iter().any(|hit| hit.rect.width == 4));
+}

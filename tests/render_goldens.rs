@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use textsurfer::core::geom::Size;
 use textsurfer::core::style::{
-    BorderCollapse, BorderSpacing, CaptionSide, Palette, Rgb, Rgba, TextRendering,
+    BorderCollapse, BorderSpacing, CaptionSide, Palette, RenderContext, Rgb, Rgba,
 };
 use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::paint::DisplayList;
@@ -46,12 +46,11 @@ fn stateful_render_reuses_one_page_load_and_restores_hover_style() {
         url::Url::parse("https://example.com/").unwrap(),
         encoding_rs::UTF_8,
         PageLoadOptions {
-            viewport: Size { cols: 40, rows: 24 },
+            render: RenderContext::terminal(Size { cols: 40, rows: 24 }),
             palette: palette(),
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
-            text_rendering: TextRendering::Cell,
         },
     );
     let first = load.force_render();
@@ -79,12 +78,11 @@ fn dynamic_flex_restyle_reflows_and_restores_the_public_render_path() {
         url::Url::parse("https://example.com/").unwrap(),
         encoding_rs::UTF_8,
         PageLoadOptions {
-            viewport: Size { cols: 20, rows: 8 },
+            render: RenderContext::terminal(Size { cols: 20, rows: 8 }),
             palette: palette(),
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
-            text_rendering: TextRendering::Cell,
         },
     );
     let first = load.force_render();
@@ -252,12 +250,11 @@ fn dynamic_custom_property_restyle_reuses_the_public_page_load() {
         url::Url::parse("https://example.com/").unwrap(),
         encoding_rs::UTF_8,
         PageLoadOptions {
-            viewport: Size { cols: 20, rows: 8 },
+            render: RenderContext::terminal(Size { cols: 20, rows: 8 }),
             palette: palette(),
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
-            text_rendering: TextRendering::Cell,
         },
     );
     let first = load.force_render();

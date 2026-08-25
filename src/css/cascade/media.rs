@@ -1,5 +1,7 @@
 use crate::core::geom::Size;
-use crate::core::style::{CellMetric, CssLength, FontSize, LengthAxis, Palette, TextRendering};
+use crate::core::style::{
+    CellMetric, CssLength, FontSize, LengthAxis, Palette, RenderContext, TextRendering,
+};
 use crate::css::StyleSheet;
 use crate::css::parser::{
     ColorScheme, CssRule, DimensionCondition, MediaAxis, MediaBound, MediaComparison, MediaFeature,
@@ -95,6 +97,15 @@ impl MediaContext {
         }
     }
 
+    pub fn with_render_context(self, render: RenderContext) -> Self {
+        Self {
+            viewport: render.viewport,
+            cell_metric: render.metrics.cell,
+            text_rendering: render.metrics.text,
+            ..self
+        }
+    }
+
     pub fn with_font_sizes(self, font_size: FontSize, root_font_size: FontSize) -> Self {
         Self {
             font_size,
@@ -122,6 +133,22 @@ impl MediaContext {
         let (font, root) = self.layout_font_sizes();
         self.cell_metric
             .resolve_signed_cells_with_fonts(length, axis, self.viewport, font, root)
+    }
+
+    pub(in crate::css) fn resolve_fractional_cells(
+        self,
+        length: CssLength,
+        axis: LengthAxis,
+    ) -> f32 {
+        let cell_px = match axis {
+            LengthAxis::Horizontal => self.cell_metric.column_px(),
+            LengthAxis::Vertical => self.cell_metric.row_px(),
+        };
+        let (font, root) = self.layout_font_sizes();
+        (self
+            .cell_metric
+            .css_pixels_with_fonts(length, self.viewport, font, root)
+            / f64::from(cell_px)) as f32
     }
 
     pub(super) fn layout_font_sizes(self) -> (f64, f64) {

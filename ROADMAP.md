@@ -27,8 +27,9 @@ written; the audit is re-run whenever a candidate crate appears.
 | `css/cascade/{content,counters}.rs` + `css/values.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
 | Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.14 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | Presentational HTML legacy values (M1-D) | narrow standards adapter | **Custom is correct** — html5ever owns HTML parsing and cssparser/cssparser-color own CSS syntax, but none implements WHATWG's legacy non-negative integer, dimension, or color-value algorithms. Keep these untrusted-value adapters isolated under `css::presentational`; compare structure and edge cases with Ladybird commit `8baf4260d40dd53cd09c21c868d2bd0625a69149`, with WHATWG authoritative |
-| `font-size` computed-value grammar (M1-D) | narrow standards adapter | **Keep narrow adapter** — cssparser owns tokenization, dimensions, percentages, functions and recovery; the adapter maps the supported Fonts/CSS-wide keywords and length-percentage forms onto the frontend-neutral computed typography model. Full font selection and CSS math remain outside the raster-font scope |
+| `font-size` computed-value grammar (M1-D) | narrow standards adapter | **Keep narrow adapter** — cssparser owns tokenization, dimensions, percentages, functions and recovery; the adapter maps the supported Fonts/CSS-wide keywords and length-percentage forms onto the frontend-neutral computed typography model. Full font selection remains outside the raster-font scope; M6 CSS math reuses the same token stream and typed evaluator |
 | CSS custom properties and `var()` (M6) | custom cascade adapter | **Keep narrow adapter** — cssparser 0.37.0 owns tokens, nesting, escapes and source positions; per-element inheritance, dependency cycles and computed-value substitution are cascade behavior. LightningCSS exposes a static build-time map and `muskitty-values` is parse-only, so neither can supply the runtime element environment. Stable Custom Properties Level 1 is implemented without a new dependency |
+| CSS math values (M6) | narrow standards adapter | **Keep narrow adapter** — cssparser 0.37.0 owns tokenization, functions, nested blocks and recovery. `muskitty-css-values` 0.1.0 is parse-only, uses an independent tokenizer, lacks computed-value type checking, percentage-basis evaluation, resource ceilings and `clamp(..., none, ...)`, and therefore cannot replace this bounded evaluator without importing another CSS stack |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ### Prior-art audit (2026-08-22)
@@ -74,8 +75,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-25): **684 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 38 golden** with the default VGA frontend, and **591 lib · 12 binary** with
+Test counts at the last green run (2026-08-26): **689 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 38 golden** with the default VGA frontend, and **596 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -830,10 +831,19 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       are capped at 2 MiB with bounded component nesting. `ComputedStyle` and `StyleTree` remain
       unchanged; selector bucketing's median may not regress by more than 15%. CSSOM, `@property`,
       animations, `env()`, dynamic Level 2 names/units and `revert-layer` remain out of scope.
-- [ ] **CSS math and layout integration** — parse and compute `calc()`, `min()`, `max()` and
-      `clamp()` after custom-property substitution, including mixed compatible units and layout-axis
-      percentage resolution. Custom properties may carry these tokens meanwhile, but consumers
-      reject the computed declaration until this item lands.
+- [ ] **CSS math, render metrics and signed margins** *(in progress)* — parse and type-check bounded Values 4
+      `calc()`, `min()`, `max()` and `clamp()` trees after custom-property substitution, preserve
+      unresolved percentages until the owning layout axis is known, and resolve physical units
+      through a frontend-injected render context. VGA injects its 8×16 bitmap metric with scaled
+      text; terminal and dump inject the nominal 8×16 cell metric. Enable Taffy's `calc` and
+      `strict_provenance` features behind a layout-owned adapter rather than its zero-resolving
+      built-in tree. Signed margins must reach block, flex, inline and the supported table subset;
+      overlapping paint and hit testing share one source/depth order. Unsupported dimensions,
+      division by zero, non-finite results, incompatible types and exhausted limits invalidate the
+      declaration atomically. Landed: render-context plumbing, mixed length/percentage math for
+      size/min/max properties, basis-independent range selection and simple signed margins.
+      Remaining: basis-dependent `min()`/`max()`/`clamp()` (including `none` bounds), then typed math
+      for margins, padding, insets, gaps, `flex-basis` and `font-size`.
 - [ ] **Grid** — enable Taffy's grid engine after the flex formatting and paint-order seams settle.
 - [ ] **Floats** — conformant line-flow-around-float formatting.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
@@ -890,6 +900,29 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-26 — **M6 CSS math foundation delivered; item remains in progress.** `RenderMetrics` and
+  `RenderContext` now keep cell geometry and text capability together from VGA/terminal/dump through
+  `PageLoad` and `MediaContext`; both current profiles explicitly inject 8×16, so a future frontend
+  can change geometry without changing cascade code. Taffy 0.14.0 enables `calc` and
+  `strict_provenance`; a layout-owned tree now dispatches block/flex/leaf work and resolves opaque
+  calculation handles without unsafe code. The bounded cssparser-backed evaluator type-checks
+  arithmetic, resolves supported units through the injected metric, defers mixed
+  length/percentage `calc()` on size/min/max properties, and supports range functions when their
+  ordering is independent of the eventual percentage basis. Basis-dependent ranges and math for
+  margins, padding, insets, gaps, flex basis and font size stay open rather than being approximated.
+  Margins are signed through cascade, block/flex layout and inline cursor offsets; a public overlap
+  case proves later content paints on top. Taffy remains latest 0.14.0 and cssparser latest 0.37.0.
+  The complete local gate matrix is green at 689 library tests (596 without defaults), 13 binary
+  tests (12 without defaults), 6 fetch-pipeline, 14 corpus and 38 render-golden tests.
+- 2026-08-25 — **M6 CSS math, render metrics and signed margins started from a green baseline.**
+  Frontend-owned render metrics replace an implicit universal geometry assumption; VGA injects its
+  8×16 bitmap profile and terminal/dump the
+  nominal 8×16 cell profile. cssparser remains pinned at latest 0.37.0. `muskitty-css-values` 0.1.0
+  was rejected because it cannot supply computed-value typing, percentage-basis evaluation,
+  resource caps or the full target grammar. Taffy remains pinned at latest 0.14.0 and will enable
+  its `calc` and `strict_provenance` features behind a layout-owned adapter. All eight required
+  gates were green before implementation: 684 library tests (591 without defaults), 13 binary (12
+  without defaults), 6 fetch-pipeline, 14 corpus and 38 render-golden tests.
 - 2026-08-25 — **M6 CSS custom properties started from a green baseline.** Stable Custom
   Properties Level 1 is the target; the experimental Level 2 dynamic-name and variable-unit grammar
   is excluded. cssparser remains pinned at 0.37.0 and owns syntax tokenization while the cascade owns

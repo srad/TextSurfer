@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use url::Url;
 
 use crate::core::geom::Size;
-use crate::core::style::{Palette, TextRendering};
+use crate::core::style::{Palette, RenderContext};
 use crate::core::url::url_fix;
 use crate::css::ColorScheme;
 use crate::net::{
@@ -57,12 +57,11 @@ pub fn dump_lines(
                 response.final_url,
                 decoded.encoding,
                 PageLoadOptions {
-                    viewport,
+                    render: RenderContext::terminal(viewport),
                     palette,
                     scripting: false,
                     color_scheme: ColorScheme::Dark,
                     started: Duration::ZERO,
-                    text_rendering: TextRendering::Cell,
                 },
             );
             let started = Instant::now();

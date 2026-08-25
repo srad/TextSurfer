@@ -11,12 +11,11 @@ fn load(source: &str) -> PageLoad {
         Url::parse("https://example.com/dir/page").unwrap(),
         UTF_8,
         PageLoadOptions {
-            viewport: Size { cols: 80, rows: 24 },
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
             palette: Palette::default(),
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
-            text_rendering: crate::core::style::TextRendering::Cell,
         },
     )
 }
@@ -60,12 +59,11 @@ fn a_local_page_may_still_load_its_own_local_stylesheets() {
         Url::parse("file:///C:/site/page.html").unwrap(),
         UTF_8,
         PageLoadOptions {
-            viewport: Size { cols: 80, rows: 24 },
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
             palette: Palette::default(),
             scripting: false,
             color_scheme: ColorScheme::Dark,
             started: Duration::ZERO,
-            text_rendering: crate::core::style::TextRendering::Cell,
         },
     );
     let commands = load.take_commands();

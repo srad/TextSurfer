@@ -200,6 +200,7 @@ pub(super) fn resolved_width(width: CssWidth, basis: usize) -> Option<usize> {
         CssWidth::Auto => None,
         CssWidth::Cells(value) => Some(value),
         CssWidth::Percent(value) => Some(value.resolve(basis)),
+        CssWidth::Calc(value) => Some(value.resolve(basis as f32).max(0.0).round() as usize),
     }
 }
 

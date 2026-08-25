@@ -2,6 +2,7 @@ mod flow;
 mod links;
 mod tables;
 mod taffy_style;
+mod tree;
 
 #[cfg(test)]
 mod tests;
@@ -9,7 +10,7 @@ mod tests;
 use std::collections::HashMap;
 
 use taffy::compute_leaf_layout;
-use taffy::prelude::{AvailableSpace, Size as TaffySize, TaffyTree};
+use taffy::prelude::{AvailableSpace, Size as TaffySize};
 use taffy::tree::Baselines;
 use unicode_width::UnicodeWidthStr;
 
@@ -30,6 +31,7 @@ use flow::{
 use links::{assign_link_rects, collect_links};
 use tables::append_table_output;
 use taffy_style::{layout_rect, taffy_style};
+use tree::LayoutTree;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BoxTree {
@@ -210,7 +212,77 @@ fn try_layout_flow(
     nesting: usize,
 ) -> Option<BoxTree> {
     let parent_direction = prepare_flow(&mut flow);
-    let mut taffy: TaffyTree<usize> = TaffyTree::new();
+    let mut table_cache = HashMap::new();
+    let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
+    let mut measure = |inputs, index: usize, style: &taffy::Style| {
+        let mut baseline = None;
+        let mut output = compute_leaf_layout(
+            inputs,
+            style,
+            |_, _| 0.0,
+            |known, available| {
+                if let Some(table) = flow[index].table {
+                    let width = measured_width(known.width, available.width, viewport_width)
+                        .definite(viewport_width)
+                        .max(1);
+                    let output = table_cache.entry((table, width)).or_insert_with(|| {
+                        TableFormatter::new(document, styles).format(
+                            table,
+                            width,
+                            TableLimits::default(),
+                            nesting,
+                        )
+                    });
+                    baseline = Some(output.baseline() as f32);
+                    return TaffySize {
+                        width: output.width as f32,
+                        height: output.height as f32,
+                    };
+                }
+                let measure = measured_width(known.width, available.width, viewport_width);
+                let key = (index, measure);
+                inline_cache.entry(key).or_insert_with(|| {
+                    resolve_inline(
+                        document,
+                        styles,
+                        viewport_width,
+                        &flow[index].inline,
+                        measure,
+                        nesting,
+                    )
+                });
+                let pieces = inline_cache.get(&key).expect("resolved inline");
+                let natural = intrinsic_width(pieces);
+                let measured_width = known.width.unwrap_or_else(|| match available.width {
+                    AvailableSpace::Definite(value) => value,
+                    AvailableSpace::MinContent => min_content_width(pieces) as f32,
+                    AvailableSpace::MaxContent => natural as f32,
+                });
+                let lines = format_inline(pieces, measured_width.max(0.0) as usize);
+                baseline = lines.first().map(|line| {
+                    let (_, baseline) = line_metrics(line, pieces);
+                    let inset = flow[index]
+                        .style
+                        .padding
+                        .top
+                        .saturating_add(flow[index].style.border.top.layout_width());
+                    baseline.saturating_add(inset) as f32
+                });
+                TaffySize {
+                    width: known.width.unwrap_or(measured_width),
+                    height: known
+                        .height
+                        .unwrap_or(formatted_height(&lines, pieces) as f32),
+                }
+            },
+        );
+        output.baselines = Baselines::from_first(baseline);
+        output
+    };
+    let calc_values = std::cell::RefCell::new(Vec::<crate::core::style::CssCalc>::new());
+    let mut taffy = LayoutTree::new(&mut measure, |value, basis| {
+        calc_values.borrow()[(value.addr() >> 3) - 1].resolve(basis)
+    });
     let mut taffy_nodes = vec![None; flow.len()];
     for index in (0..flow.len()).rev() {
         let style = taffy_style(
@@ -218,103 +290,35 @@ fn try_layout_flow(
             index == 0 && root_index == 0,
             viewport_width,
             parent_direction[index],
+            &calc_values,
         );
         let node = if !flow[index].inline.is_empty() || flow[index].table.is_some() {
-            taffy.new_leaf_with_context(style, index).ok()?
+            taffy.new_leaf(style, index)
         } else {
             let children: Vec<_> = flow[index]
                 .children
                 .iter()
                 .map(|child| taffy_nodes[*child])
                 .collect::<Option<Vec<_>>>()?;
-            taffy.new_with_children(style, &children).ok()?
+            taffy.new_with_children(style, children)
         };
         taffy_nodes[index] = Some(node);
     }
     let root = taffy_nodes[root_index]?;
-    let mut table_cache = HashMap::new();
-    let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
-    taffy
-        .compute_layout_with_measure(
-            root,
-            TaffySize {
-                width: available_width,
-                height: AvailableSpace::MaxContent,
-            },
-            |inputs, _, context, style| {
-                let index = context.map(|context| *context);
-                let mut baseline = None;
-                let mut output = compute_leaf_layout(
-                    inputs,
-                    style,
-                    |_, _| 0.0,
-                    |known, available| {
-                        let Some(index) = index else {
-                            return TaffySize::ZERO;
-                        };
-                        if let Some(table) = flow[index].table {
-                            let width =
-                                measured_width(known.width, available.width, viewport_width)
-                                    .definite(viewport_width)
-                                    .max(1);
-                            let output = table_cache.entry((table, width)).or_insert_with(|| {
-                                TableFormatter::new(document, styles).format(
-                                    table,
-                                    width,
-                                    TableLimits::default(),
-                                    nesting,
-                                )
-                            });
-                            baseline = Some(output.baseline() as f32);
-                            return TaffySize {
-                                width: output.width as f32,
-                                height: output.height as f32,
-                            };
-                        }
-                        let measure = measured_width(known.width, available.width, viewport_width);
-                        let key = (index, measure);
-                        inline_cache.entry(key).or_insert_with(|| {
-                            resolve_inline(
-                                document,
-                                styles,
-                                viewport_width,
-                                &flow[index].inline,
-                                measure,
-                                nesting,
-                            )
-                        });
-                        let pieces = inline_cache.get(&key).expect("resolved inline");
-                        let natural = intrinsic_width(pieces);
-                        let measured_width = known.width.unwrap_or_else(|| match available.width {
-                            AvailableSpace::Definite(value) => value,
-                            AvailableSpace::MinContent => min_content_width(pieces) as f32,
-                            AvailableSpace::MaxContent => natural as f32,
-                        });
-                        let lines = format_inline(pieces, measured_width.max(0.0) as usize);
-                        baseline = lines.first().map(|line| {
-                            let (_, baseline) = line_metrics(line, pieces);
-                            let inset = flow[index]
-                                .style
-                                .padding
-                                .top
-                                .saturating_add(flow[index].style.border.top.layout_width());
-                            baseline.saturating_add(inset) as f32
-                        });
-                        TaffySize {
-                            width: known.width.unwrap_or(measured_width),
-                            height: known
-                                .height
-                                .unwrap_or(formatted_height(&lines, pieces) as f32),
-                        }
-                    },
-                );
-                output.baselines = Baselines::from_first(baseline);
-                output
-            },
-        )
-        .ok()?;
+    taffy.compute_layout(
+        root,
+        TaffySize {
+            width: available_width,
+            height: AvailableSpace::MaxContent,
+        },
+    );
 
-    let root_layout = *taffy.layout(root).ok()?;
+    let layouts: Vec<_> = taffy_nodes
+        .iter()
+        .map(|node| node.map(|node| taffy.layout(node)))
+        .collect::<Option<Vec<_>>>()?;
+    drop(taffy);
+    let root_layout = layouts[root_index];
     let mut tree = BoxTree {
         width: root_layout.size.width.max(0.0).round() as usize,
         height: 0,
@@ -329,8 +333,7 @@ fn try_layout_flow(
         false,
     )];
     while let Some((index, parent_col, parent_row, inherited_clip, fixed_subtree)) = stack.pop() {
-        let node = taffy_nodes[index]?;
-        let layout = *taffy.layout(node).ok()?;
+        let layout = layouts[index];
         let absolute_col = parent_col + layout.location.x;
         let absolute_row = parent_row + layout.location.y;
         let border_rect = layout_rect(absolute_col, absolute_row, layout.size);
@@ -651,6 +654,7 @@ fn resolve_inline(
         .map(|piece| {
             let atom = piece.atom.as_ref().map(|source| match source {
                 InlineAtomSource::Ready(output) => InlineAtom::Table(output.clone()),
+                InlineAtomSource::Offset(offset) => InlineAtom::Offset(*offset),
                 InlineAtomSource::Node(node)
                     if matches!(
                         styles.get(*node).display.inside(),

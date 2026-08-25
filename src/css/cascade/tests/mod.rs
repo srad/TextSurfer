@@ -824,6 +824,48 @@ fn lengths_resolve_through_the_terminal_cell_metric_on_each_axis() {
 }
 
 #[test]
+fn negative_margins_preserve_their_sign_on_both_axes() {
+    let mut document = Document::new();
+    let node = document.insert_element(
+        None,
+        "p",
+        ElementNs::Html,
+        vec![Attr::plain(
+            "style",
+            "margin: -8px -16px -32px -24px; margin-left: -4ch",
+        )],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    assert_eq!(
+        styles.get(node).margin,
+        crate::core::style::MarginEdges {
+            top: CssMargin::Cells(-1),
+            right: CssMargin::Cells(-2),
+            bottom: CssMargin::Cells(-2),
+            left: CssMargin::Cells(-4),
+        }
+    );
+}
+
+#[test]
+fn css_math_preserves_mixed_percentage_and_length_until_layout() {
+    let mut document = Document::new();
+    let node = document.insert_element(
+        None,
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain("style", "width: calc(50% - 1ch)")],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let CssSize::Calc(value) = styles.get(node).width else {
+        panic!("expected deferred math");
+    };
+    assert_eq!(value.length(), -1.0);
+    assert_eq!(value.percent(), 0.5);
+    assert_eq!(value.resolve(10.0), 4.0);
+}
+
+#[test]
 fn bucketed_and_naive_cascades_agree_for_complex_selector_lists() {
     let mut document = Document::new();
     let article = document.insert_element(

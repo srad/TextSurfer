@@ -4,6 +4,7 @@ mod display;
 mod flex;
 mod length;
 mod list;
+mod render;
 mod table;
 mod typography;
 
@@ -15,7 +16,7 @@ use std::collections::HashMap;
 use crate::core::dom::NodeId;
 
 pub use box_model::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssInset, CssMargin,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssCalc, CssInset, CssMargin,
     CssMaxSize, CssPercentage, CssSize, CssWidth, EdgeSizes, InsetEdges, MarginEdges, Overflow,
     OverflowAxes, Position,
 };
@@ -29,6 +30,7 @@ pub use flex::{
 };
 pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
+pub use render::{RenderContext, RenderMetrics};
 pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
 pub use typography::{FontSize, TextPresentation, TextRendering};
 

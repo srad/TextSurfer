@@ -287,7 +287,13 @@ fn taffy_alignment_mapping_preserves_safety_and_physical_fallbacks() {
             .iter()
             .find(|flow| flow.owner == Some(root))
             .unwrap();
-        crate::layout::engine::taffy_style::taffy_style(container, false, 20, None)
+        crate::layout::engine::taffy_style::taffy_style(
+            container,
+            false,
+            20,
+            None,
+            &std::cell::RefCell::new(Vec::new()),
+        )
     }
 
     let column = mapped(

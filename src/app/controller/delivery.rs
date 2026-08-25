@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::core::geom::Size;
+use crate::core::style::RenderContext;
 use crate::net::{
     FetchPayload, FetchPoll, ResourceId, charset_from_content_type, decode, decode_text,
 };
@@ -178,12 +179,14 @@ impl App {
                                         response.final_url,
                                         decoded.encoding,
                                         PageLoadOptions {
-                                            viewport,
+                                            render: RenderContext {
+                                                viewport,
+                                                metrics: self.render_metrics,
+                                            },
                                             palette,
                                             scripting: false,
                                             color_scheme,
                                             started: self.now,
-                                            text_rendering: self.text_rendering,
                                         },
                                     );
                                     commands = load.take_commands();

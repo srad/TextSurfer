@@ -17,7 +17,7 @@ use crate::core::event::{InputBatch, InputEvent};
 use crate::core::focus::Focus;
 use crate::core::frame::FrameDamage;
 use crate::core::geom::{Point, Size};
-use crate::core::style::TextRendering;
+use crate::core::style::{RenderMetrics, TextRendering};
 use crate::ui::editing::EditBuffer;
 use crate::ui::mouse::ChromeGeometry;
 
@@ -46,7 +46,7 @@ pub struct App {
     theme_index: usize,
     focus_before_menu: Focus,
     now: Duration,
-    text_rendering: TextRendering,
+    render_metrics: RenderMetrics,
     pointer: Option<Point>,
     hover: Option<HoverTarget>,
     pressed: Option<PressedTarget>,
@@ -70,10 +70,20 @@ impl App {
     }
 
     pub fn with_net(net: Arc<dyn Navigate>) -> Self {
-        Self::with_net_and_rendering(net, TextRendering::Cell)
+        Self::with_net_and_metrics(net, RenderMetrics::TERMINAL)
     }
 
     pub fn with_net_and_rendering(net: Arc<dyn Navigate>, text_rendering: TextRendering) -> Self {
+        Self::with_net_and_metrics(
+            net,
+            RenderMetrics {
+                cell: crate::core::style::CellMetric::DEFAULT,
+                text: text_rendering,
+            },
+        )
+    }
+
+    pub fn with_net_and_metrics(net: Arc<dyn Navigate>, render_metrics: RenderMetrics) -> Self {
         let geometry = ChromeGeometry::for_size(DEFAULT_SIZE);
         Self {
             focus: Focus::Address,
@@ -93,7 +103,7 @@ impl App {
             theme_index: crate::ui::theme::DEFAULT_THEME_INDEX,
             focus_before_menu: Focus::Address,
             now: Duration::ZERO,
-            text_rendering,
+            render_metrics,
             pointer: None,
             hover: None,
             pressed: None,

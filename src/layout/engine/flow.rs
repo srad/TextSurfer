@@ -53,27 +53,28 @@ pub(super) struct FlowBox {
 pub(super) enum InlineAtomSource {
     Ready(Box<TableOutput>),
     Node(NodeId),
+    Offset(isize),
 }
 
 impl Atom for InlineAtomSource {
     fn width(&self) -> usize {
         match self {
             Self::Ready(output) => output.width,
-            Self::Node(_) => 0,
+            Self::Node(_) | Self::Offset(_) => 0,
         }
     }
 
     fn height(&self) -> usize {
         match self {
             Self::Ready(output) => output.height,
-            Self::Node(_) => 0,
+            Self::Node(_) | Self::Offset(_) => 0,
         }
     }
 
     fn baseline(&self) -> usize {
         match self {
             Self::Ready(output) => output.baseline(),
-            Self::Node(_) => 0,
+            Self::Node(_) | Self::Offset(_) => 0,
         }
     }
 }
@@ -82,6 +83,7 @@ impl Atom for InlineAtomSource {
 pub(super) enum InlineAtom {
     Table(Box<TableOutput>),
     Layout(Box<AtomicLayout>),
+    Offset(isize),
 }
 
 #[derive(Clone)]
@@ -95,6 +97,7 @@ impl Atom for InlineAtom {
         match self {
             Self::Table(output) => output.width,
             Self::Layout(output) => output.tree.width,
+            Self::Offset(_) => 0,
         }
     }
 
@@ -102,6 +105,7 @@ impl Atom for InlineAtom {
         match self {
             Self::Table(output) => output.height,
             Self::Layout(output) => output.tree.height,
+            Self::Offset(_) => 0,
         }
     }
 
@@ -109,6 +113,7 @@ impl Atom for InlineAtom {
         match self {
             Self::Table(output) => output.baseline(),
             Self::Layout(output) => output.baseline,
+            Self::Offset(_) => 0,
         }
     }
 }
@@ -796,42 +801,46 @@ fn append_edge(
     buffer: &mut Vec<InlinePiece>,
 ) {
     let cells = if left {
-        style.margin.left.cells().saturating_add(style.padding.left)
+        style
+            .margin
+            .left
+            .cells()
+            .saturating_add(style.padding.left as isize)
     } else {
         style
             .margin
             .right
             .cells()
-            .saturating_add(style.padding.right)
+            .saturating_add(style.padding.right as isize)
     };
-    if cells > 0 {
-        buffer.push(InlinePiece {
-            node,
-            text: " ".repeat(cells),
-            white_space: WhiteSpace::BreakSpaces,
-            depth: context.depth,
-            style: context.style,
-            hidden: context.computed.visibility.is_hidden(),
-            atom: None,
-        });
-    }
+    append_horizontal_margin(node, cells, context, buffer);
 }
 
 fn append_horizontal_margin(
     node: NodeId,
-    cells: usize,
+    cells: isize,
     context: InlineContext,
     buffer: &mut Vec<InlinePiece>,
 ) {
     if cells > 0 {
         buffer.push(InlinePiece {
             node,
-            text: " ".repeat(cells),
+            text: " ".repeat(cells as usize),
             white_space: WhiteSpace::BreakSpaces,
             depth: context.depth,
             style: context.style,
             hidden: context.computed.visibility.is_hidden(),
             atom: None,
+        });
+    } else if cells < 0 {
+        buffer.push(InlinePiece {
+            node,
+            text: String::new(),
+            white_space: WhiteSpace::BreakSpaces,
+            depth: context.depth,
+            style: context.style,
+            hidden: context.computed.visibility.is_hidden(),
+            atom: Some(InlineAtomSource::Offset(cells)),
         });
     }
 }
@@ -862,6 +871,9 @@ pub(super) fn append_inline(
                     let row = current_row
                         .saturating_add(baseline.saturating_sub(atom.baseline()) as isize);
                     match atom {
+                        InlineAtom::Offset(offset) => {
+                            current_col = current_col.saturating_add(*offset);
+                        }
                         InlineAtom::Table(table) => append_table_output(
                             tree,
                             table.as_ref().clone(),

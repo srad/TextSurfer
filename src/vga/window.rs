@@ -24,7 +24,7 @@ use crate::app::net::Navigate;
 use crate::core::event::{InputBatch, InputEvent, MouseEvent, MouseKind, ResizePhase};
 use crate::core::frame::{FrameDamage, FrameScheduler, RowDamage};
 use crate::core::geom::{Point, Size};
-use crate::core::style::{Cursor, Rgb, TextRendering};
+use crate::core::style::{Cursor, RenderMetrics, Rgb};
 use crate::layout::LayoutRect;
 use crate::ui::chrome;
 use crate::ui::frame::FrameComposer;
@@ -113,7 +113,7 @@ impl VgaApp {
         options: VgaOptions,
         url: Option<String>,
     ) -> io::Result<Self> {
-        let mut app = App::with_net_and_rendering(net, TextRendering::ScaledBitmap);
+        let mut app = App::with_net_and_metrics(net, RenderMetrics::VGA);
         let theme = *app.theme();
         let palette = theme.palette();
         let backend = VgaBackend::new(SurfaceConfig {

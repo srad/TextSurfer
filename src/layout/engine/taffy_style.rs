@@ -24,6 +24,7 @@ pub(super) fn taffy_style(
     root: bool,
     viewport_width: usize,
     parent_direction: Option<FlexDirection>,
+    calc_values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
 ) -> TaffyStyle {
     if root {
         return TaffyStyle {
@@ -82,20 +83,20 @@ pub(super) fn taffy_style(
             bottom: inset(flow.style.inset.bottom),
         },
         size: TaffySize {
-            width: dimension(flow.style.width),
+            width: dimension(flow.style.width, calc_values),
             height: if flow.rule && flow.style.height == CssSize::Auto {
                 Dimension::length(1.0)
             } else {
-                dimension(flow.style.height)
+                dimension(flow.style.height, calc_values)
             },
         },
         min_size: TaffySize {
-            width: minimum(flow.style.min_width),
-            height: minimum(flow.style.min_height),
+            width: minimum(flow.style.min_width, calc_values),
+            height: minimum(flow.style.min_height, calc_values),
         },
         max_size: TaffySize {
-            width: maximum(flow.style.max_width),
-            height: maximum(flow.style.max_height),
+            width: maximum(flow.style.max_width, calc_values),
+            height: maximum(flow.style.max_height, calc_values),
         },
         margin: TaffyRect {
             left: margin(flow.style.margin.left),
@@ -174,32 +175,53 @@ fn inset(value: CssInset) -> LengthPercentageAuto {
     }
 }
 
-fn dimension(value: CssSize) -> Dimension {
+fn dimension(
+    value: CssSize,
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+) -> Dimension {
     match value {
         CssSize::Auto => Dimension::auto(),
         CssSize::Cells(value) => Dimension::length(value as f32),
         CssSize::Percent(value) => Dimension::percent(value.basis_points() as f32 / 10_000.0),
+        CssSize::Calc(value) => Dimension::calc(calc_handle(values, value)),
     }
 }
 
-fn minimum(value: CssSize) -> LengthPercentageAuto {
+fn minimum(
+    value: CssSize,
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+) -> LengthPercentageAuto {
     match value {
         CssSize::Auto => LengthPercentageAuto::auto(),
         CssSize::Cells(value) => LengthPercentageAuto::length(value as f32),
         CssSize::Percent(value) => {
             LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
         }
+        CssSize::Calc(value) => LengthPercentageAuto::calc(calc_handle(values, value)),
     }
 }
 
-fn maximum(value: CssMaxSize) -> LengthPercentageAuto {
+fn maximum(
+    value: CssMaxSize,
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+) -> LengthPercentageAuto {
     match value {
         CssMaxSize::None => LengthPercentageAuto::auto(),
         CssMaxSize::Cells(value) => LengthPercentageAuto::length(value as f32),
         CssMaxSize::Percent(value) => {
             LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
         }
+        CssMaxSize::Calc(value) => LengthPercentageAuto::calc(calc_handle(values, value)),
     }
+}
+
+fn calc_handle(
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    value: crate::core::style::CssCalc,
+) -> *const () {
+    let mut values = values.borrow_mut();
+    values.push(value);
+    std::ptr::without_provenance(values.len() << 3)
 }
 
 fn flex_basis(value: FlexBasis, parent_direction: Option<FlexDirection>) -> Dimension {

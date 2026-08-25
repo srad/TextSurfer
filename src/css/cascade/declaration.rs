@@ -13,7 +13,7 @@ use crate::css::values::{
     assign_border_color, assign_border_colors, assign_border_side, assign_border_style,
     assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
     consume_block, parse_background_color, parse_border, parse_color, parse_cursor, parse_display,
-    parse_font_weight, parse_ident, parse_length_token, parse_lengths, parse_list_style_position,
+    parse_font_weight, parse_ident, parse_lengths, parse_list_style_position,
     parse_list_style_type, parse_size, parse_text_decoration,
 };
 
@@ -192,18 +192,12 @@ fn apply_declaration_raw(
                 style.vertical_align = value;
             }
         }
-        "width" => {
-            if let Some(width) = parse_size(
-                &declaration.value,
-                media.cell_metric,
-                media.viewport,
-                font_px,
-                root_font_px,
-                LengthAxis::Horizontal,
-            ) {
-                style.width = width;
-            }
-        }
+        "width" => assign_size(
+            &mut style.width,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media,
+        ),
         "height" => assign_size(
             &mut style.height,
             &declaration.value,
@@ -777,13 +771,13 @@ fn parse_margins(source: &str, media: MediaContext) -> Option<MarginEdges> {
         {
             CssMargin::Auto
         } else {
-            let length = parse_length_token(&mut parser)?;
+            let length = crate::css::values::parse_signed_length_token(&mut parser)?;
             let axis = if matches!(values.len(), 0 | 2) {
                 LengthAxis::Vertical
             } else {
                 LengthAxis::Horizontal
             };
-            CssMargin::Cells(media.resolve_cells(length, axis))
+            CssMargin::Cells(media.resolve_signed_cells(length, axis))
         };
         values.push(value);
     }
@@ -810,16 +804,26 @@ fn assign_margin(target: &mut CssMargin, source: &str, axis: LengthAxis, media: 
         *target = CssMargin::Auto;
         return;
     }
-    let Some(length) = parse_lengths(source).and_then(|values| match values.as_slice() {
-        [value] => Some(*value),
-        _ => None,
-    }) else {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let Some(length) = crate::css::values::parse_signed_length_token(&mut parser) else {
         return;
     };
-    *target = CssMargin::Cells(media.resolve_cells(length, axis));
+    if !parser.is_exhausted() {
+        return;
+    }
+    *target = CssMargin::Cells(media.resolve_signed_cells(length, axis));
 }
 
 fn assign_size(target: &mut CssSize, source: &str, axis: LengthAxis, media: MediaContext) {
+    let source_start = source.trim_start().to_ascii_lowercase();
+    let is_math = ["calc(", "min(", "max(", "clamp("]
+        .iter()
+        .any(|function| source_start.starts_with(function));
+    if is_math && let Some(value) = crate::css::math::parse_length_percentage(source, media, axis) {
+        *target = CssSize::Calc(value);
+        return;
+    }
     let (font_px, root_font_px) = media.layout_font_sizes();
     if let Some(value) = parse_size(
         source,
@@ -843,6 +847,7 @@ fn assign_max_size(target: &mut CssMaxSize, source: &str, axis: LengthAxis, medi
     *target = match value {
         CssSize::Cells(value) => CssMaxSize::Cells(value),
         CssSize::Percent(value) => CssMaxSize::Percent(value),
+        CssSize::Calc(value) => CssMaxSize::Calc(value),
         CssSize::Auto => return,
     };
 }

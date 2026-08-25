@@ -75,7 +75,8 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - Hierarchical rendering path: cssparser + selectors cascade inline, embedded, linked and recursively
   imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
   scripting, color scheme and CSS-pixel viewport dimensions, including MQ4 ranges. CSS absolute,
-  font-relative and viewport-relative lengths resolve through a shared 8×16 cell metric; Taffy
+  font-relative and viewport-relative lengths resolve through a frontend-injected cell metric (the
+  VGA bitmap and nominal terminal/dump profiles are currently 8×16); Taffy
   sizes nested and anonymous block and flex flow, including wrapping, gaps, alignment, ordering,
   growth/shrinkage, explicit/min/max sizing and atomic inline-flex,
   while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
@@ -140,10 +141,11 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): CSS math
-(`calc()`/`min()`/`max()`/`clamp()`) is the next website-rendering slice so real-world variable-driven
-dimensions can reach layout, followed by Grid. Product work continues with keyboard links, forms and
-in-page search (M2), then the JavaScript seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math slice is in
+progress. Mixed length/percentage `calc()` sizing, frontend render metrics and signed block/flex/
+inline margins have landed. Basis-dependent range functions and math in margins, padding, insets,
+gaps, flex basis and font size are next, followed by Grid. Product work continues with keyboard
+links, forms and in-page search (M2), then the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 

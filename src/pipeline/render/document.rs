@@ -1,6 +1,6 @@
 use crate::core::dom::{Document, SharedDocument};
 use crate::core::geom::Size;
-use crate::core::style::{Palette, StyleTree, TextRendering};
+use crate::core::style::{Palette, RenderContext, RenderMetrics, StyleTree, TextRendering};
 use crate::css::{BasicCascade, Cascade, ColorScheme, MediaContext, StyleSheet};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
@@ -14,7 +14,12 @@ pub fn render_html(
     palette: Palette,
     scripting: bool,
 ) -> RenderedPage {
-    render_html_with_text_rendering(source, viewport, palette, scripting, TextRendering::Cell)
+    render_html_with_context(
+        source,
+        RenderContext::terminal(viewport),
+        palette,
+        scripting,
+    )
 }
 
 pub fn render_html_with_text_rendering(
@@ -24,18 +29,37 @@ pub fn render_html_with_text_rendering(
     scripting: bool,
     text_rendering: TextRendering,
 ) -> RenderedPage {
+    render_html_with_context(
+        source,
+        RenderContext {
+            viewport,
+            metrics: RenderMetrics {
+                cell: crate::core::style::CellMetric::DEFAULT,
+                text: text_rendering,
+            },
+        },
+        palette,
+        scripting,
+    )
+}
+
+pub fn render_html_with_context(
+    source: &str,
+    render: RenderContext,
+    palette: Palette,
+    scripting: bool,
+) -> RenderedPage {
     let base = url::Url::parse("about:blank").expect("the static synthetic base parses");
     let mut load = PageLoad::new(
         source,
         base,
         encoding_rs::UTF_8,
         PageLoadOptions {
-            viewport,
+            render,
             palette,
             scripting,
             color_scheme: ColorScheme::Dark,
             started: std::time::Duration::ZERO,
-            text_rendering,
         },
     );
     load.force_render()
