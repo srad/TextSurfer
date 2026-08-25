@@ -1,3 +1,4 @@
+mod clip;
 pub mod engine;
 mod replaced;
 mod table;

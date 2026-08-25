@@ -1,3 +1,26 @@
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Visibility {
+    #[default]
+    Visible,
+    Hidden,
+    Collapse,
+}
+
+impl Visibility {
+    pub const fn parse(keyword: &str) -> Option<Self> {
+        Some(match keyword.as_bytes() {
+            b"visible" => Self::Visible,
+            b"hidden" => Self::Hidden,
+            b"collapse" => Self::Collapse,
+            _ => return None,
+        })
+    }
+
+    pub const fn is_hidden(self) -> bool {
+        !matches!(self, Self::Visible)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayOutside {
     Block,

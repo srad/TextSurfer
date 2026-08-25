@@ -2,6 +2,8 @@ use super::document::elements_in_document_order;
 use super::*;
 
 mod flex;
+mod overflow;
+mod positioning;
 use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
@@ -675,13 +677,17 @@ fn display_modes_preserve_their_computed_outside_and_inside_components() {
 
     let mut document = Document::new();
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
-    let baseline = BasicCascade.apply(&[], &document, MediaContext::screen());
     let sheet =
         CssparserParser.parse("p { position: absolute; inset: 4px; top: 1px; height: 50% }");
-    let degraded = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    let mut expected = baseline.get(p);
-    expected.height = CssSize::Percent(CssPercentage::new(5_000));
-    assert_eq!(degraded.get(p), expected);
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(
+        styles.get(p).position,
+        crate::core::style::Position::Absolute
+    );
+    assert_eq!(
+        styles.get(p).height,
+        CssSize::Percent(CssPercentage::new(5_000))
+    );
 }
 
 #[test]

@@ -15,12 +15,13 @@ use std::collections::HashMap;
 use crate::core::dom::NodeId;
 
 pub use box_model::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssMargin, CssMaxSize,
-    CssPercentage, CssSize, CssWidth, EdgeSizes, MarginEdges,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssInset, CssMargin,
+    CssMaxSize, CssPercentage, CssSize, CssWidth, EdgeSizes, InsetEdges, MarginEdges, Overflow,
+    OverflowAxes, Position,
 };
 pub use color::{CellStyle, Palette, Rgb, Rgba};
 pub use display::{
-    Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside,
+    Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside, Visibility,
 };
 pub use flex::{
     Alignment, AlignmentSafety, AxisCellLength, ContentAlignment, CssGap, CssNumber, FlexBasis,
@@ -131,6 +132,10 @@ pub struct ComputedStyle {
     pub max_height: CssMaxSize,
     pub flex: FlexStyle,
     pub box_sizing: BoxSizing,
+    pub overflow: OverflowAxes,
+    pub visibility: Visibility,
+    pub position: Position,
+    pub inset: InsetEdges,
     pub margin: MarginEdges,
     pub padding: EdgeSizes,
     pub border: BorderEdges,
@@ -159,6 +164,7 @@ impl ComputedStyle {
             display,
             white_space: parent.white_space,
             cursor: parent.cursor,
+            visibility: parent.visibility,
             list_style_type: parent.list_style_type,
             list_style_position: parent.list_style_position,
             border_collapse: parent.border_collapse,

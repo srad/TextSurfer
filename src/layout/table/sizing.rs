@@ -96,10 +96,13 @@ pub(super) fn size_columns(
                     .saturating_add(geometry.fixed_overhead)
                     .min(available_width)
             })
-            .saturating_sub(geometry.fixed_overhead)
-            .max(minimum.iter().sum());
+            .saturating_sub(geometry.fixed_overhead);
         let mut auto = minimum;
-        grow_towards(&mut auto, &maximum, target);
+        if auto.iter().sum::<usize>() > target && specified.is_some() {
+            shrink_to(&mut auto, target);
+        } else if auto.iter().sum::<usize>() <= target {
+            grow_towards(&mut auto, &maximum, target);
+        }
         auto
     };
     for value in &mut widths {
@@ -109,10 +112,11 @@ pub(super) fn size_columns(
         .iter()
         .sum::<usize>()
         .saturating_add(geometry.fixed_overhead);
-    if caption_natural > table_width {
+    let caption_target = specified.map_or(caption_natural, |width| caption_natural.min(width));
+    if caption_target > table_width {
         distribute_remainder(
             &mut widths,
-            caption_natural.saturating_sub(geometry.fixed_overhead),
+            caption_target.saturating_sub(geometry.fixed_overhead),
         );
         table_width = widths
             .iter()
@@ -123,6 +127,29 @@ pub(super) fn size_columns(
         widths,
         table_width: table_width.max(1),
     }
+}
+
+fn shrink_to(values: &mut [usize], target: usize) {
+    if values.is_empty() {
+        return;
+    }
+    let target = target.max(values.len());
+    let total = values.iter().sum::<usize>().max(1);
+    for value in values.iter_mut() {
+        *value = value
+            .saturating_mul(target)
+            .checked_div(total)
+            .unwrap_or(0)
+            .max(1);
+    }
+    while values.iter().sum::<usize>() > target {
+        if let Some(value) = values.iter_mut().filter(|value| **value > 1).max() {
+            *value -= 1;
+        } else {
+            break;
+        }
+    }
+    distribute_remainder(values, target);
 }
 
 pub(super) fn grow_span(values: &mut [usize], start: usize, span: usize, required: usize) {

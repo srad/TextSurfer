@@ -22,6 +22,7 @@ pub(super) struct Piece<A> {
     pub white_space: WhiteSpace,
     pub depth: usize,
     pub style: CellStyle,
+    pub hidden: bool,
     pub atom: Option<A>,
 }
 
@@ -33,6 +34,7 @@ pub(super) struct Glyph {
     pub depth: usize,
     pub white_space: WhiteSpace,
     pub style: CellStyle,
+    pub hidden: bool,
     pub atom: Option<usize>,
 }
 
@@ -72,6 +74,7 @@ pub(super) fn flatten_glyphs<A: Atom>(pieces: &[Piece<A>]) -> Vec<Glyph> {
                 depth: piece.depth,
                 white_space: piece.white_space,
                 style: piece.style,
+                hidden: piece.hidden,
                 atom: Some(index),
             });
             continue;
@@ -85,6 +88,7 @@ pub(super) fn flatten_glyphs<A: Atom>(pieces: &[Piece<A>]) -> Vec<Glyph> {
             piece.white_space,
             piece.depth,
             piece.style,
+            piece.hidden,
         ));
     }
     append_text_glyphs(&mut glyphs, &source, &spans);
@@ -94,7 +98,7 @@ pub(super) fn flatten_glyphs<A: Atom>(pieces: &[Piece<A>]) -> Vec<Glyph> {
 fn append_text_glyphs(
     glyphs: &mut Vec<Glyph>,
     source: &str,
-    spans: &[(usize, usize, NodeId, WhiteSpace, usize, CellStyle)],
+    spans: &[(usize, usize, NodeId, WhiteSpace, usize, CellStyle, bool)],
 ) {
     if source.is_empty() {
         return;
@@ -104,7 +108,7 @@ fn append_text_glyphs(
         while span + 1 < spans.len() && offset >= spans[span].1 {
             span += 1;
         }
-        let (_, _, node, white_space, depth, style) = spans[span];
+        let (_, _, node, white_space, depth, style, hidden) = spans[span];
         Glyph {
             node,
             text: text.to_string(),
@@ -112,6 +116,7 @@ fn append_text_glyphs(
             depth,
             white_space,
             style,
+            hidden,
             atom: None,
         }
     }));

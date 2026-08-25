@@ -43,6 +43,119 @@ pub enum BoxSizing {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Overflow {
+    #[default]
+    Visible,
+    Hidden,
+    Clip,
+    Scroll,
+    Auto,
+}
+
+impl Overflow {
+    pub const fn parse(keyword: &str) -> Option<Self> {
+        Some(match keyword.as_bytes() {
+            b"visible" => Self::Visible,
+            b"hidden" => Self::Hidden,
+            b"clip" => Self::Clip,
+            b"scroll" => Self::Scroll,
+            b"auto" => Self::Auto,
+            _ => return None,
+        })
+    }
+
+    pub const fn clips(self) -> bool {
+        !matches!(self, Self::Visible)
+    }
+
+    pub const fn is_scrollable(self) -> bool {
+        matches!(self, Self::Hidden | Self::Scroll | Self::Auto)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OverflowAxes {
+    pub x: Overflow,
+    pub y: Overflow,
+}
+
+impl OverflowAxes {
+    pub const VISIBLE: Self = Self {
+        x: Overflow::Visible,
+        y: Overflow::Visible,
+    };
+
+    pub const fn uniform(value: Overflow) -> Self {
+        Self { x: value, y: value }
+    }
+
+    pub const fn computed(self) -> Self {
+        match (self.x.is_scrollable(), self.y.is_scrollable()) {
+            (true, false) => Self {
+                x: self.x,
+                y: Overflow::Auto,
+            },
+            (false, true) => Self {
+                x: Overflow::Auto,
+                y: self.y,
+            },
+            _ => self,
+        }
+    }
+
+    pub const fn clips(self) -> bool {
+        self.x.clips() || self.y.clips()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Position {
+    #[default]
+    Static,
+    Relative,
+    Absolute,
+    Fixed,
+    Sticky,
+}
+
+impl Position {
+    pub const fn parse(keyword: &str) -> Option<Self> {
+        Some(match keyword.as_bytes() {
+            b"static" => Self::Static,
+            b"relative" => Self::Relative,
+            b"absolute" => Self::Absolute,
+            b"fixed" => Self::Fixed,
+            b"sticky" => Self::Sticky,
+            _ => return None,
+        })
+    }
+
+    pub const fn is_absolute(self) -> bool {
+        matches!(self, Self::Absolute | Self::Fixed)
+    }
+
+    pub const fn is_positioned(self) -> bool {
+        !matches!(self, Self::Static)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CssInset {
+    #[default]
+    Auto,
+    Cells(isize),
+    Percent(CssPercentage),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InsetEdges {
+    pub top: CssInset,
+    pub right: CssInset,
+    pub bottom: CssInset,
+    pub left: CssInset,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EdgeSizes {
     pub top: usize,
     pub right: usize,

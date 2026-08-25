@@ -118,6 +118,12 @@ impl MediaContext {
             .resolve_cells_with_fonts(length, axis, self.viewport, font, root)
     }
 
+    pub fn resolve_signed_cells(self, length: CssLength, axis: LengthAxis) -> isize {
+        let (font, root) = self.layout_font_sizes();
+        self.cell_metric
+            .resolve_signed_cells_with_fonts(length, axis, self.viewport, font, root)
+    }
+
     pub(super) fn layout_font_sizes(self) -> (f64, f64) {
         if self.text_rendering == TextRendering::Cell {
             (

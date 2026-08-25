@@ -1,29 +1,44 @@
+use crate::layout::clip::ClipRegion;
 use crate::layout::table::TableOutput;
 
-use super::{BoxTree, LayoutRect, TextFragment};
+use super::{BoxTree, TextFragment};
 
 pub(super) fn append_table_output(
     tree: &mut BoxTree,
     output: TableOutput,
-    col: usize,
-    row: usize,
+    col: isize,
+    row: isize,
     depth: usize,
     merge_base: usize,
 ) {
-    tree.height = tree.height.max(row.saturating_add(output.height));
+    if row >= 0 {
+        tree.height = tree
+            .height
+            .max((row as usize).saturating_add(output.height));
+    }
     for mut layout_box in output.boxes {
-        offset_rect(&mut layout_box.border_rect, col, row);
-        offset_rect(&mut layout_box.content_rect, col, row);
+        let Some(border_rect) = ClipRegion::translate_rect(layout_box.border_rect, col, row) else {
+            continue;
+        };
+        layout_box.border_rect = border_rect;
+        layout_box.content_rect =
+            ClipRegion::translate_rect(layout_box.content_rect, col, row).unwrap_or_default();
         layout_box.depth += depth;
         tree.boxes.push(layout_box);
     }
     for mut fill in output.fills {
-        offset_rect(&mut fill.rect, col, row);
+        let Some(rect) = ClipRegion::translate_rect(fill.rect, col, row) else {
+            continue;
+        };
+        fill.rect = rect;
         fill.depth += depth;
         tree.fills.push(fill);
     }
     for mut stroke in output.strokes {
-        offset_rect(&mut stroke.rect, col, row);
+        let Some(translated) = ClipRegion::translate_stroke(stroke, col, row) else {
+            continue;
+        };
+        stroke = translated;
         stroke.depth += depth;
         stroke.merge_group = merge_base
             .saturating_mul(1_000_000)
@@ -31,18 +46,16 @@ pub(super) fn append_table_output(
         tree.strokes.push(stroke);
     }
     for fragment in output.fragments {
-        tree.fragments.push(TextFragment {
+        let fragment = TextFragment {
             node: fragment.node,
-            col: col.saturating_add(fragment.col),
-            row: row.saturating_add(fragment.row),
+            col: fragment.col,
+            row: fragment.row,
             text: fragment.text,
             depth: depth.saturating_add(fragment.depth),
             style: fragment.style,
-        });
+        };
+        if let Some(fragment) = ClipRegion::translate_fragment(&fragment, col, row) {
+            tree.fragments.push(fragment);
+        }
     }
-}
-
-fn offset_rect(rect: &mut LayoutRect, col: usize, row: usize) {
-    rect.col = rect.col.saturating_add(col);
-    rect.row = rect.row.saturating_add(row);
 }

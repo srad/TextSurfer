@@ -26,6 +26,7 @@ pub(super) fn ua_style(
         return ComputedStyle {
             color: inherited.color,
             cursor: inherited.cursor,
+            visibility: inherited.visibility,
             bold: inherited.bold,
             underline: inherited.underline,
             strike: inherited.strike,
@@ -44,6 +45,7 @@ pub(super) fn ua_style(
         return ComputedStyle {
             color: inherited.color,
             cursor: inherited.cursor,
+            visibility: inherited.visibility,
             bold: inherited.bold,
             underline: inherited.underline,
             strike: inherited.strike,
@@ -116,6 +118,7 @@ pub(super) fn ua_style(
         display,
         white_space: inherited.white_space,
         cursor: inherited.cursor,
+        visibility: inherited.visibility,
         color: inherited.color,
         bold: inherited.bold,
         underline: inherited.underline,

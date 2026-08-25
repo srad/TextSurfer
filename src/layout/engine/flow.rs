@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{Document, ElementNs, Node, NodeId};
@@ -209,6 +210,7 @@ fn build_flow_tree_from(
                     white_space: marker.style.white_space,
                     depth: own.depth,
                     style: marker.style.cell_style(),
+                    hidden: marker.style.visibility.is_hidden(),
                     atom: None,
                 });
             }
@@ -266,6 +268,7 @@ fn build_flow_tree_from(
                         white_space: context.white_space,
                         depth: context.depth,
                         style: context.style,
+                        hidden: context.computed.visibility.is_hidden(),
                         atom: Some(InlineAtomSource::Ready(Box::new(atom))),
                     };
                     if context.inline_parent {
@@ -302,6 +305,7 @@ fn build_flow_tree_from(
                         white_space: context.white_space,
                         depth: context.depth,
                         style: context.style,
+                        hidden: context.computed.visibility.is_hidden(),
                         atom: None,
                     }),
                     Some(Node::Element { name, ns, attrs }) => {
@@ -376,6 +380,7 @@ fn build_flow_tree_from(
                                 white_space: context.white_space,
                                 depth: context.depth,
                                 style: style.cell_style(),
+                                hidden: style.visibility.is_hidden(),
                                 atom: Some(InlineAtomSource::Node(node)),
                             });
                             append_horizontal_margin(
@@ -421,6 +426,7 @@ fn build_flow_tree_from(
                                     white_space: style.white_space,
                                     depth: context.depth,
                                     style: style.cell_style(),
+                                    hidden: style.visibility.is_hidden(),
                                     atom: None,
                                 }];
                             } else {
@@ -433,6 +439,7 @@ fn build_flow_tree_from(
                                 white_space: WhiteSpace::Pre,
                                 depth: context.depth,
                                 style: context.style,
+                                hidden: context.computed.visibility.is_hidden(),
                                 atom: None,
                             });
                         } else if *ns == ElementNs::Html && name == "img" {
@@ -443,6 +450,7 @@ fn build_flow_tree_from(
                                     white_space: context.white_space,
                                     depth: context.depth,
                                     style: style.cell_style(),
+                                    hidden: style.visibility.is_hidden(),
                                     atom: None,
                                 });
                             }
@@ -456,6 +464,7 @@ fn build_flow_tree_from(
                                     white_space: marker.style.white_space,
                                     depth: context.depth,
                                     style: marker.style.cell_style(),
+                                    hidden: marker.style.visibility.is_hidden(),
                                     atom: None,
                                 });
                             }
@@ -527,9 +536,88 @@ fn build_flow_tree_from(
         flow[flow_index].children = children;
         tasks.extend(nested_tasks.into_iter().rev());
     }
+    reparent_positioned(document, styles, &mut flow);
     FlowTree {
         boxes: flow,
         truncated,
+    }
+}
+
+fn reparent_positioned(document: &Document, styles: &StyleTree, flow: &mut Vec<FlowBox>) {
+    let original_len = flow.len();
+    let mut parents = vec![None; original_len];
+    for (parent, item) in flow.iter().enumerate() {
+        for child in &item.children {
+            parents[*child] = Some(parent);
+        }
+    }
+    let owners: HashMap<_, _> = flow
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| item.owner.map(|owner| (owner, index)))
+        .collect();
+    let mut order = Vec::with_capacity(original_len);
+    let mut stack = vec![0];
+    while let Some(index) = stack.pop() {
+        order.push(index);
+        stack.extend(flow[index].children.iter().rev().copied());
+    }
+    let mut desired = parents.clone();
+    for index in order.iter().copied().skip(1) {
+        let position = flow[index].style.position;
+        if !position.is_absolute() {
+            continue;
+        }
+        let target = if matches!(position, crate::core::style::Position::Fixed) {
+            0
+        } else {
+            let mut ancestor = flow[index].owner.and_then(|owner| document.parent(owner));
+            let mut target = 0;
+            while let Some(node) = ancestor {
+                if styles.get(node).position.is_positioned()
+                    && let Some(candidate) = owners.get(&node).copied()
+                {
+                    target = candidate;
+                    break;
+                }
+                ancestor = document.parent(node);
+            }
+            target
+        };
+        desired[index] = Some(if target < index { target } else { 0 });
+    }
+    let mut anonymous = Vec::new();
+    for target in desired.iter().flatten().copied().collect::<Vec<_>>() {
+        if target >= original_len || flow[target].inline.is_empty() {
+            continue;
+        }
+        if anonymous.iter().any(|(owner, _)| *owner == target) {
+            continue;
+        }
+        let child = flow.len();
+        let inline = std::mem::take(&mut flow[target].inline);
+        flow.push(FlowBox {
+            owner: None,
+            style: ComputedStyle::anonymous_inheriting(flow[target].style, Display::BLOCK),
+            depth: flow[target].depth.saturating_add(1),
+            inline,
+            children: Vec::new(),
+            rule: false,
+            table: None,
+            marker: None,
+        });
+        anonymous.push((target, child));
+    }
+    for item in flow.iter_mut().take(original_len) {
+        item.children.clear();
+    }
+    for (parent, child) in anonymous {
+        flow[parent].children.push(child);
+    }
+    for index in order.into_iter().skip(1) {
+        if let Some(parent) = desired[index] {
+            flow[parent].children.push(index);
+        }
     }
 }
 
@@ -662,6 +750,7 @@ fn append_pseudo(
         white_space: pseudo.style.white_space,
         depth: context.depth,
         style: pseudo.style.cell_style(),
+        hidden: pseudo.style.visibility.is_hidden(),
         atom: None,
     });
 }
@@ -688,6 +777,7 @@ fn append_flex_pseudo(
             white_space: pseudo.style.white_space,
             depth,
             style: pseudo.style.cell_style(),
+            hidden: pseudo.style.visibility.is_hidden(),
             atom: None,
         }],
         children: Vec::new(),
@@ -721,6 +811,7 @@ fn append_edge(
             white_space: WhiteSpace::BreakSpaces,
             depth: context.depth,
             style: context.style,
+            hidden: context.computed.visibility.is_hidden(),
             atom: None,
         });
     }
@@ -739,6 +830,7 @@ fn append_horizontal_margin(
             white_space: WhiteSpace::BreakSpaces,
             depth: context.depth,
             style: context.style,
+            hidden: context.computed.visibility.is_hidden(),
             atom: None,
         });
     }
@@ -747,8 +839,8 @@ fn append_horizontal_margin(
 pub(super) fn append_inline(
     tree: &mut BoxTree,
     pieces: &[ResolvedInlinePiece],
-    col: usize,
-    row: usize,
+    col: isize,
+    row: isize,
     width: usize,
     text_align: TextAlign,
     merge_base: usize,
@@ -763,11 +855,12 @@ pub(super) fn append_inline(
             TextAlign::Center => remaining.div_ceil(2),
             TextAlign::Start | TextAlign::Left | TextAlign::Justify => 0,
         };
-        let mut current_col = col.saturating_add(offset);
+        let mut current_col = col.saturating_add(offset as isize);
         for glyph in line {
             if let Some(index) = glyph.atom {
                 if let Some(atom) = &pieces[index].atom {
-                    let row = current_row + baseline.saturating_sub(atom.baseline());
+                    let row = current_row
+                        .saturating_add(baseline.saturating_sub(atom.baseline()) as isize);
                     match atom {
                         InlineAtom::Table(table) => append_table_output(
                             tree,
@@ -787,15 +880,26 @@ pub(super) fn append_inline(
                         ),
                     }
                 }
-                current_col = current_col.saturating_add(glyph.width);
+                current_col = current_col.saturating_add(glyph.width as isize);
                 continue;
             }
             if glyph.style.scale == 0 {
                 continue;
             }
-            let baseline = current_row + baseline;
+            if glyph.hidden {
+                current_col = current_col.saturating_add(glyph.width as isize);
+                continue;
+            }
+            let baseline = current_row.saturating_add(baseline as isize);
             let glyph_row =
-                baseline.saturating_sub(usize::from(glyph.style.scale).saturating_sub(1));
+                baseline.saturating_sub(usize::from(glyph.style.scale).saturating_sub(1) as isize);
+            let glyph_end = current_col.saturating_add(glyph.width as isize);
+            if current_col < 0 || glyph_row < 0 || glyph_end <= 0 {
+                current_col = glyph_end;
+                continue;
+            }
+            let emission_col = current_col as usize;
+            let glyph_row = glyph_row as usize;
             if let Some(last) = tree.fragments.last_mut()
                 && last.node == glyph.node
                 && last.row == glyph_row
@@ -803,50 +907,67 @@ pub(super) fn append_inline(
                 && last.style == glyph.style
                 && last.col
                     + UnicodeWidthStr::width(last.text.as_str()) * usize::from(last.style.scale)
-                    == current_col
+                    == emission_col
             {
                 last.text.push_str(&glyph.text);
             } else {
                 tree.fragments.push(TextFragment {
                     node: glyph.node,
-                    col: current_col,
+                    col: emission_col,
                     row: glyph_row,
                     text: glyph.text,
                     depth: glyph.depth,
                     style: glyph.style,
                 });
             }
-            current_col = current_col.saturating_add(glyph.width);
+            current_col = current_col.saturating_add(glyph.width as isize);
         }
-        current_row += line_height;
+        current_row = current_row.saturating_add(line_height as isize);
     }
 }
 
 fn append_atomic_layout(
     tree: &mut BoxTree,
     nested: &BoxTree,
-    col: usize,
-    row: usize,
+    col: isize,
+    row: isize,
     depth: usize,
     merge_base: usize,
 ) {
-    tree.height = tree.height.max(row.saturating_add(nested.height));
+    if row >= 0 {
+        tree.height = tree
+            .height
+            .max((row as usize).saturating_add(nested.height));
+    }
     for layout_box in &nested.boxes {
         let mut layout_box = layout_box.clone();
-        offset_rect(&mut layout_box.border_rect, col, row);
-        offset_rect(&mut layout_box.content_rect, col, row);
+        let Some(border_rect) =
+            crate::layout::clip::ClipRegion::translate_rect(layout_box.border_rect, col, row)
+        else {
+            continue;
+        };
+        layout_box.border_rect = border_rect;
+        layout_box.content_rect =
+            crate::layout::clip::ClipRegion::translate_rect(layout_box.content_rect, col, row)
+                .unwrap_or_default();
         layout_box.depth = layout_box.depth.saturating_add(depth);
         tree.boxes.push(layout_box);
     }
     for fill in &nested.fills {
         let mut fill = *fill;
-        offset_rect(&mut fill.rect, col, row);
+        let Some(rect) = crate::layout::clip::ClipRegion::translate_rect(fill.rect, col, row)
+        else {
+            continue;
+        };
+        fill.rect = rect;
         fill.depth = fill.depth.saturating_add(depth);
         tree.fills.push(fill);
     }
     for stroke in &nested.strokes {
-        let mut stroke = *stroke;
-        offset_rect(&mut stroke.rect, col, row);
+        let Some(mut stroke) = crate::layout::clip::ClipRegion::translate_stroke(*stroke, col, row)
+        else {
+            continue;
+        };
         stroke.depth = stroke.depth.saturating_add(depth);
         stroke.merge_group = merge_base
             .saturating_mul(1_000_000)
@@ -854,15 +975,12 @@ fn append_atomic_layout(
         tree.strokes.push(stroke);
     }
     for fragment in &nested.fragments {
-        let mut fragment = fragment.clone();
-        fragment.col = fragment.col.saturating_add(col);
-        fragment.row = fragment.row.saturating_add(row);
+        let Some(mut fragment) =
+            crate::layout::clip::ClipRegion::translate_fragment(fragment, col, row)
+        else {
+            continue;
+        };
         fragment.depth = fragment.depth.saturating_add(depth);
         tree.fragments.push(fragment);
     }
-}
-
-fn offset_rect(rect: &mut super::LayoutRect, col: usize, row: usize) {
-    rect.col = rect.col.saturating_add(col);
-    rect.row = rect.row.saturating_add(row);
 }

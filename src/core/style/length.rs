@@ -169,6 +169,23 @@ impl CellMetric {
             .round()
             .min(MAX_LAYOUT_CELLS) as usize
     }
+
+    pub fn resolve_signed_cells_with_fonts(
+        self,
+        length: CssLength,
+        axis: LengthAxis,
+        viewport: Size,
+        font_px: f64,
+        root_font_px: f64,
+    ) -> isize {
+        let cell_px = match axis {
+            LengthAxis::Horizontal => self.column_px,
+            LengthAxis::Vertical => self.row_px,
+        };
+        (self.css_pixels_with_fonts(length, viewport, font_px, root_font_px) / f64::from(cell_px))
+            .round()
+            .clamp(-MAX_LAYOUT_CELLS, MAX_LAYOUT_CELLS) as isize
+    }
 }
 
 impl Default for CellMetric {

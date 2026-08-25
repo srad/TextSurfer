@@ -131,6 +131,8 @@ fn disjoint(a: LayoutRect, b: LayoutRect) -> bool {
 }
 
 mod flex;
+mod overflow;
+mod positioning;
 
 proptest! {
     #[test]
@@ -804,7 +806,7 @@ fn intrinsic_height_is_not_limited_by_viewport_rows() {
 fn all_white_space_modes_apply_their_collapse_break_and_wrap_rules() {
     let cases = [
         ("normal", " a  b c ", 4, vec!["a b", "c"]),
-        ("nowrap", " a  b c ", 4, vec!["a b c"]),
+        ("nowrap", " a  b c ", 4, vec!["a b "]),
         ("pre", " a\nb ", 2, vec![" a", "b "]),
         ("pre-wrap", "ab cd", 3, vec!["ab ", "cd"]),
         ("pre-line", " a  b\n c ", 4, vec!["a b", "c"]),

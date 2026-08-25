@@ -106,7 +106,8 @@ pub(super) fn cascade_document(
             apply_declaration(&mut style, parent_style, &declaration, element_media);
             authored_counters.apply(&declaration);
         }
-        style.display = computed_display(document, &tree, id, style.display);
+        style.overflow = style.overflow.computed();
+        style.display = computed_display(document, &tree, id, style.display, style.position);
         if style.display.is_inline_flow()
             || matches!(
                 style.display,
@@ -252,6 +253,7 @@ fn cascade_pseudo(
         display: Display::INLINE,
         white_space: origin.white_space,
         cursor: origin.cursor,
+        visibility: origin.visibility,
         color: origin.color,
         background: (!origin.display.is_contents())
             .then_some(origin.background)
@@ -286,6 +288,10 @@ fn cascade_pseudo(
             content = Some(spec);
         }
     }
+    style.overflow = style.overflow.computed();
+    if style.position.is_absolute() {
+        style.display = style.display.blockify();
+    }
     if flex_item {
         style.display = style.display.blockify();
     }
@@ -307,6 +313,7 @@ fn computed_display(
     tree: &StyleTree,
     id: NodeId,
     display: Display,
+    position: crate::core::style::Position,
 ) -> Display {
     let display = if display.is_contents()
         && matches!(
@@ -339,7 +346,9 @@ fn computed_display(
     } else {
         display
     };
-    if document.parent(id).is_none() {
+    if position.is_absolute() {
+        display.blockify()
+    } else if document.parent(id).is_none() {
         if display.is_contents() {
             Display::BLOCK
         } else {

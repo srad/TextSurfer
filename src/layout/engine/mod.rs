@@ -13,6 +13,8 @@ use taffy::prelude::{AvailableSpace, Size as TaffySize, TaffyTree};
 use taffy::tree::Baselines;
 use unicode_width::UnicodeWidthStr;
 
+use crate::layout::clip::ClipRegion;
+
 use crate::core::dom::{Document, NodeId};
 use crate::core::geom::Size;
 use crate::core::style::{BorderEdges, CellStyle, DisplayInside, FlexDirection, Rgb, StyleTree};
@@ -315,15 +317,46 @@ fn try_layout_flow(
     let root_layout = *taffy.layout(root).ok()?;
     let mut tree = BoxTree {
         width: root_layout.size.width.max(0.0).round() as usize,
-        height: root_layout.size.height.max(0.0).round() as usize,
+        height: 0,
         ..Default::default()
     };
-    let mut stack = vec![(root_index, 0.0f32, 0.0f32)];
-    while let Some((index, parent_col, parent_row)) = stack.pop() {
+    let mut layout_height = 0;
+    let mut stack = vec![(
+        root_index,
+        0.0f32,
+        0.0f32,
+        ClipRegion::viewport(viewport_width),
+        false,
+    )];
+    while let Some((index, parent_col, parent_row, inherited_clip, fixed_subtree)) = stack.pop() {
         let node = taffy_nodes[index]?;
         let layout = *taffy.layout(node).ok()?;
         let absolute_col = parent_col + layout.location.x;
         let absolute_row = parent_row + layout.location.y;
+        let border_rect = layout_rect(absolute_col, absolute_row, layout.size);
+        let padding_rect = layout_rect(
+            absolute_col + layout.border.left,
+            absolute_row + layout.border.top,
+            TaffySize {
+                width: (layout.size.width - layout.border.left - layout.border.right).max(0.0),
+                height: (layout.size.height - layout.border.top - layout.border.bottom).max(0.0),
+            },
+        );
+        let propagates = flow[index]
+            .owner
+            .is_some_and(|owner| propagates_overflow(document, owner));
+        let child_clip = if propagates {
+            inherited_clip
+        } else {
+            inherited_clip.intersect_axes(
+                padding_rect,
+                flow[index].style.overflow.x.clips(),
+                flow[index].style.overflow.y.clips(),
+            )
+        };
+        if !fixed_subtree && let Some(bottom) = inherited_clip.vertical_end(border_rect) {
+            layout_height = layout_height.max(bottom);
+        }
         if let Some(table) = flow[index].table {
             let width = layout.size.width.max(1.0) as usize;
             let output = table_cache
@@ -337,16 +370,17 @@ fn try_layout_flow(
                     )
                 })
                 .clone();
+            let starts = OutputStarts::new(&tree);
             append_table_output(
                 &mut tree,
                 output,
-                absolute_col.max(0.0).round() as usize,
-                absolute_row.max(0.0).round() as usize,
+                absolute_col.round() as isize,
+                absolute_row.round() as isize,
                 flow[index].depth,
                 index.saturating_add(1),
             );
+            clip_since(&mut tree, starts, child_clip);
         } else if let Some(owner) = flow[index].owner {
-            let border_rect = layout_rect(absolute_col, absolute_row, layout.size);
             let left = layout.border.left + layout.padding.left;
             let right = layout.border.right + layout.padding.right;
             let top = layout.border.top + layout.padding.top;
@@ -359,58 +393,74 @@ fn try_layout_flow(
                     height: (layout.size.height - top - bottom).max(0.0),
                 },
             );
-            tree.height = tree
-                .height
-                .max(border_rect.row.saturating_add(border_rect.height));
             let style = flow[index].style.cell_style();
-            if let Some(color) = style.bg {
+            let visible = !flow[index].style.visibility.is_hidden();
+            let painted_border = inherited_clip.box_rect(border_rect);
+            if visible
+                && let Some(rect) = painted_border
+                && let Some(color) = style.bg
+            {
                 tree.fills.push(BackgroundFill {
-                    rect: border_rect,
+                    rect,
                     color,
                     depth: flow[index].depth,
                 });
             }
-            if flow[index].style.border.is_visible() {
-                tree.strokes.push(BorderStroke {
+            if visible
+                && flow[index].style.border.is_visible()
+                && let Some(stroke) = inherited_clip.stroke(BorderStroke {
                     rect: border_rect,
                     edges: flow[index].style.border,
                     style,
                     depth: flow[index].depth,
                     merge_group: index.saturating_add(1),
+                })
+            {
+                tree.strokes.push(stroke);
+            }
+            if visible && let Some(border_rect) = painted_border {
+                tree.boxes.push(LayoutBox {
+                    node: owner,
+                    border_rect,
+                    content_rect: inherited_clip.rect(content_rect).unwrap_or_default(),
+                    depth: flow[index].depth,
+                    style,
                 });
             }
-            tree.boxes.push(LayoutBox {
-                node: owner,
-                border_rect,
-                content_rect,
-                depth: flow[index].depth,
-                style,
-            });
-            if flow[index].rule && content_rect.width > 0 {
-                tree.fragments.push(TextFragment {
+            if visible
+                && flow[index].rule
+                && content_rect.width > 0
+                && let Some(fragment) = inherited_clip.fragment(&TextFragment {
                     node: owner,
                     col: content_rect.col,
                     row: content_rect.row,
                     text: "─".repeat(content_rect.width),
                     depth: flow[index].depth,
                     style: flow[index].style.cell_style(),
-                });
+                })
+            {
+                tree.fragments.push(fragment);
             }
-            if let Some(marker) = &flow[index].marker {
+            if let Some(marker) = &flow[index].marker
+                && !marker.style.visibility.is_hidden()
+            {
                 let width = UnicodeWidthStr::width(marker.text.as_str());
-                tree.fragments.push(TextFragment {
+                if let Some(fragment) = inherited_clip.fragment(&TextFragment {
                     node: owner,
                     col: content_rect.col.saturating_sub(width),
                     row: content_rect.row,
                     text: marker.text.clone(),
                     depth: flow[index].depth,
                     style: marker.style.cell_style(),
-                });
+                }) {
+                    tree.fragments.push(fragment);
+                }
             }
         }
-        if !flow[index].inline.is_empty() {
+        if !flow[index].inline.is_empty() && !child_clip.is_empty() {
             let rect = layout_rect(absolute_col, absolute_row, layout.size);
-            let measure = MeasureWidth::Definite(rect.width);
+            let layout_width = layout.size.width.max(0.0).round() as usize;
+            let measure = MeasureWidth::Definite(layout_width);
             let key = (index, measure);
             inline_cache.entry(key).or_insert_with(|| {
                 resolve_inline(
@@ -422,25 +472,102 @@ fn try_layout_flow(
                     nesting,
                 )
             });
+            let starts = OutputStarts::new(&tree);
             append_inline(
                 &mut tree,
                 inline_cache.get(&key).expect("resolved inline"),
-                rect.col,
-                rect.row,
-                rect.width,
+                absolute_col.round() as isize,
+                absolute_row.round() as isize,
+                layout_width,
                 flow[index].style.text_align,
                 index.saturating_add(1),
             );
-            tree.height = tree.height.max(rect.row.saturating_add(rect.height));
+            clip_since(&mut tree, starts, child_clip);
+            if !fixed_subtree && let Some(rect) = child_clip.rect(rect) {
+                layout_height = layout_height.max(rect.row.saturating_add(rect.height));
+            }
         }
-        for child in flow[index].children.iter().rev() {
-            stack.push((*child, absolute_col, absolute_row));
+        if !child_clip.is_empty() || index == root_index {
+            for child in flow[index].children.iter().rev() {
+                stack.push((
+                    *child,
+                    absolute_col,
+                    absolute_row,
+                    child_clip,
+                    fixed_subtree
+                        || matches!(
+                            flow[*child].style.position,
+                            crate::core::style::Position::Fixed
+                        ),
+                ));
+            }
         }
     }
+    tree.height = layout_height;
     tree.boxes.sort_by_key(|layout_box| layout_box.depth);
     tree.fragments
         .sort_by_key(|fragment| (fragment.row, fragment.col, fragment.depth));
     Some(tree)
+}
+
+#[derive(Clone, Copy)]
+struct OutputStarts {
+    boxes: usize,
+    fills: usize,
+    strokes: usize,
+    fragments: usize,
+}
+
+impl OutputStarts {
+    fn new(tree: &BoxTree) -> Self {
+        Self {
+            boxes: tree.boxes.len(),
+            fills: tree.fills.len(),
+            strokes: tree.strokes.len(),
+            fragments: tree.fragments.len(),
+        }
+    }
+}
+
+fn clip_since(tree: &mut BoxTree, starts: OutputStarts, clip: ClipRegion) {
+    let boxes: Vec<_> = tree
+        .boxes
+        .drain(starts.boxes..)
+        .filter_map(|mut layout_box| {
+            layout_box.border_rect = clip.box_rect(layout_box.border_rect)?;
+            layout_box.content_rect = clip.box_rect(layout_box.content_rect).unwrap_or_default();
+            Some(layout_box)
+        })
+        .collect();
+    tree.boxes.extend(boxes);
+    let fills: Vec<_> = tree
+        .fills
+        .drain(starts.fills..)
+        .filter_map(|mut fill| {
+            fill.rect = clip.rect(fill.rect)?;
+            Some(fill)
+        })
+        .collect();
+    tree.fills.extend(fills);
+    let strokes: Vec<_> = tree
+        .strokes
+        .drain(starts.strokes..)
+        .filter_map(|stroke| clip.stroke(stroke))
+        .collect();
+    tree.strokes.extend(strokes);
+    let fragments: Vec<_> = tree
+        .fragments
+        .drain(starts.fragments..)
+        .filter_map(|fragment| clip.fragment(&fragment))
+        .collect();
+    tree.fragments.extend(fragments);
+}
+
+fn propagates_overflow(document: &Document, node: NodeId) -> bool {
+    matches!(
+        document.node(node),
+        Some(crate::core::dom::Node::Element { name, .. }) if matches!(name.as_str(), "html" | "body")
+    )
 }
 
 fn prepare_flow(flow: &mut [FlowBox]) -> Vec<Option<FlexDirection>> {
@@ -452,9 +579,21 @@ fn prepare_flow(flow: &mut [FlowBox]) -> Vec<Option<FlexDirection>> {
         ) {
             let direction = flow[index].style.flex.direction;
             let mut children = flow[index].children.clone();
-            children.sort_by_key(|child| flow[*child].style.flex.order);
-            for child in &children {
-                parent_direction[*child] = Some(direction);
+            let positions: Vec<_> = children
+                .iter()
+                .enumerate()
+                .filter_map(|(position, child)| {
+                    (!flow[*child].style.position.is_absolute()).then_some(position)
+                })
+                .collect();
+            let mut in_flow: Vec<_> = positions
+                .iter()
+                .map(|position| children[*position])
+                .collect();
+            in_flow.sort_by_key(|child| flow[*child].style.flex.order);
+            for (position, child) in positions.into_iter().zip(in_flow) {
+                children[position] = child;
+                parent_direction[child] = Some(direction);
             }
             flow[index].children = children;
         }
@@ -561,6 +700,7 @@ fn resolve_inline(
                 white_space: piece.white_space,
                 depth: piece.depth,
                 style: piece.style,
+                hidden: piece.hidden,
                 atom,
             }
         })

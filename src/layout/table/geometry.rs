@@ -137,7 +137,9 @@ pub(super) fn place_table(
         width: columns.table_width,
         height: grid_height,
     };
-    if let Some(node) = root.owner {
+    if let Some(node) = root.owner
+        && !table_style.visibility.is_hidden()
+    {
         output.boxes.push(LayoutBox {
             node,
             border_rect: table_rect,
@@ -147,7 +149,8 @@ pub(super) fn place_table(
         });
     }
     add_fill(&mut output.fills, table_rect, table_style, 0);
-    if !geometry.collapsed && table_style.border.is_visible() {
+    if !table_style.visibility.is_hidden() && !geometry.collapsed && table_style.border.is_visible()
+    {
         output.strokes.push(BorderStroke {
             rect: table_rect,
             edges: table_style.border,
@@ -383,7 +386,9 @@ pub(super) fn place_table(
         if geometry.collapsed && cell.row + cell.row_span < output.model.rows.len() {
             hit_rect.height = hit_rect.height.saturating_sub(geometry.grid);
         }
-        if let Some(node) = cell.owner {
+        if let Some(node) = cell.owner
+            && !style.visibility.is_hidden()
+        {
             output.boxes.push(LayoutBox {
                 node,
                 border_rect: hit_rect,
@@ -393,22 +398,24 @@ pub(super) fn place_table(
             });
         }
         add_fill(&mut output.fills, rect, style, 5);
-        if geometry.collapsed {
-            add_collapsed_candidates(
-                &mut collapse_segments,
-                rect,
-                style.border,
-                style.cell_style(),
-                5,
-            );
-        } else if style.border.is_visible() {
-            output.strokes.push(BorderStroke {
-                rect,
-                edges: style.border,
-                style: style.cell_style(),
-                depth: 5,
-                merge_group: index + 2,
-            });
+        if !style.visibility.is_hidden() {
+            if geometry.collapsed {
+                add_collapsed_candidates(
+                    &mut collapse_segments,
+                    rect,
+                    style.border,
+                    style.cell_style(),
+                    5,
+                );
+            } else if style.border.is_visible() {
+                output.strokes.push(BorderStroke {
+                    rect,
+                    edges: style.border,
+                    style: style.cell_style(),
+                    depth: 5,
+                    merge_group: index + 2,
+                });
+            }
         }
         append_cell_content(
             &mut output,
@@ -528,7 +535,9 @@ pub(super) fn add_fill(
     style: ComputedStyle,
     depth: usize,
 ) {
-    if let Some(color) = style.background {
+    if !style.visibility.is_hidden()
+        && let Some(color) = style.background
+    {
         fills.push(BackgroundFill { rect, color, depth });
     }
 }

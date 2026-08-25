@@ -22,6 +22,7 @@ pub(super) struct TextRun {
     text: String,
     white_space: WhiteSpace,
     style: CellStyle,
+    hidden: bool,
 }
 
 #[derive(Clone)]
@@ -271,6 +272,7 @@ impl TableFormatter<'_> {
             text: pseudo.text.clone(),
             white_space: pseudo.style.white_space,
             style: pseudo.style.cell_style(),
+            hidden: pseudo.style.visibility.is_hidden(),
         }));
     }
 
@@ -311,6 +313,7 @@ impl TableFormatter<'_> {
                         text: normalize_segment_breaks(data),
                         white_space: style.white_space,
                         style: cell_style,
+                        hidden: style.visibility.is_hidden(),
                     }));
                 }
                 Some(Node::Element { name, ns, attrs }) => {
@@ -340,6 +343,7 @@ impl TableFormatter<'_> {
                             text: marker.text.clone(),
                             white_space: marker.style.white_space,
                             style: marker.style.cell_style(),
+                            hidden: marker.style.visibility.is_hidden(),
                         }));
                     }
                     self.push_pseudo(&mut items, node, PseudoElement::Before);
@@ -356,6 +360,7 @@ impl TableFormatter<'_> {
                             text,
                             white_space: style.white_space,
                             style: style.cell_style(),
+                            hidden: style.visibility.is_hidden(),
                         }));
                     }
                     stack.push(ContentEvent::Exit(node, root));
@@ -443,6 +448,7 @@ pub(super) fn resolve_items<A: Atom>(
                     white_space: WhiteSpace::Pre,
                     depth: 0,
                     style: *style,
+                    hidden: false,
                     atom: None,
                 });
                 has_content = true;
@@ -461,6 +467,7 @@ pub(super) fn resolve_items<A: Atom>(
                         white_space: WhiteSpace::Pre,
                         depth: 0,
                         style,
+                        hidden: false,
                         atom: None,
                     });
                 }
@@ -470,6 +477,7 @@ pub(super) fn resolve_items<A: Atom>(
                     white_space: run.white_space,
                     depth: 0,
                     style: run.style,
+                    hidden: run.hidden,
                     atom: None,
                 });
                 has_content |= visible;
@@ -482,6 +490,7 @@ pub(super) fn resolve_items<A: Atom>(
                         white_space: WhiteSpace::Pre,
                         depth: 0,
                         style,
+                        hidden: false,
                         atom: None,
                     });
                 }
@@ -491,6 +500,7 @@ pub(super) fn resolve_items<A: Atom>(
                     white_space: WhiteSpace::Normal,
                     depth: 0,
                     style: CellStyle::default(),
+                    hidden: false,
                     atom: Some(resolve_table(*node)),
                 });
                 has_content = true;
@@ -511,6 +521,10 @@ fn append_line(
     let mut col = start;
     for glyph in line {
         if glyph.style.scale == 0 {
+            continue;
+        }
+        if glyph.hidden {
+            col = col.saturating_add(glyph.width);
             continue;
         }
         if col.saturating_add(glyph.width) > clip_right {

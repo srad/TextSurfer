@@ -85,7 +85,10 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   CSS Display outside/inside modes survive cascade: `contents` elides its principal box without
   losing inheritance or links, inline flow-root/table/grid boxes remain atomic, inline-flex uses
   nested Taffy layout, and
-  misparented table roles receive ownerless anonymous wrappers after contents elision
+  misparented table roles receive ownerless anonymous wrappers after contents elision. Overflow
+  clips paint and hit geometry at nested padding boxes, `visibility` preserves layout while
+  suppressing hidden descendants, and relative/absolute/fixed positioning uses signed insets
+  without letting out-of-flow boxes inflate document height
 - Generated content and list-marker support: `::before`, `::after` and `::marker` match, `content`
   supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped
   stack. Ordered lists number, nested lists number independently, and `list-style-type` covers
@@ -259,6 +262,7 @@ Status, decisions, acceptance criteria and the updates log live in
 foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chrome ✅ · M1-B
 style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
 awaiting human smoke · M1-D layout completeness implemented, awaiting the human VGA smoke ·
+M1-E overflow, visibility and positioning implemented, awaiting the human VGA/terminal smoke ·
 M3 mouse pulled ahead of M2: slice 1 navigation implemented, awaiting the human mouse smoke, slice 2
 live `:hover`/`:focus` styling open, slice 3 chrome affordances implemented, awaiting smoke ·
 M2 tabs/keyboard/forms · M4 JS seam · M5 Boa · M6 stretch.

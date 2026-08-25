@@ -1,3 +1,4 @@
+use taffy::geometry::Point as TaffyPoint;
 use taffy::prelude::{
     BoxSizing as TaffyBoxSizing, Dimension, Display as TaffyDisplay, LengthPercentage,
     LengthPercentageAuto, Rect as TaffyRect, Size as TaffySize, Style as TaffyStyle,
@@ -6,12 +7,13 @@ use taffy::style::{
     AlignContent as TaffyAlignContent, AlignContentKeyword as TaffyContentKeyword,
     AlignItems as TaffyAlignItems, AlignItemsKeyword as TaffyItemKeyword,
     AlignmentSafety as TaffySafety, FlexDirection as TaffyFlexDirection, FlexWrap as TaffyFlexWrap,
-    TextAlign as TaffyTextAlign,
+    Overflow as TaffyOverflow, Position as TaffyPosition, TextAlign as TaffyTextAlign,
 };
 
 use crate::core::style::{
-    Alignment, AlignmentSafety, BoxSizing, ContentAlignment, CssGap, CssMargin, CssMaxSize,
-    CssSize, FlexBasis, FlexDirection, FlexWrap, ItemAlignment, LegacyAlign,
+    Alignment, AlignmentSafety, BoxSizing, ContentAlignment, CssGap, CssInset, CssMargin,
+    CssMaxSize, CssSize, FlexBasis, FlexDirection, FlexWrap, ItemAlignment, LegacyAlign, Overflow,
+    Position,
 };
 
 use super::LayoutRect;
@@ -63,6 +65,21 @@ pub(super) fn taffy_style(
         box_sizing: match flow.style.box_sizing {
             BoxSizing::ContentBox => TaffyBoxSizing::ContentBox,
             BoxSizing::BorderBox => TaffyBoxSizing::BorderBox,
+        },
+        overflow: TaffyPoint {
+            x: overflow(flow.style.overflow.x),
+            y: overflow(flow.style.overflow.y),
+        },
+        scrollbar_width: 0.0,
+        position: match flow.style.position {
+            Position::Absolute | Position::Fixed => TaffyPosition::Absolute,
+            Position::Static | Position::Relative | Position::Sticky => TaffyPosition::Relative,
+        },
+        inset: TaffyRect {
+            left: inset(flow.style.inset.left),
+            right: inset(flow.style.inset.right),
+            top: inset(flow.style.inset.top),
+            bottom: inset(flow.style.inset.bottom),
         },
         size: TaffySize {
             width: dimension(flow.style.width),
@@ -135,6 +152,25 @@ pub(super) fn taffy_style(
             height: gap(flow.style.flex.row_gap),
         },
         ..Default::default()
+    }
+}
+
+fn overflow(value: Overflow) -> TaffyOverflow {
+    match value {
+        Overflow::Visible => TaffyOverflow::Visible,
+        Overflow::Hidden | Overflow::Auto => TaffyOverflow::Hidden,
+        Overflow::Clip => TaffyOverflow::Clip,
+        Overflow::Scroll => TaffyOverflow::Scroll,
+    }
+}
+
+fn inset(value: CssInset) -> LengthPercentageAuto {
+    match value {
+        CssInset::Auto => LengthPercentageAuto::auto(),
+        CssInset::Cells(value) => LengthPercentageAuto::length(value as f32),
+        CssInset::Percent(value) => {
+            LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
+        }
     }
 }
 
@@ -247,8 +283,8 @@ fn margin(value: CssMargin) -> LengthPercentageAuto {
 }
 
 pub(super) fn layout_rect(col: f32, row: f32, size: TaffySize<f32>) -> LayoutRect {
-    let right = (col.max(0.0) + size.width.max(0.0)).round() as usize;
-    let bottom = (row.max(0.0) + size.height.max(0.0)).round() as usize;
+    let right = (col + size.width.max(0.0)).max(0.0).round() as usize;
+    let bottom = (row + size.height.max(0.0)).max(0.0).round() as usize;
     let col = col.max(0.0).round() as usize;
     let row = row.max(0.0).round() as usize;
     LayoutRect {

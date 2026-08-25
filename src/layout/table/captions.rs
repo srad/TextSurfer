@@ -120,15 +120,17 @@ pub(super) fn append_captions(
         let mut content_rect = caption.content_rect;
         border_rect.row = border_rect.row.saturating_add(row);
         content_rect.row = content_rect.row.saturating_add(row);
-        output.boxes.push(LayoutBox {
-            node: caption.node,
-            border_rect,
-            content_rect,
-            depth: 1,
-            style: caption.style.cell_style(),
-        });
+        if !caption.style.visibility.is_hidden() {
+            output.boxes.push(LayoutBox {
+                node: caption.node,
+                border_rect,
+                content_rect,
+                depth: 1,
+                style: caption.style.cell_style(),
+            });
+        }
         add_fill(&mut output.fills, border_rect, caption.style, 1);
-        if caption.style.border.is_visible() {
+        if !caption.style.visibility.is_hidden() && caption.style.border.is_visible() {
             output.strokes.push(BorderStroke {
                 rect: border_rect,
                 edges: caption.style.border,

@@ -3,9 +3,10 @@ use cssparser::{Parser, ParserInput, Token};
 use super::MediaContext;
 use super::flex::apply_flex_declaration;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssMargin, CssMaxSize,
-    CssSize, LegacyAlign, LengthAxis, ListStyleType, MarginEdges, TableLayoutMode, TextAlign,
-    VerticalAlign, WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssInset, CssMargin,
+    CssMaxSize, CssPercentage, CssSize, InsetEdges, LegacyAlign, LengthAxis, ListStyleType,
+    MarginEdges, Overflow, Position, TableLayoutMode, TextAlign, VerticalAlign, Visibility,
+    WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
@@ -41,6 +42,69 @@ pub(super) fn apply_declaration(
                 style.display = display;
             }
         }
+        "overflow" => {
+            if let Some((x, y)) = parse_overflow(&declaration.value) {
+                style.overflow.x = x;
+                style.overflow.y = y;
+            }
+        }
+        "overflow-x" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| Overflow::parse(&value))
+            {
+                style.overflow.x = value;
+            }
+        }
+        "overflow-y" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| Overflow::parse(&value))
+            {
+                style.overflow.y = value;
+            }
+        }
+        "visibility" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| Visibility::parse(&value))
+            {
+                style.visibility = value;
+            }
+        }
+        "position" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| Position::parse(&value))
+            {
+                style.position = value;
+            }
+        }
+        "inset" => {
+            if let Some(value) = parse_insets(&declaration.value, media) {
+                style.inset = value;
+            }
+        }
+        "top" => assign_inset(
+            &mut style.inset.top,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media,
+        ),
+        "right" => assign_inset(
+            &mut style.inset.right,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media,
+        ),
+        "bottom" => assign_inset(
+            &mut style.inset.bottom,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media,
+        ),
+        "left" => assign_inset(
+            &mut style.inset.left,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media,
+        ),
         "white-space" => {
             if let Some(white_space) =
                 parse_ident(&declaration.value).and_then(|value| match value.as_str() {
@@ -357,6 +421,16 @@ fn apply_css_wide(
     };
     match property {
         "display" => style.display = source.display,
+        "overflow" => style.overflow = source.overflow,
+        "overflow-x" => style.overflow.x = source.overflow.x,
+        "overflow-y" => style.overflow.y = source.overflow.y,
+        "visibility" => style.visibility = source.visibility,
+        "position" => style.position = source.position,
+        "inset" => style.inset = source.inset,
+        "top" => style.inset.top = source.inset.top,
+        "right" => style.inset.right = source.inset.right,
+        "bottom" => style.inset.bottom = source.inset.bottom,
+        "left" => style.inset.left = source.inset.left,
         "white-space" => style.white_space = source.white_space,
         "cursor" => style.cursor = source.cursor,
         "text-align" => {
@@ -449,6 +523,7 @@ fn is_inherited(property: &str) -> bool {
         property,
         "white-space"
             | "cursor"
+            | "visibility"
             | "text-align"
             | "color"
             | "font-weight"
@@ -459,6 +534,94 @@ fn is_inherited(property: &str) -> bool {
             | "list-style-type"
             | "list-style-position"
     )
+}
+
+fn parse_overflow(source: &str) -> Option<(Overflow, Overflow)> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let first = Overflow::parse(parser.expect_ident().ok()?.as_ref())?;
+    let second = if parser.is_exhausted() {
+        first
+    } else {
+        Overflow::parse(parser.expect_ident().ok()?.as_ref())?
+    };
+    parser.expect_exhausted().ok()?;
+    Some((first, second))
+}
+
+#[derive(Clone, Copy)]
+enum ParsedInset {
+    Auto,
+    Length(crate::core::style::CssLength),
+    Percent(CssPercentage),
+}
+
+fn parse_insets(source: &str, media: MediaContext) -> Option<InsetEdges> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut values = Vec::new();
+    while !parser.is_exhausted() {
+        if values.len() == 4 {
+            return None;
+        }
+        values.push(parse_inset_token(&mut parser)?);
+    }
+    let [top, right, bottom, left] = match values.as_slice() {
+        [all] => [*all; 4],
+        [vertical, horizontal] => [*vertical, *horizontal, *vertical, *horizontal],
+        [top, horizontal, bottom] => [*top, *horizontal, *bottom, *horizontal],
+        [top, right, bottom, left] => [*top, *right, *bottom, *left],
+        _ => return None,
+    };
+    Some(InsetEdges {
+        top: resolve_inset(top, LengthAxis::Vertical, media),
+        right: resolve_inset(right, LengthAxis::Horizontal, media),
+        bottom: resolve_inset(bottom, LengthAxis::Vertical, media),
+        left: resolve_inset(left, LengthAxis::Horizontal, media),
+    })
+}
+
+fn assign_inset(target: &mut CssInset, source: &str, axis: LengthAxis, media: MediaContext) {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    if let Some(value) = parse_inset_token(&mut parser)
+        && parser.expect_exhausted().is_ok()
+    {
+        *target = resolve_inset(value, axis, media);
+    }
+}
+
+fn parse_inset_token(parser: &mut Parser<'_, '_>) -> Option<ParsedInset> {
+    if parser
+        .try_parse(|input| input.expect_ident_matching("auto"))
+        .is_ok()
+    {
+        return Some(ParsedInset::Auto);
+    }
+    if let Ok(unit_value) = parser.try_parse(|input| {
+        let token = input.next()?.clone();
+        match token {
+            Token::Percentage { unit_value, .. } if unit_value.is_finite() && unit_value >= 0.0 => {
+                Ok(unit_value)
+            }
+            token => Err(input.new_unexpected_token_error::<()>(token)),
+        }
+    }) {
+        return Some(ParsedInset::Percent(CssPercentage::new(
+            (unit_value * 10_000.0).round().min(u32::MAX as f32) as u32,
+        )));
+    }
+    Some(ParsedInset::Length(
+        crate::css::values::parse_signed_length_token(parser)?,
+    ))
+}
+
+fn resolve_inset(value: ParsedInset, axis: LengthAxis, media: MediaContext) -> CssInset {
+    match value {
+        ParsedInset::Auto => CssInset::Auto,
+        ParsedInset::Length(length) => CssInset::Cells(media.resolve_signed_cells(length, axis)),
+        ParsedInset::Percent(value) => CssInset::Percent(value),
+    }
 }
 
 fn parse_margins(source: &str, media: MediaContext) -> Option<MarginEdges> {

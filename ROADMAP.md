@@ -66,14 +66,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
 | M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, VGA-native bitmap typography | (done — user VGA smoke pending; terminal smoke deferred) |
+| M1-E — Overflow and positioning | Element overflow clipping, inherited visibility, CSS positioning, constrained auto-table sizing | (done — human VGA/terminal smoke pending) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (in progress) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-25): **647 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 35 golden** with the default VGA frontend, and **554 lib · 12 binary** with
+Test counts at the last green run (2026-08-25): **665 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 35 golden** with the default VGA frontend, and **572 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -89,7 +90,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 |---|---|---|
 | M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
 | ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
-| M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. The pointer path is no longer exposed to the clipping gap — M3 slice 1 bounds-checks a click against the visible content view before converting it — but paint still emits unclipped rectangles, so keyboard link navigation must not assume they are safe |
+| M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. M1-E closed the former link/hit clipping gap by clipping layout boxes and fragments before link rectangles are derived |
 | M2 | **Confirmed, not a candidate: `Document::insert_element` is quadratic in depth.** indextree 4.8.1's `checked_append` walks every ancestor to reject a cycle (`id.rs:714`), so building a 100,000-deep chain measured **49 s**, against 100 ms to cascade it and 27 ms to lay it out. A hostile page hangs in the parser long before M2's block-depth cap matters, and the 10 MiB body limit still allows millions of levels | Not fixable at the call site: indextree exposes no unchecked append (`append` just unwraps `checked_append`), and `insert_with_neighbors` is private. Needs either a parse-time depth limit — which would change html5lib corpus trees and must be weighed against conformance — or a different arena. The cycle check is provably unnecessary where `Document::append` calls it, since it always passes a node it just created detached |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
 | M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row; inline-precise hover adds roughly one linear-scanned hit region per text fragment | Put explicit resource ceilings, sparse-vs-dense evidence and indexed paint-order hit/activation resolution behind the perf gate |
@@ -265,8 +266,16 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   cell metric. The terminal profile keeps the fixed 16px/8px font approximations; the VGA bitmap
   profile uses the element and root computed font sizes for `em`/`ex`/`ch` and `rem`. Layout rounds
   per axis while media queries compare unrounded CSS pixels.
-- Overflow: the x axis displays (clipped at the viewport edge), the y axis extends the document, and
-  there are no scrollbars.
+- The viewport clips the x axis and leaves the document y axis unbounded. Element `overflow`
+  supports `visible | hidden | clip | scroll | auto`: a specified `visible` axis computes to
+  `auto` when the other axis is scrollable (`hidden | scroll | auto`), while `clip` stays distinct.
+  Element clips use the padding box. `scroll` and `auto` create no terminal scrollbar and render as
+  clipped scroll containers; the root/body values are propagated to the viewport rather than
+  clipping their own boxes.
+- Positioned layout supports `static | relative | absolute | fixed | sticky` and signed inset
+  lengths. Absolute descendants resolve against the nearest positioned ancestor's padding box;
+  fixed descendants resolve against the viewport. `sticky` degrades to `relative`, stacking remains
+  source/depth order without `z-index`, and negative origins clip rather than translating content.
 - `:visited` parses and **never matches** — page styling must not observe history.
 - Colour **values** are parsed by `cssparser-color` 0.5.0 (same cssparser 0.37 pin), so keywords,
   hex, `rgb()/rgba()`, `hsl()` and `hwb()` all work; CIE spaces (`lab`, `lch`, `oklab`, `oklch`)
@@ -552,6 +561,27 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       frontend-selection tests. No new font, anti-aliasing or fractional rasterization dependency.
 - **Acceptance:** the fixture set above green; manual smoke on a table-heavy page (Wikipedia infobox)
   is readable without horizontal guessing.
+
+### M1-E — Overflow and positioning (done — human VGA/terminal smoke pending)
+
+- [x] Cascade `overflow`, `overflow-x`, `overflow-y` and inherited `visibility`, including
+      pseudo-elements, anonymous boxes, CSS-wide keywords, atomic invalid-value handling and the
+      cross-axis computed-value fixup.
+- [x] Map computed overflow to Taffy with zero-width scrollbars and clip every layout producer on
+      all four edges without moving negatively positioned content. Hidden boxes retain geometry;
+      hidden paint and hit regions do not, while explicitly visible descendants reappear.
+- [x] Cascade and lay out `position`, `inset` and the four inset longhands. Blockify absolute/fixed
+      boxes, resolve their containing blocks through a source-order-preserving flow-tree pass, keep
+      fixed subtrees out of document height, and preserve the flow index invariant.
+- [x] Constrain definite-width auto-layout tables to their specified width when min-content and
+      percentage constraints would otherwise expand them; shrink columns proportionally with a
+      one-cell floor and clip cell output on grapheme boundaries.
+- [x] Add focused cascade/layout contracts plus positioning and Wikipedia-navbox regressions. Run all
+      local gates, inspect every snapshot change, then repeat the Wikipedia terminal dump and leave
+      the VGA/terminal interaction smoke to the human list.
+- **Deliberate limits:** opacity, floats/clear, `z-index`, `clip: rect()`, relative positioning of
+  non-replaced inline boxes, positioned descendants inside the independent table-cell formatter,
+  true sticky behavior and a fixed-position repaint layer remain unimplemented.
 
 ### M2 — Tabs & keyboard navigation (in progress)
 
@@ -848,6 +878,27 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-25 — **M1-E overflow and positioning started from a green default test baseline.** The
+  live Wikipedia terminal dump confirmed three related failures: zero-height hidden dropdowns paint
+  into the article, the clipped skip link prints one glyph per row, and a 100%-wide auto navbox
+  expands through its own border. CSS Overflow 3 and Taffy 0.14 require `clip` to remain distinct
+  from scrollable overflow; only a specified `visible` axis paired with `hidden | scroll | auto`
+  computes to `auto`. `auto` maps to Taffy's non-scrolling clipped behavior, while `scroll` uses a
+  zero scrollbar width. Axis-aware element clips, signed emission geometry and inherited visibility
+  are therefore one layout slice. Positioning follows with source-order-preserving containing-block
+  hoisting; the auto-table correction is the final independent slice. No dependency pin changes.
+- 2026-08-25 — **M1-E overflow and positioning delivered.** Cascade now computes overflow axes,
+  inherited visibility, all five position modes and signed/percentage/auto insets. Taffy receives
+  the matching overflow/position primitives with zero-width scrollbars; a shared axis-aware clip
+  trims boxes, fills, strokes and whole graphemes before hit/link geometry is derived. Positioned
+  flow hoists absolute descendants to the nearest positioned ancestor without disturbing source
+  order, fixed subtrees stay out of document height, and negative text origins clip instead of
+  translating. Definite-width auto tables proportionally shrink oversized min-content columns while
+  intrinsic probes retain their natural minimum. All format, strict Clippy and default/JS/VGA/
+  no-default gates are green at **665 library tests** (**572** without default features), plus 13
+  binary, 6 fetch-pipeline, 14 corpus and 35 render-golden tests. The live 100-column Wikipedia
+  terminal-emulator dump contains none of the five recorded corruption signatures and retains all
+  required article/navbox content. Human VGA and terminal interaction smoke remains pending.
 - 2026-08-25 — **M2 started at the robustness end (user).** The slice is ordered
   robustness → non-2xx bodies → content-type sniffing → rendered error pages, ahead of the keyboard
   items, because failure was what the browser handled worst. The first two are delivered.

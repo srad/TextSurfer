@@ -72,6 +72,28 @@ fn image_alt_fallbacks_match_inside_table_cells() {
 }
 
 #[test]
+fn constrained_auto_tables_shrink_min_content_columns_inside_their_target_width() {
+    let output = formatted(
+        "<style id=css>#table { width:100%;border:solid;padding:1ch } td { white-space:nowrap }</style>
+         <table id=table><tr><td>abcdefghijklmno</td><td>pqrstuvwxyz</td></tr></table>",
+        20,
+    );
+    assert!(output.width <= 20);
+    assert!(output.fragments.iter().all(|fragment| {
+        fragment
+            .col
+            .saturating_add(UnicodeWidthStr::width(fragment.text.as_str()))
+            <= output.width
+    }));
+    assert!(
+        output
+            .strokes
+            .iter()
+            .all(|stroke| stroke.rect.col.saturating_add(stroke.rect.width) <= output.width)
+    );
+}
+
+#[test]
 fn fixed_layout_clips_wide_graphemes_at_the_cell_inner_edge() {
     let output = formatted(
         "<style id=css>#table { table-layout: fixed; width: 5ch } td { border: solid }</style>
