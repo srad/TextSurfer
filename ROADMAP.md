@@ -75,8 +75,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-26): **689 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 38 golden** with the default VGA frontend, and **596 lib · 12 binary** with
+Test counts at the last green run (2026-08-26): **695 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 38 golden** with the default VGA frontend, and **602 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -841,9 +841,9 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       overlapping paint and hit testing share one source/depth order. Unsupported dimensions,
       division by zero, non-finite results, incompatible types and exhausted limits invalidate the
       declaration atomically. Landed: render-context plumbing, mixed length/percentage math for
-      size/min/max properties, basis-independent range selection and simple signed margins.
-      Remaining: basis-dependent `min()`/`max()`/`clamp()` (including `none` bounds), then typed math
-      for margins, padding, insets, gaps, `flex-basis` and `font-size`.
+      size/min/max properties, used-value `min()`/`max()`/`clamp()` with `none` bounds, and simple
+      signed margins. Remaining: typed math for margins, padding, insets, gaps, `flex-basis` and
+      `font-size`.
 - [ ] **Grid** — enable Taffy's grid engine after the flex formatting and paint-order seams settle.
 - [ ] **Floats** — conformant line-flow-around-float formatting.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
@@ -900,6 +900,17 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-26 — **M6 basis-dependent comparison math delivered; item remains in progress.**
+  `min()`, `max()` and `clamp()` now remain as typed expressions until Taffy supplies the containing-
+  block basis, including nested arithmetic, all three `none`-bound forms and the specified rule that
+  a conflicting minimum wins. A `StyleTree`-owned, structurally deduplicated expression store keeps
+  `ComputedStyle` copyable and caps the tree at 65,536 stored nodes; each parsed value remains capped
+  at 32 nested components and 256 primary nodes. Invalid types, division by zero and exhausted limits
+  still discard the declaration atomically, including after custom-property substitution. No
+  dependency pin changed. Typed math for margins, padding, insets, gaps, flex basis and font size
+  remains open. The complete local format, strict default/all-feature/no-default Clippy and
+  default/JS/VGA/no-default test matrix is green at 695 library tests (602 without defaults), 13
+  binary tests (12 without defaults), 6 fetch-pipeline, 14 corpus and 38 render-golden tests.
 - 2026-08-26 — **M6 CSS math foundation delivered; item remains in progress.** `RenderMetrics` and
   `RenderContext` now keep cell geometry and text capability together from VGA/terminal/dump through
   `PageLoad` and `MediaContext`; both current profiles explicitly inject 8×16, so a future frontend

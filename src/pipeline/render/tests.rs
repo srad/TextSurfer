@@ -216,3 +216,46 @@ fn mixed_css_math_reaches_parent_relative_layout() {
     );
     assert!(page.painted.hits.iter().any(|hit| hit.rect.width == 4));
 }
+
+#[test]
+fn comparison_math_resolves_after_the_containing_width_is_known() {
+    for (value, cols, expected) in [
+        ("min(75%, 6ch)", 4, 3),
+        ("min(75%, 6ch)", 12, 6),
+        ("max(50%, 6ch)", 8, 6),
+        ("max(50%, 6ch)", 16, 8),
+        ("clamp(3ch, 75%, 6ch)", 4, 3),
+        ("clamp(3ch, 75%, 6ch)", 8, 6),
+        ("clamp(8ch, 50%, 4ch)", 10, 8),
+        ("clamp(none, 75%, 6ch)", 4, 3),
+        ("clamp(3ch, 25%, none)", 16, 4),
+        ("clamp(none, 50%, none)", 10, 5),
+        ("calc(min(75%, 6ch) + 1ch)", 4, 4),
+        ("calc(min(75%, 6ch) + 1ch)", 12, 7),
+    ] {
+        let page = render_html(
+            &format!("<body style='margin:0'><div style='width:{value}'>X</div></body>"),
+            Size { cols, rows: 4 },
+            Palette::default(),
+            false,
+        );
+        assert!(
+            page.painted
+                .hits
+                .iter()
+                .any(|hit| hit.rect.width == expected),
+            "{value} at a {cols}-cell basis did not resolve to {expected} cells"
+        );
+    }
+}
+
+#[test]
+fn comparison_math_survives_custom_property_substitution() {
+    let page = render_html(
+        "<body style='margin:0'><div style='--measure:min(75%, 6ch);width:var(--measure)'>X</div></body>",
+        Size { cols: 8, rows: 4 },
+        Palette::default(),
+        false,
+    );
+    assert!(page.painted.hits.iter().any(|hit| hit.rect.width == 6));
+}

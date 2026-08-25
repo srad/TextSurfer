@@ -281,7 +281,11 @@ fn try_layout_flow(
     };
     let calc_values = std::cell::RefCell::new(Vec::<crate::core::style::CssCalc>::new());
     let mut taffy = LayoutTree::new(&mut measure, |value, basis| {
-        calc_values.borrow()[(value.addr() >> 3) - 1].resolve(basis)
+        calc_values
+            .borrow()
+            .get((value.addr() >> 3).saturating_sub(1))
+            .and_then(|value| styles.resolve_calc(*value, basis))
+            .unwrap_or(0.0)
     });
     let mut taffy_nodes = vec![None; flow.len()];
     for index in (0..flow.len()).rev() {

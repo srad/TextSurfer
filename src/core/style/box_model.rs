@@ -1,35 +1,4 @@
-use super::Rgb;
-
-#[repr(align(8))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CssCalc {
-    length: u32,
-    percent: u32,
-}
-
-impl CssCalc {
-    pub fn new(length: f32, percent: f32) -> Option<Self> {
-        if !length.is_finite() || !percent.is_finite() {
-            return None;
-        }
-        Some(Self {
-            length: length.to_bits(),
-            percent: percent.to_bits(),
-        })
-    }
-
-    pub fn length(self) -> f32 {
-        f32::from_bits(self.length)
-    }
-
-    pub fn percent(self) -> f32 {
-        f32::from_bits(self.percent)
-    }
-
-    pub fn resolve(self, basis: f32) -> f32 {
-        self.length() + self.percent() * basis
-    }
-}
+use super::{CssCalc, Rgb};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CssSize {

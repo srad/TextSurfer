@@ -1,16 +1,16 @@
 use cssparser::{ParseError, Parser, ParserInput, Token};
 
-use crate::core::style::{CssCalc, CssLength, CssLengthUnit, LengthAxis};
+use crate::core::style::{CssCalcExpr, CssLength, CssLengthUnit, LengthAxis};
 
 use super::cascade::MediaContext;
 
 const MAX_DEPTH: usize = 32;
 const MAX_NODES: usize = 256;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Value {
     Number(f32),
-    Length(CssCalc),
+    Length(CssCalcExpr),
 }
 
 struct Limits {
@@ -22,7 +22,7 @@ pub(super) fn parse_length_percentage(
     source: &str,
     media: MediaContext,
     axis: LengthAxis,
-) -> Option<CssCalc> {
+) -> Option<CssCalcExpr> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let mut limits = Limits { depth: 0, nodes: 0 };
@@ -86,7 +86,7 @@ fn parse_primary<'i, 't>(
     match parser.next()?.clone() {
         Token::Number { value, .. } if value.is_finite() => Ok(Value::Number(value)),
         Token::Percentage { unit_value, .. } if unit_value.is_finite() => Ok(Value::Length(
-            CssCalc::new(0.0, unit_value).ok_or_else(|| parser.new_custom_error(()))?,
+            CssCalcExpr::linear(0.0, unit_value).ok_or_else(|| parser.new_custom_error(()))?,
         )),
         Token::Dimension { value, unit, .. } => {
             let length = CssLength::new(
@@ -95,7 +95,7 @@ fn parse_primary<'i, 't>(
             )
             .ok_or_else(|| parser.new_custom_error(()))?;
             Ok(Value::Length(
-                CssCalc::new(media.resolve_fractional_cells(length, axis), 0.0)
+                CssCalcExpr::linear(media.resolve_fractional_cells(length, axis), 0.0)
                     .ok_or_else(|| parser.new_custom_error(()))?,
             ))
         }
@@ -115,9 +115,7 @@ fn parse_primary<'i, 't>(
                     range(values, name.eq_ignore_ascii_case("min"))
                         .ok_or_else(|| input.new_custom_error(()))
                 } else if name.eq_ignore_ascii_case("clamp") {
-                    let values =
-                        input.parse_comma_separated(|item| parse_sum(item, media, axis, limits))?;
-                    clamp(values).ok_or_else(|| input.new_custom_error(()))
+                    parse_clamp(input, media, axis, limits)
                 } else {
                     Err(input.new_custom_error(()))
                 }
@@ -125,11 +123,19 @@ fn parse_primary<'i, 't>(
             limits.depth -= 1;
             result
         }
-        Token::ParenthesisBlock => parser.parse_nested_block(|input| {
-            let value = parse_sum(input, media, axis, limits)?;
-            input.expect_exhausted()?;
-            Ok(value)
-        }),
+        Token::ParenthesisBlock => {
+            limits.depth += 1;
+            if limits.depth > MAX_DEPTH {
+                return Err(parser.new_custom_error(()));
+            }
+            let result = parser.parse_nested_block(|input| {
+                let value = parse_sum(input, media, axis, limits)?;
+                input.expect_exhausted()?;
+                Ok(value)
+            });
+            limits.depth -= 1;
+            result
+        }
         Token::Ident(name) if name.eq_ignore_ascii_case("e") => {
             Ok(Value::Number(std::f32::consts::E))
         }
@@ -143,11 +149,9 @@ fn parse_primary<'i, 't>(
 fn add(left: Value, right: Value, sign: f32) -> Option<Value> {
     match (left, right) {
         (Value::Number(left), Value::Number(right)) => finite(left + sign * right),
-        (Value::Length(left), Value::Length(right)) => CssCalc::new(
-            left.length() + sign * right.length(),
-            left.percent() + sign * right.percent(),
-        )
-        .map(Value::Length),
+        (Value::Length(left), Value::Length(right)) => {
+            left.add(right, sign > 0.0).map(Value::Length)
+        }
         _ => None,
     }
 }
@@ -156,9 +160,7 @@ fn multiply(left: Value, right: Value) -> Option<Value> {
     match (left, right) {
         (Value::Number(left), Value::Number(right)) => finite(left * right),
         (Value::Length(value), Value::Number(number))
-        | (Value::Number(number), Value::Length(value)) => {
-            CssCalc::new(value.length() * number, value.percent() * number).map(Value::Length)
-        }
+        | (Value::Number(number), Value::Length(value)) => value.scale(number).map(Value::Length),
         _ => None,
     }
 }
@@ -174,40 +176,87 @@ fn divide(left: Value, right: Value) -> Option<Value> {
 }
 
 fn range(values: Vec<Value>, minimum: bool) -> Option<Value> {
-    let mut values = values.into_iter();
-    let first = values.next()?;
-    values.try_fold(first, |left, right| select(left, right, minimum))
-}
-
-fn clamp(values: Vec<Value>) -> Option<Value> {
-    let [minimum, value, maximum] = values.as_slice() else {
-        return None;
-    };
-    select(select(*minimum, *value, false)?, *maximum, true)
-}
-
-fn select(left: Value, right: Value, minimum: bool) -> Option<Value> {
-    match (left, right) {
-        (Value::Number(left), Value::Number(right)) => finite(if minimum {
-            left.min(right)
+    let mut numbers = Vec::new();
+    let mut lengths = Vec::new();
+    for value in values {
+        match value {
+            Value::Number(value) if lengths.is_empty() => numbers.push(value),
+            Value::Length(value) if numbers.is_empty() => lengths.push(value),
+            _ => return None,
+        }
+    }
+    if !numbers.is_empty() {
+        let initial = if minimum {
+            f32::INFINITY
         } else {
-            left.max(right)
-        }),
-        (Value::Length(left), Value::Length(right))
-            if left.percent() == right.percent() || left.length() == right.length() =>
-        {
-            let basis = if left.percent() == right.percent() {
-                0.0
+            f32::NEG_INFINITY
+        };
+        return finite(numbers.into_iter().fold(initial, |result, value| {
+            if minimum {
+                result.min(value)
             } else {
-                1.0
+                result.max(value)
+            }
+        }));
+    }
+    if minimum {
+        CssCalcExpr::minimum(lengths).map(Value::Length)
+    } else {
+        CssCalcExpr::maximum(lengths).map(Value::Length)
+    }
+}
+
+fn parse_clamp<'i, 't>(
+    parser: &mut Parser<'i, 't>,
+    media: MediaContext,
+    axis: LengthAxis,
+    limits: &mut Limits,
+) -> Result<Value, ParseError<'i, ()>> {
+    let minimum = parse_optional_bound(parser, media, axis, limits)?;
+    parser.expect_comma()?;
+    let value = parse_sum(parser, media, axis, limits)?;
+    parser.expect_comma()?;
+    let maximum = parse_optional_bound(parser, media, axis, limits)?;
+    parser.expect_exhausted()?;
+    clamp(minimum, value, maximum).ok_or_else(|| parser.new_custom_error(()))
+}
+
+fn parse_optional_bound<'i, 't>(
+    parser: &mut Parser<'i, 't>,
+    media: MediaContext,
+    axis: LengthAxis,
+    limits: &mut Limits,
+) -> Result<Option<Value>, ParseError<'i, ()>> {
+    if parser
+        .try_parse(|input| input.expect_ident_matching("none"))
+        .is_ok()
+    {
+        Ok(None)
+    } else {
+        parse_sum(parser, media, axis, limits).map(Some)
+    }
+}
+
+fn clamp(minimum: Option<Value>, value: Value, maximum: Option<Value>) -> Option<Value> {
+    match (minimum, value, maximum) {
+        (Some(Value::Number(minimum)), Value::Number(value), Some(Value::Number(maximum))) => {
+            finite(minimum.max(value.min(maximum)))
+        }
+        (Some(Value::Number(minimum)), Value::Number(value), None) => finite(minimum.max(value)),
+        (None, Value::Number(value), Some(Value::Number(maximum))) => finite(value.min(maximum)),
+        (None, Value::Number(value), None) => finite(value),
+        (minimum, Value::Length(value), maximum) => {
+            let minimum = match minimum {
+                Some(Value::Length(value)) => Some(value),
+                None => None,
+                _ => return None,
             };
-            Some(Value::Length(
-                if minimum == (left.resolve(basis) <= right.resolve(basis)) {
-                    left
-                } else {
-                    right
-                },
-            ))
+            let maximum = match maximum {
+                Some(Value::Length(value)) => Some(value),
+                None => None,
+                _ => return None,
+            };
+            Some(Value::Length(CssCalcExpr::clamp(minimum, value, maximum)))
         }
         _ => None,
     }
@@ -237,4 +286,52 @@ fn length_unit(unit: &str) -> Option<CssLengthUnit> {
         "vmax" => Vmax,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::style::CssCalcStore;
+
+    fn resolve(source: &str, basis: f32) -> Option<f32> {
+        let expression =
+            parse_length_percentage(source, MediaContext::screen(), LengthAxis::Horizontal)?;
+        let mut calculations = CssCalcStore::default();
+        let value = calculations.insert(expression)?;
+        calculations.resolve(value, basis)
+    }
+
+    #[test]
+    fn comparison_functions_keep_type_and_used_value_semantics() {
+        assert_eq!(resolve("min(75%, 6ch)", 4.0), Some(3.0));
+        assert_eq!(resolve("min(75%, 6ch)", 12.0), Some(6.0));
+        assert_eq!(resolve("clamp(8ch, 50%, 4ch)", 10.0), Some(8.0));
+        assert_eq!(resolve("clamp(none, 50%, none)", 10.0), Some(5.0));
+        assert_eq!(resolve("calc(min(75%, 6ch) + 1ch)", 12.0), Some(7.0));
+    }
+
+    #[test]
+    fn incompatible_or_exhausted_math_is_invalid_as_one_value() {
+        assert_eq!(resolve("min(1, 1ch)", 10.0), None);
+        assert_eq!(resolve("calc(1ch * 1ch)", 10.0), None);
+        assert_eq!(resolve("calc(1ch / 0)", 10.0), None);
+        assert_eq!(resolve("clamp(1ch, none, 2ch)", 10.0), None);
+        let nested = format!("calc({}1ch{})", "(".repeat(33), ")".repeat(33));
+        assert_eq!(resolve(&nested, 10.0), None);
+        let wide = format!("calc({})", vec!["1ch"; 257].join(" + "));
+        assert_eq!(resolve(&wide, 10.0), None);
+    }
+
+    #[test]
+    fn identical_expressions_share_one_style_tree_value() {
+        let first = parse_length_percentage(
+            "min(75%, 6ch)",
+            MediaContext::screen(),
+            LengthAxis::Horizontal,
+        )
+        .unwrap();
+        let second = first.clone();
+        let mut calculations = CssCalcStore::default();
+        assert_eq!(calculations.insert(first), calculations.insert(second));
+    }
 }

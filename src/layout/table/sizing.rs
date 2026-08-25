@@ -21,7 +21,7 @@ pub(super) fn size_columns(
 ) -> ColumnLayout {
     let mut minimum = vec![1usize; model.columns];
     let mut maximum = vec![1usize; model.columns];
-    let specified = resolved_width(table_style.width, available_width);
+    let specified = resolved_width(table_style.width, available_width, formatter.styles);
     let percentage_basis = specified.unwrap_or(available_width);
     for (cell, metric) in model.cells.iter().zip(metrics) {
         if cell.col_span == 1 {
@@ -34,7 +34,11 @@ pub(super) fn size_columns(
             grow_span(&mut minimum, cell.col, cell.col_span, metric.minimum);
             grow_span(&mut maximum, cell.col, cell.col_span, metric.maximum);
         }
-        if let Some(width) = cell_width_hint(formatter.cell_style(cell), percentage_basis) {
+        if let Some(width) = cell_width_hint(
+            formatter.cell_style(cell),
+            percentage_basis,
+            formatter.styles,
+        ) {
             grow_span(&mut minimum, cell.col, cell.col_span, width);
             grow_span(&mut maximum, cell.col, cell.col_span, width);
         }
@@ -45,6 +49,7 @@ pub(super) fn size_columns(
                 formatter.styles.get(group).width,
                 available_width,
                 &mut minimum[col],
+                formatter.styles,
             );
             maximum[col] = maximum[col].max(minimum[col]);
         }
@@ -53,6 +58,7 @@ pub(super) fn size_columns(
                 formatter.styles.get(node).width,
                 available_width,
                 &mut minimum[col],
+                formatter.styles,
             );
             maximum[col] = maximum[col].max(minimum[col]);
         }
@@ -65,6 +71,7 @@ pub(super) fn size_columns(
                     formatter.styles.get(group).width,
                     available_width,
                     &mut fixed[col],
+                    formatter.styles,
                 );
             }
             if let Some(node) = track.column {
@@ -72,11 +79,16 @@ pub(super) fn size_columns(
                     formatter.styles.get(node).width,
                     available_width,
                     &mut fixed[col],
+                    formatter.styles,
                 );
             }
         }
         for cell in model.cells.iter().filter(|cell| cell.row == 0) {
-            if let Some(width) = cell_width_hint(formatter.cell_style(cell), percentage_basis) {
+            if let Some(width) = cell_width_hint(
+                formatter.cell_style(cell),
+                percentage_basis,
+                formatter.styles,
+            ) {
                 let each = width.div_ceil(cell.col_span);
                 for value in &mut fixed[cell.col..cell.col + cell.col_span] {
                     *value = (*value).max(each);
@@ -189,23 +201,38 @@ pub(super) fn grow_towards(values: &mut [usize], maximum: &[usize], target: usiz
     }
 }
 
-pub(super) fn apply_width_hint(width: CssWidth, basis: usize, target: &mut usize) {
-    if let Some(value) = resolved_width(width, basis) {
+pub(super) fn apply_width_hint(
+    width: CssWidth,
+    basis: usize,
+    target: &mut usize,
+    styles: &crate::core::style::StyleTree,
+) {
+    if let Some(value) = resolved_width(width, basis, styles) {
         *target = (*target).max(value);
     }
 }
 
-pub(super) fn resolved_width(width: CssWidth, basis: usize) -> Option<usize> {
+pub(super) fn resolved_width(
+    width: CssWidth,
+    basis: usize,
+    styles: &crate::core::style::StyleTree,
+) -> Option<usize> {
     match width {
         CssWidth::Auto => None,
         CssWidth::Cells(value) => Some(value),
         CssWidth::Percent(value) => Some(value.resolve(basis)),
-        CssWidth::Calc(value) => Some(value.resolve(basis as f32).max(0.0).round() as usize),
+        CssWidth::Calc(value) => {
+            Some(styles.resolve_calc(value, basis as f32)?.max(0.0).round() as usize)
+        }
     }
 }
 
-pub(super) fn cell_width_hint(style: ComputedStyle, basis: usize) -> Option<usize> {
-    resolved_width(style.width, basis).map(|width| {
+pub(super) fn cell_width_hint(
+    style: ComputedStyle,
+    basis: usize,
+    styles: &crate::core::style::StyleTree,
+) -> Option<usize> {
+    resolved_width(style.width, basis, styles).map(|width| {
         if style.box_sizing == crate::core::style::BoxSizing::ContentBox {
             width
                 + style.padding.left

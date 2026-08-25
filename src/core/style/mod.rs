@@ -4,6 +4,7 @@ mod display;
 mod flex;
 mod length;
 mod list;
+mod math;
 mod render;
 mod table;
 mod typography;
@@ -16,7 +17,7 @@ use std::collections::HashMap;
 use crate::core::dom::NodeId;
 
 pub use box_model::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssCalc, CssInset, CssMargin,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssInset, CssMargin,
     CssMaxSize, CssPercentage, CssSize, CssWidth, EdgeSizes, InsetEdges, MarginEdges, Overflow,
     OverflowAxes, Position,
 };
@@ -30,6 +31,8 @@ pub use flex::{
 };
 pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
+pub use math::CssCalc;
+pub(crate) use math::{CssCalcExpr, CssCalcStore};
 pub use render::{RenderContext, RenderMetrics};
 pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
 pub use typography::{FontSize, TextPresentation, TextRendering};
@@ -218,6 +221,7 @@ pub struct StyleTree {
     styles: HashMap<NodeId, ComputedStyle>,
     pseudo: HashMap<(NodeId, PseudoElement), PseudoBox>,
     markers: HashMap<NodeId, Marker>,
+    calculations: CssCalcStore,
 }
 
 impl StyleTree {
@@ -243,5 +247,13 @@ impl StyleTree {
 
     pub fn marker(&self, node: NodeId) -> Option<&Marker> {
         self.markers.get(&node)
+    }
+
+    pub(crate) fn set_calculations(&mut self, calculations: CssCalcStore) {
+        self.calculations = calculations;
+    }
+
+    pub fn resolve_calc(&self, value: CssCalc, basis: f32) -> Option<f32> {
+        self.calculations.resolve(value, basis)
     }
 }

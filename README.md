@@ -142,10 +142,11 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   in tests; error-count comparison is an open harness follow-up
 
 **Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math slice is in
-progress. Mixed length/percentage `calc()` sizing, frontend render metrics and signed block/flex/
-inline margins have landed. Basis-dependent range functions and math in margins, padding, insets,
-gaps, flex basis and font size are next, followed by Grid. Product work continues with keyboard
-links, forms and in-page search (M2), then the JavaScript seam/Boa integration (M4–M5).
+progress. Mixed length/percentage sizing, used-value `min()`/`max()`/`clamp()` (including `none`
+bounds), frontend render metrics and signed block/flex/inline margins have landed. Typed math in
+margins, padding, insets, gaps, flex basis and font size is next, followed by Grid. Product work
+continues with keyboard links, forms and in-page search (M2), then the JavaScript seam/Boa
+integration (M4–M5).
 
 ## Architecture
 

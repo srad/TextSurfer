@@ -5,8 +5,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::style::{
-    ComputedStyle, CssMaxSize, CssSize, Display, DisplayInside, ListStylePosition, Marker,
-    PseudoBox, PseudoElement, StyleTree,
+    ComputedStyle, CssCalcStore, CssMaxSize, CssSize, Display, DisplayInside, ListStylePosition,
+    Marker, PseudoBox, PseudoElement, StyleTree,
 };
 use crate::css::StyleSheet;
 use crate::css::parser::{StyleRule, parse_declarations};
@@ -28,6 +28,7 @@ pub(super) fn cascade_document(
     bucketed: bool,
 ) -> StyleTree {
     let mut tree = StyleTree::default();
+    let mut calculations = CssCalcStore::default();
     let rules = active_style_rules(sheets, media);
     let index = bucketed.then(|| RuleIndex::new(&rules, document));
     let mut counters = CounterScopes::default();
@@ -137,6 +138,7 @@ pub(super) fn cascade_document(
                 ua_baseline,
                 &declaration,
                 element_media,
+                &mut calculations,
             );
             authored_counters.apply(&declaration);
         }
@@ -179,6 +181,7 @@ pub(super) fn cascade_document(
                 None,
                 pseudo_is_flex_item(document, &tree, id, style),
                 environment.clone(),
+                &mut calculations,
             ) {
                 tree.insert_pseudo(id, which, pseudo);
             }
@@ -197,6 +200,7 @@ pub(super) fn cascade_document(
                 fallback,
                 false,
                 environment.clone(),
+                &mut calculations,
             ) {
                 markers.push(PendingMarker {
                     node: id,
@@ -232,6 +236,7 @@ pub(super) fn cascade_document(
             },
         );
     }
+    tree.set_calculations(calculations);
     tree
 }
 
@@ -258,6 +263,7 @@ fn cascade_pseudo(
     fallback: Option<String>,
     flex_item: bool,
     origin_environment: Rc<Environment>,
+    calculations: &mut CssCalcStore,
 ) -> Option<PseudoBox> {
     let mut declarations = Vec::new();
     let mut order = 0usize;
@@ -338,6 +344,7 @@ fn cascade_pseudo(
             ua_baseline,
             &declaration,
             pseudo_media,
+            calculations,
         );
         if declaration.name == "content"
             && let Some(spec) = parse_content(&declaration.value)

@@ -3,10 +3,10 @@ use cssparser::{Parser, ParserInput, Token};
 use super::MediaContext;
 use super::flex::apply_flex_declaration;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssInset, CssMargin,
-    CssMaxSize, CssPercentage, CssSize, InsetEdges, LegacyAlign, LengthAxis, ListStyleType,
-    MarginEdges, Overflow, Position, TableLayoutMode, TextAlign, VerticalAlign, Visibility,
-    WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssCalcStore, CssInset,
+    CssMargin, CssMaxSize, CssPercentage, CssSize, InsetEdges, LegacyAlign, LengthAxis,
+    ListStyleType, MarginEdges, Overflow, Position, TableLayoutMode, TextAlign, VerticalAlign,
+    Visibility, WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
@@ -30,12 +30,20 @@ pub(super) fn apply_declaration(
     ua_style: ComputedStyle,
     declaration: &Declaration,
     media: MediaContext,
+    calculations: &mut CssCalcStore,
 ) -> ApplyOutcome {
     if declaration.name == "font-size" || !is_supported_property(&declaration.name) {
         return ApplyOutcome::Unsupported;
     }
     let before = *style;
-    apply_declaration_raw(style, parent_style, ua_style, declaration, media);
+    apply_declaration_raw(
+        style,
+        parent_style,
+        ua_style,
+        declaration,
+        media,
+        calculations,
+    );
     if *style != before || declaration_value_is_valid(parent_style, ua_style, declaration, media) {
         ApplyOutcome::Applied
     } else {
@@ -49,6 +57,7 @@ fn apply_declaration_raw(
     ua_style: ComputedStyle,
     declaration: &Declaration,
     media: MediaContext,
+    calculations: &mut CssCalcStore,
 ) {
     if declaration.name == "font-size" {
         return;
@@ -197,36 +206,42 @@ fn apply_declaration_raw(
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            calculations,
         ),
         "height" => assign_size(
             &mut style.height,
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            calculations,
         ),
         "min-width" => assign_size(
             &mut style.min_width,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            calculations,
         ),
         "min-height" => assign_size(
             &mut style.min_height,
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            calculations,
         ),
         "max-width" => assign_max_size(
             &mut style.max_width,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            calculations,
         ),
         "max-height" => assign_max_size(
             &mut style.max_height,
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            calculations,
         ),
         "box-sizing" => {
             if let Some(box_sizing) =
@@ -445,7 +460,15 @@ pub(super) fn declaration_value_is_valid(
     ];
     probes.iter_mut().any(|probe| {
         let before = *probe;
-        apply_declaration_raw(probe, parent_style, ua_style, declaration, media);
+        let mut calculations = CssCalcStore::default();
+        apply_declaration_raw(
+            probe,
+            parent_style,
+            ua_style,
+            declaration,
+            media,
+            &mut calculations,
+        );
         *probe != before
     })
 }
@@ -815,12 +838,21 @@ fn assign_margin(target: &mut CssMargin, source: &str, axis: LengthAxis, media: 
     *target = CssMargin::Cells(media.resolve_signed_cells(length, axis));
 }
 
-fn assign_size(target: &mut CssSize, source: &str, axis: LengthAxis, media: MediaContext) {
+fn assign_size(
+    target: &mut CssSize,
+    source: &str,
+    axis: LengthAxis,
+    media: MediaContext,
+    calculations: &mut CssCalcStore,
+) {
     let source_start = source.trim_start().to_ascii_lowercase();
     let is_math = ["calc(", "min(", "max(", "clamp("]
         .iter()
         .any(|function| source_start.starts_with(function));
-    if is_math && let Some(value) = crate::css::math::parse_length_percentage(source, media, axis) {
+    if is_math
+        && let Some(value) = crate::css::math::parse_length_percentage(source, media, axis)
+        && let Some(value) = calculations.insert(value)
+    {
         *target = CssSize::Calc(value);
         return;
     }
@@ -837,13 +869,19 @@ fn assign_size(target: &mut CssSize, source: &str, axis: LengthAxis, media: Medi
     }
 }
 
-fn assign_max_size(target: &mut CssMaxSize, source: &str, axis: LengthAxis, media: MediaContext) {
+fn assign_max_size(
+    target: &mut CssMaxSize,
+    source: &str,
+    axis: LengthAxis,
+    media: MediaContext,
+    calculations: &mut CssCalcStore,
+) {
     if parse_ident(source).as_deref() == Some("none") {
         *target = CssMaxSize::None;
         return;
     }
     let mut value = CssSize::Auto;
-    assign_size(&mut value, source, axis, media);
+    assign_size(&mut value, source, axis, media, calculations);
     *target = match value {
         CssSize::Cells(value) => CssMaxSize::Cells(value),
         CssSize::Percent(value) => CssMaxSize::Percent(value),

@@ -860,9 +860,21 @@ fn css_math_preserves_mixed_percentage_and_length_until_layout() {
     let CssSize::Calc(value) = styles.get(node).width else {
         panic!("expected deferred math");
     };
-    assert_eq!(value.length(), -1.0);
-    assert_eq!(value.percent(), 0.5);
-    assert_eq!(value.resolve(10.0), 4.0);
+    assert_eq!(styles.resolve_calc(value, 10.0), Some(4.0));
+    assert_eq!(styles.resolve_calc(value, 20.0), Some(9.0));
+}
+
+#[test]
+fn invalid_comparison_math_does_not_override_an_earlier_size() {
+    let mut document = Document::new();
+    let node = document.insert_element(
+        None,
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain("style", "width:3ch;width:min(1, 1ch)")],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    assert_eq!(styles.get(node).width, CssSize::Cells(3));
 }
 
 #[test]
