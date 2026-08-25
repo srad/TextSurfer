@@ -285,7 +285,7 @@ fn default_link_hover_and_inline_span_hover_reach_the_live_styles() {
             .unwrap()
             .get(link)
             .color,
-        Some(crate::ui::theme::NORTON.palette().link.into())
+        Some(crate::ui::theme::DEFAULT.palette().link.into())
     );
     let cell = link_cell(&link_app);
     link_app.handle_mouse(event(MouseKind::Move, cell));
@@ -298,7 +298,7 @@ fn default_link_hover_and_inline_span_hover_reach_the_live_styles() {
             .unwrap()
             .get(link)
             .color,
-        Some(crate::ui::theme::NORTON.palette().link_hover.into())
+        Some(crate::ui::theme::DEFAULT.palette().link_hover.into())
     );
 
     let mut span_app = loaded(

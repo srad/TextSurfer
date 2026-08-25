@@ -200,7 +200,7 @@ fn alt_letter_opens_the_matching_menu() {
     app.handle_key(alt(press(Key::Char('v'))));
     assert_eq!(app.chrome_view().menu_active, 2);
     app.handle_key(press(Key::Enter));
-    assert_eq!(app.message(), "theme: Norton");
+    assert_eq!(app.message(), "theme: Turbo Vision");
 }
 
 #[test]

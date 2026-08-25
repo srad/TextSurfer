@@ -263,7 +263,7 @@ mod tests {
     use crate::core::geom::Size;
     use crate::core::style::Rgb;
     use crate::ui::test_util::buffer_string;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use crate::ui::widgets::content::{Content, ContentLines};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -335,7 +335,7 @@ mod tests {
                         painted: &page,
                         scroll: 0,
                     },
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut());
             })

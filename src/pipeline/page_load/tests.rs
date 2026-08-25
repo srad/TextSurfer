@@ -3,6 +3,7 @@ use encoding_rs::UTF_8;
 use super::*;
 use crate::css::{DynamicState, FocusSource, FocusedNode};
 use crate::net::FetchError;
+use crate::ui::theme::PAPER_WHITE;
 
 fn load(source: &str) -> PageLoad {
     PageLoad::new(
@@ -238,6 +239,46 @@ fn newly_applicable_pending_sheet_repaints_without_blank_loading_state() {
             .iter()
             .any(|line| line == "visible")
     );
+}
+
+#[test]
+fn newly_applicable_color_scheme_sheet_repaints_without_blank_loading_state() {
+    let mut load = load(
+        "<!doctype html><link rel=stylesheet media='(prefers-color-scheme: light)' href='light.css'>
+             <p>visible</p>",
+    );
+    let command = load.take_commands().pop().unwrap();
+    assert!(load.render_if_ready(Duration::ZERO).is_some());
+    let page = load
+        .recolor(PAPER_WHITE.palette(), ColorScheme::Light)
+        .expect("the settled page repaints immediately");
+    assert!(
+        page.painted
+            .text_lines()
+            .iter()
+            .any(|line| line == "visible")
+    );
+    assert!(!load.final_painted);
+
+    let (id, response) = css_response(command, b"p { display: none }");
+    assert!(load.deliver(id, Ok(response)));
+    let page = load.render_if_ready(Duration::ZERO).unwrap();
+    assert!(
+        !page
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line == "visible")
+    );
+}
+
+#[test]
+fn deferred_color_context_marks_a_painted_page_dirty_and_noops_when_unchanged() {
+    let mut load = load("<p>visible</p>");
+    assert!(load.render_if_ready(Duration::ZERO).is_some());
+    assert!(load.set_color_context(PAPER_WHITE.palette(), ColorScheme::Light));
+    assert!(load.dirty);
+    assert!(!load.set_color_context(PAPER_WHITE.palette(), ColorScheme::Light));
 }
 
 #[test]

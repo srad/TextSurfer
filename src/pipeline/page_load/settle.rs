@@ -1,11 +1,35 @@
 use std::time::Duration;
 
+use crate::core::style::Palette;
+use crate::css::ColorScheme;
 use crate::css::cascade::media_query_list_matches;
 
 use super::super::render::RenderedPage;
 use super::{FetchState, PageLoad, RootSource};
 
 impl PageLoad {
+    pub fn set_color_context(&mut self, palette: Palette, color_scheme: ColorScheme) -> bool {
+        if self.palette == palette && self.media.color_scheme == color_scheme {
+            return false;
+        }
+        self.palette = palette;
+        self.media = self
+            .media
+            .with_palette(palette)
+            .with_color_scheme(color_scheme);
+        self.dirty = true;
+        true
+    }
+
+    pub fn recolor(&mut self, palette: Palette, color_scheme: ColorScheme) -> Option<RenderedPage> {
+        if !self.set_color_context(palette, color_scheme) || !self.first_painted {
+            return None;
+        }
+        self.final_painted = self.applicable_graph_settled();
+        self.dirty = false;
+        Some(self.render_page())
+    }
+
     pub fn render_if_ready(&mut self, now: Duration) -> Option<RenderedPage> {
         let settled = self.applicable_graph_settled();
         if !self.first_painted {

@@ -161,6 +161,16 @@ impl Surface {
         &self.pixels
     }
 
+    pub fn set_default_palette(&mut self, palette: Palette) -> bool {
+        if self.default_fg == palette.text && self.default_bg == palette.background {
+            return false;
+        }
+        self.default_fg = palette.text;
+        self.default_bg = palette.background;
+        self.clear();
+        true
+    }
+
     pub fn take_damage(&mut self) -> Option<PixelRect> {
         let damage = std::mem::take(&mut self.damage);
         damage.into_iter().reduce(union_pixel_rect)

@@ -83,7 +83,7 @@ impl Widget for Toolbar<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -97,7 +97,7 @@ mod tests {
                     focused,
                     back_enabled: back,
                     forward_enabled: forward,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -121,7 +121,7 @@ mod tests {
                     focused: false,
                     back_enabled: false,
                     forward_enabled: true,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -130,13 +130,13 @@ mod tests {
         assert_eq!(cells[2].symbol(), "‹");
         assert_eq!(
             cells[2].style().fg,
-            Some(NORTON.dim),
+            Some(DEFAULT.dim),
             "disabled back glyph must be dim"
         );
         assert_eq!(cells[6].symbol(), "›");
         assert_eq!(
             cells[6].style().fg,
-            Some(NORTON.text),
+            Some(DEFAULT.text),
             "enabled forward glyph must be normal text"
         );
     }
@@ -163,13 +163,13 @@ mod tests {
                     focused: true,
                     back_enabled: true,
                     forward_enabled: true,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
             .unwrap();
         let cells = terminal.backend().buffer().content();
-        let selected = NORTON.selected();
+        let selected = DEFAULT.selected();
         assert_eq!(
             cells[23].style().bg,
             selected.bg,
@@ -199,7 +199,7 @@ mod tests {
                     focused: false,
                     back_enabled: true,
                     forward_enabled: true,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })

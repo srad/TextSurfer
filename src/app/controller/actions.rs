@@ -2,7 +2,7 @@ use crate::core::event::{Key, KeyEvent};
 use crate::core::focus::Focus;
 use crate::core::frame::ChromeDamage;
 use crate::ui::keymap::{Action, DefaultKeymap, Keymap};
-use crate::ui::widgets::menu::MENUS;
+use crate::ui::widgets::menu::{MENUS, THEME_MENU};
 
 use super::App;
 
@@ -80,19 +80,16 @@ impl App {
                 } else {
                     self.menu_active - 1
                 };
-                self.menu_item = 0;
+                self.menu_item = self.initial_menu_item(self.menu_active);
                 self.touch();
             }
             Action::MenuRight => {
                 self.menu_active = (self.menu_active + 1) % MENUS.len();
-                self.menu_item = 0;
+                self.menu_item = self.initial_menu_item(self.menu_active);
                 self.touch();
             }
             Action::MenuSelect => self.menu_select(),
-            Action::ThemeInfo => {
-                self.tabs.active_mut().message = "theme: Norton".to_string();
-                self.touch();
-            }
+            Action::SetTheme(index) => self.set_theme(index),
         }
     }
 
@@ -102,7 +99,7 @@ impl App {
         } else {
             self.focus_before_menu = self.focus;
             self.menu_active = 0;
-            self.menu_item = 0;
+            self.menu_item = self.initial_menu_item(self.menu_active);
             self.menu_open = true;
             self.focus = Focus::Menu;
             self.touch();
@@ -116,7 +113,7 @@ impl App {
         self.focus = Focus::Menu;
         self.menu_open = true;
         self.menu_active = menu.min(MENUS.len() - 1);
-        self.menu_item = 0;
+        self.menu_item = self.initial_menu_item(self.menu_active);
         self.touch();
     }
 
@@ -124,6 +121,14 @@ impl App {
         self.menu_open = false;
         self.focus = self.focus_before_menu;
         self.touch();
+    }
+
+    fn initial_menu_item(&self, menu: usize) -> usize {
+        if menu == THEME_MENU {
+            self.theme_index
+        } else {
+            0
+        }
     }
 
     fn menu_select(&mut self) {
@@ -176,7 +181,7 @@ fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
         (1, 0) => Some(Action::Back),
         (1, 1) => Some(Action::Forward),
         (1, 2) => Some(Action::Home),
-        (2, 0) => Some(Action::ThemeInfo),
+        (THEME_MENU, item) if item < MENUS[THEME_MENU].len() => Some(Action::SetTheme(item)),
         (3, 0) => Some(Action::Help),
         _ => None,
     }

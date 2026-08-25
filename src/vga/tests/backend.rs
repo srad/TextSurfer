@@ -12,12 +12,16 @@ use crate::layout::LayoutRect;
 use crate::paint::ScaledTextRun;
 use crate::ui::chrome;
 use crate::ui::test_util::draft_view;
+use crate::ui::theme::{DEFAULT, rgb_of};
 use crate::vga::backend::{VgaBackend, cell_at, grid_for, pixel_size};
 use crate::vga::font::{CELL_H, CELL_W};
 use crate::vga::{SurfaceConfig, VgaOptions};
 
 const FG: Rgb = Rgb::new(200, 200, 200);
-const BG: Rgb = Rgb::new(0, 0, 128);
+
+fn bg() -> Rgb {
+    rgb_of(DEFAULT.bg)
+}
 
 /// The chrome fixture's own geometry, so the widgets lay out as they were written to.
 const VIEW: Size = Size { cols: 60, rows: 10 };
@@ -28,7 +32,7 @@ fn config(size: Size) -> SurfaceConfig {
         rows: size.rows,
         scale: 1,
         default_fg: FG,
-        default_bg: BG,
+        default_bg: bg(),
     }
 }
 
@@ -44,7 +48,7 @@ fn packed(colour: Rgb) -> u32 {
 fn cell_is_marked(backend: &VgaBackend, col: u16, row: u16) -> bool {
     let surface = backend.surface();
     let (width, _) = surface.pixel_size();
-    let plain = packed(BG);
+    let plain = packed(bg());
     (0..CELL_H).any(|y| {
         (0..CELL_W).any(|x| {
             let at = (row as usize * CELL_H + y) * width + col as usize * CELL_W + x;
@@ -71,7 +75,7 @@ fn scaled_run(node: NodeId, col: usize, row: usize) -> ScaledTextRun {
         text: "A".to_string(),
         style: CellStyle {
             fg: Some(Rgba::opaque(FG)),
-            bg: Some(BG),
+            bg: Some(bg()),
             scale: 2,
             ..Default::default()
         },
@@ -208,7 +212,7 @@ fn the_real_chrome_renders_the_same_cells_as_the_terminal_backend() {
             let reference_cell = &expected[(col, row)];
             // A cell is visibly marked if it draws a glyph or tints its background.
             let reference_marked = reference_cell.symbol() != " "
-                || reference_cell.bg != ratatui::style::Color::Rgb(BG.r, BG.g, BG.b);
+                || reference_cell.bg != ratatui::style::Color::Rgb(bg().r, bg().g, bg().b);
             if reference_marked != cell_is_marked(actual, col, row) {
                 disagreements.push(format!(
                     "({col}, {row}) {:?} reference={reference_marked}",
@@ -271,7 +275,7 @@ fn scaled_text_lands_on_the_content_rows_the_chrome_reserved() {
         &[],
         Palette {
             text: FG,
-            background: BG,
+            background: bg(),
             link: FG,
             link_hover: FG,
         },
@@ -311,7 +315,7 @@ fn chrome_pixels_golden() {
         .map(|y| {
             let row: String = (0..18 * CELL_W)
                 .map(|x| {
-                    if surface.pixels()[y * width + x] == packed(BG) {
+                    if surface.pixels()[y * width + x] == packed(bg()) {
                         '.'
                     } else {
                         '#'

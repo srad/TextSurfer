@@ -29,7 +29,7 @@ use crate::layout::LayoutRect;
 use crate::ui::chrome;
 use crate::ui::frame::FrameComposer;
 use crate::ui::mouse::WHEEL_ROWS;
-use crate::ui::theme::{NORTON, rgb_of};
+use crate::ui::theme::rgb_of;
 
 use super::backend::{VgaBackend, cell_at, grid_for, pixel_size};
 use super::font::{CELL_H, CELL_W};
@@ -99,7 +99,8 @@ pub(super) struct VgaApp {
     pointer: Option<Point>,
     wheel: WheelAccumulator,
     cursor: CursorPresentation,
-    background: Rgb,
+    theme_index: usize,
+    force_full_present: bool,
     presented: Option<Presented>,
     /// The first error to escape a callback. `ApplicationHandler` cannot return one,
     /// so it is stashed here and surfaced by [`run`] after the loop exits.
@@ -112,19 +113,21 @@ impl VgaApp {
         options: VgaOptions,
         url: Option<String>,
     ) -> io::Result<Self> {
-        let background = rgb_of(NORTON.bg);
+        let mut app = App::with_net_and_rendering(net, TextRendering::ScaledBitmap);
+        let theme = *app.theme();
+        let palette = theme.palette();
         let backend = VgaBackend::new(SurfaceConfig {
             cols: options.cells.cols,
             rows: options.cells.rows,
             scale: options.scale,
-            default_fg: rgb_of(NORTON.text),
-            default_bg: background,
+            default_fg: palette.text,
+            default_bg: palette.background,
         });
-        let mut app = App::with_net_and_rendering(net, TextRendering::ScaledBitmap);
         app.on_resize(options.cells);
         if let Some(url) = url {
             app.submit_url(&url);
         }
+        let theme_index = app.theme_index();
         Ok(Self {
             backend,
             composer: FrameComposer::new(ratatui::layout::Rect::new(
@@ -146,7 +149,8 @@ impl VgaApp {
                 visible: true,
                 icon: CursorIcon::Default,
             },
-            background,
+            theme_index,
+            force_full_present: false,
             presented: None,
             failure: None,
         })
@@ -171,6 +175,7 @@ impl VgaApp {
             self.app.advance(&InputBatch::new(), now);
             advanced = true;
         }
+        self.sync_theme();
         let damage = self.app.take_damage();
         let changed = !damage.is_empty();
         self.pending_damage.merge(damage);
@@ -185,8 +190,21 @@ impl VgaApp {
         }
         Tick {
             quit: false,
-            redraw: !self.pending_damage.is_empty(),
+            redraw: !self.pending_damage.is_empty() || self.force_full_present,
         }
+    }
+
+    fn sync_theme(&mut self) {
+        let theme_index = self.app.theme_index();
+        if theme_index == self.theme_index {
+            return;
+        }
+        self.theme_index = theme_index;
+        self.backend
+            .surface_mut()
+            .set_default_palette(self.app.theme().palette());
+        self.force_full_present = true;
+        self.pending_damage.merge(FrameDamage::full());
     }
 
     /// Show the hand over links, the arrow everywhere else, and only when it changes —
@@ -225,6 +243,9 @@ impl VgaApp {
                 .pending_size
                 .unwrap_or_else(|| self.backend.surface().size())
         {
+            if self.force_full_present && physical.width > 0 && physical.height > 0 {
+                self.pending_damage.merge(FrameDamage::full());
+            }
             return;
         }
         self.pending_size = Some(cells);
@@ -275,10 +296,20 @@ impl VgaApp {
         &self.backend
     }
 
+    #[cfg(test)]
+    pub(super) fn theme_index(&self) -> usize {
+        self.theme_index
+    }
+
+    #[cfg(test)]
+    pub(super) fn force_full_present(&self) -> bool {
+        self.force_full_present
+    }
+
     /// Draw the chrome, then copy the pixels into the window.
     pub(super) fn redraw(&mut self) -> io::Result<()> {
         let damage = std::mem::take(&mut self.pending_damage);
-        if damage.is_empty() {
+        if damage.is_empty() && !self.force_full_present {
             return Ok(());
         }
         let content_changed = damage.content.full
@@ -327,7 +358,7 @@ impl VgaApp {
                 scroll,
                 layout_rect(content),
                 &occlusions,
-                NORTON.palette(),
+                self.app.theme().palette(),
             );
         }
         self.present()
@@ -340,6 +371,7 @@ impl VgaApp {
     /// remainder keeps the strides honest — writing the grid's rows straight into a
     /// wider window buffer would shear the image diagonally.
     fn present(&mut self) -> io::Result<()> {
+        let fill = pack_rgb(rgb_of(self.app.theme().bg));
         let Some(presented) = self.presented.as_mut() else {
             return Ok(());
         };
@@ -359,20 +391,19 @@ impl VgaApp {
         }
 
         let damage = self.backend.surface_mut().take_damage_regions();
-        if damage.is_empty() {
+        if damage.is_empty() && !self.force_full_present {
             return Ok(());
         }
         let backend_surface = self.backend.surface();
         let (grid_width, grid_height) = backend_surface.pixel_size();
         let pixels = backend_surface.pixels();
-        let fill = (u32::from(self.background.r) << 16)
-            | (u32::from(self.background.g) << 8)
-            | u32::from(self.background.b);
-
         let window_width = width.get() as usize;
         let mut buffer = presented.surface.buffer_mut().map_err(into_io)?;
         let age = usize::from(buffer.age());
-        let full = resized || age == 0 || age.saturating_sub(1) > presented.damage_history.len();
+        let full = self.force_full_present
+            || resized
+            || age == 0
+            || age.saturating_sub(1) > presented.damage_history.len();
         let current_damage = if full {
             vec![softbuffer::Rect {
                 x: 0,
@@ -402,30 +433,65 @@ impl VgaApp {
                 .flatten()
                 .copied(),
         );
-        if full {
-            buffer.fill(fill);
-        }
-        let copied_width = grid_width.min(window_width);
-        for damage in &repair {
-            let first_row = damage.y as usize;
-            let last_row = first_row
-                .saturating_add(damage.height.get() as usize)
-                .min(grid_height)
-                .min(height.get() as usize);
-            for row in first_row..last_row {
-                let from = row * grid_width;
-                let to = row * window_width;
-                let first_col = (damage.x as usize).min(copied_width);
-                let last_col = first_col
-                    .saturating_add(damage.width.get() as usize)
-                    .min(copied_width);
-                buffer[to + first_col..to + last_col]
-                    .copy_from_slice(&pixels[from + first_col..from + last_col]);
-            }
-        }
+        let repair_pixels = repair
+            .iter()
+            .map(|damage| super::surface::PixelRect {
+                x: damage.x as usize,
+                y: damage.y as usize,
+                width: damage.width.get() as usize,
+                height: damage.height.get() as usize,
+            })
+            .collect::<Vec<_>>();
+        blit_pixels(
+            &mut buffer,
+            (window_width, height.get() as usize),
+            pixels,
+            (grid_width, grid_height),
+            fill,
+            full,
+            &repair_pixels,
+        );
         presented.damage_history.insert(0, current_damage);
         presented.damage_history.truncate(8);
-        buffer.present_with_damage(&repair).map_err(into_io)
+        buffer.present_with_damage(&repair).map_err(into_io)?;
+        self.force_full_present = false;
+        Ok(())
+    }
+}
+
+fn pack_rgb(color: Rgb) -> u32 {
+    (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)
+}
+
+pub(super) fn blit_pixels(
+    target: &mut [u32],
+    target_size: (usize, usize),
+    pixels: &[u32],
+    grid_size: (usize, usize),
+    fill: u32,
+    full: bool,
+    repair: &[super::surface::PixelRect],
+) {
+    let (target_width, target_height) = target_size;
+    let (grid_width, grid_height) = grid_size;
+    if full {
+        target.fill(fill);
+    }
+    let copied_width = grid_width.min(target_width);
+    for damage in repair {
+        let first_row = damage.y;
+        let last_row = first_row
+            .saturating_add(damage.height)
+            .min(grid_height)
+            .min(target_height);
+        for row in first_row..last_row {
+            let from = row * grid_width;
+            let to = row * target_width;
+            let first_col = damage.x.min(copied_width);
+            let last_col = first_col.saturating_add(damage.width).min(copied_width);
+            target[to + first_col..to + last_col]
+                .copy_from_slice(&pixels[from + first_col..from + last_col]);
+        }
     }
 }
 

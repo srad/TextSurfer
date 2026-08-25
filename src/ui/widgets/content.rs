@@ -86,7 +86,7 @@ fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -100,7 +100,7 @@ mod tests {
                         painted: &DisplayList::from_lines(lines),
                         scroll,
                     },
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -167,7 +167,7 @@ mod tests {
                         painted: &painted,
                         scroll: 0,
                     },
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -176,13 +176,13 @@ mod tests {
         let link = &buffer[(1, 0)];
         assert_eq!(link.fg, ratatui::style::Color::Rgb(255, 255, 0));
         assert_eq!(
-            link.bg, NORTON.bg,
+            link.bg, DEFAULT.bg,
             "unset backgrounds fall back to the theme"
         );
         assert!(link.modifier.contains(ratatui::style::Modifier::UNDERLINED));
         let loud = &buffer[(6, 0)];
         assert_eq!(
-            loud.fg, NORTON.text,
+            loud.fg, DEFAULT.text,
             "unset foregrounds fall back to the theme"
         );
         assert_eq!(loud.bg, ratatui::style::Color::Rgb(0, 128, 0));

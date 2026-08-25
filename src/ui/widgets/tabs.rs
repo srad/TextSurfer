@@ -172,7 +172,7 @@ impl Widget for TabBar<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -184,7 +184,7 @@ mod tests {
                 TabBar {
                     tabs,
                     active,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -248,13 +248,13 @@ mod tests {
                 TabBar {
                     tabs: &tabs,
                     active: 1,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
             .unwrap();
         let cells = terminal.backend().buffer().content();
-        let selected = NORTON.selected();
+        let selected = DEFAULT.selected();
         let active_corner = (0..20)
             .map(|i| &cells[i])
             .find(|cell| cell.symbol() == "┌" && cell.style().bg == selected.bg);
@@ -264,7 +264,7 @@ mod tests {
         );
         let plain_corner = (0..20)
             .map(|i| &cells[i])
-            .find(|cell| cell.symbol() == "┌" && cell.style().fg == Some(NORTON.frame));
+            .find(|cell| cell.symbol() == "┌" && cell.style().fg == Some(DEFAULT.frame));
         assert!(
             plain_corner.is_some(),
             "inactive box corners must be framed, not selected"
@@ -360,7 +360,7 @@ mod tests {
                 TabBar {
                     tabs: &tabs,
                     active: 0,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -372,8 +372,8 @@ mod tests {
             buffer[(1 + close.start + 1, 0)].clone()
         };
         assert_eq!(mark(0).symbol(), "■");
-        assert_eq!(mark(0).style().bg, NORTON.selected().bg);
+        assert_eq!(mark(0).style().bg, DEFAULT.selected().bg);
         assert_eq!(mark(1).symbol(), "■");
-        assert_eq!(mark(1).style().fg, Some(NORTON.dim));
+        assert_eq!(mark(1).style().fg, Some(DEFAULT.dim));
     }
 }

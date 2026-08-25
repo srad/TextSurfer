@@ -21,7 +21,7 @@ use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
 use textsurfer::pipeline::dump::dump_lines;
 use textsurfer::ui::frame::FrameComposer;
 use textsurfer::ui::mouse::WHEEL_ROWS;
-use textsurfer::ui::theme::NORTON;
+use textsurfer::ui::theme::DEFAULT;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -166,7 +166,7 @@ fn run_vga(_fetch: Arc<dyn textsurfer::net::Fetch>, _cli: &Cli) -> io::Result<()
 }
 
 fn dump(fetch: Arc<dyn textsurfer::net::Fetch>, url: &str, cols: u16, rows: u16) -> io::Result<()> {
-    let lines = dump_lines(fetch, url, Size { cols, rows }, NORTON.palette())?;
+    let lines = dump_lines(fetch, url, Size { cols, rows }, DEFAULT.palette())?;
     let mut out = io::stdout().lock();
     for line in lines {
         writeln!(out, "{}", line.trim_end())?;

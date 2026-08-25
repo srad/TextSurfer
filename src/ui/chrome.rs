@@ -20,6 +20,7 @@ use crate::ui::widgets::toolbar::{FIELD_TEXT, Toolbar};
 pub struct ChromeView<'a> {
     pub geometry: ChromeGeometry,
     pub theme: Theme,
+    pub theme_index: usize,
     pub can_back: bool,
     pub can_forward: bool,
     pub address: Cow<'a, str>,
@@ -142,6 +143,8 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         MenuPopup {
             menu: view.menu_active,
             selected: view.menu_item,
+            marked: (view.menu_active == crate::ui::widgets::menu::THEME_MENU)
+                .then_some(view.theme_index),
             theme: &view.theme,
         }
         .render(area, buffer);
@@ -289,7 +292,7 @@ mod tests {
     use super::*;
     use crate::core::geom::Size;
     use crate::ui::test_util::draft_view as draft;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -399,19 +402,19 @@ mod tests {
         assert_eq!(blank.symbol(), " ");
         assert_eq!(
             blank.style().bg,
-            Some(NORTON.bg),
+            Some(DEFAULT.bg),
             "blank chrome cells must carry the theme background"
         );
         let blank_content = &cells[8 * 80 + 20];
         assert_eq!(
             blank_content.style().bg,
-            Some(NORTON.bg),
+            Some(DEFAULT.bg),
             "blank content cells must carry the theme background"
         );
         let bar = &cells[23 * 80 + 10];
         assert_eq!(
             bar.style().bg,
-            Some(NORTON.bar_bg),
+            Some(DEFAULT.bar_bg),
             "the bottom bar must carry the bar background"
         );
     }

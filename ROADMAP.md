@@ -167,9 +167,12 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 
 ### Locked — product and architecture
 - UI design language: classic DOS/QBasic text-mode rich UI (grey menu bar and context bar, boxed
-  panels, bordered input field, raised tab strip, Norton-Commander palette on a navy field) around a
+  panels, bordered input field, raised tab strip, Turbo Vision palette on a blue desktop) around a
   normal browser layout shell — decided by the user; `ui::Theme` centralizes all colors, the painter
-  and every widget draw from it; no color literals outside it.
+  and every widget draw from it; no color literals outside it. The View menu selects one global,
+  session-scoped theme from Turbo Vision (default), Norton, Amber CRT, Green Phosphor and Paper
+  White. `App` owns that choice and maps its dark/light appearance into
+  `prefers-color-scheme`; persistence remains with M6 configuration.
 - Product = UI, VGA-native bitmap rendering and the terminal compatibility frontend; every other
   layer adopts a mature, latest-version
   crate: html5ever (HTML parse incl. tree-builder), cssparser + selectors (syntax + selector
@@ -322,8 +325,9 @@ corpus floor counting raw passes only with mandatory manifest hashes.
 from one recorded unmaintained transitive (`paste`, reachable only through optional Boa).
 
 ### M1.5 — Chrome redesign: DOS/QBasic rich UI (complete)
-`ui::theme` with a zero-literal rule; full-width grey menu bar (row 0) with working `Alt+F/N/V/H`
-dropdowns; raised NC-style tab strip with an aligned active divider; toolbar with
+`ui::theme` with a zero-literal rule and five session-selectable retro palettes; full-width grey
+menu bar (row 0) with working `Alt+F/N/V/H` dropdowns; raised NC-style tab strip with an aligned
+active divider; toolbar with
 `[‹][›][↻][⌂]` buttons wired to per-tab history plus a bordered `URL:` field; full-width grey context
 bar at the bottom; `CHROME_ROWS = 6` with `MouseZone` mapping Menu 0 / Tabs 1–2 / Address 3–4 /
 Content 5+; browser-like startup focus on the address field.
@@ -1396,3 +1400,27 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   visible in the regenerated 80x24 chrome golden. It follows from "the thumb fills the track", but
   if it reads too loud in the window, drawing the bare `▒` track when `max_scroll == 0` is a
   one-branch change. Human smoke of both affordances, in the VGA window and the terminal, is owed.
+- 2026-08-25 — Default theme switched to Borland Turbo Vision (user, from the Turbo C++ 3.0 About
+  screenshot): blue desktop `(0,0,170)`, yellow text, bright-cyan frames, cyan dim text, bright-green
+  links, white hover, grey bar with black text and red mnemonics, and a green selection bar.
+  `Theme` gained `selected_text`/`selected_bg` so `selected()` is themed rather than fixed
+  black-on-white; `theme::DEFAULT` is the single name production and tests draw from, with `NORTON`
+  kept as an alternate.
+- 2026-08-25 — **Selectable retro themes follow-up locked (user; in progress).** The View menu will
+  expose Turbo Vision, Norton, Amber CRT, Green Phosphor and Paper White as one App-owned,
+  session-only choice, with no cycle key, persistence or dump flag. Paper White maps to
+  `prefers-color-scheme: light`; the other four map to dark. Active pages repaint immediately and
+  recompute stylesheet settlement because a scheme change can make a pending external sheet
+  applicable; background pages defer through `render_dirty`. VGA must replace its default colours
+  and force a physical-buffer fill so window margins cannot retain the previous background.
+- 2026-08-25 — **Selectable retro themes follow-up delivered.** View now selects all five palettes
+  by keyboard or mouse and marks the current session choice. The App injects each palette and its
+  light/dark appearance into new, active and background `PageLoad`s; scheme changes recompute
+  applicable external-sheet settlement without blanking an already painted page. The VGA frontend
+  refreshes reset colours and retains a forced full physical-buffer fill until presentation
+  succeeds, including the right and bottom margins. README usage and the popup snapshot are current.
+  The complete local format, strict default/all-feature/no-default Clippy and
+  default/JS/VGA/no-default test matrix is green: 594 library tests with default, JS and VGA
+  features; 501 without defaults; 13 binary tests (12 without defaults), 4 fetch-pipeline, 14 corpus
+  and 32 render-golden tests. Human smoke remains owed in both VGA and terminal frontends against
+  `https://example.com`; no dependency pins changed.

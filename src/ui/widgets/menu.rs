@@ -7,12 +7,14 @@ use ratatui::widgets::{Block, Clear, List, ListItem, Widget};
 use crate::ui::theme::Theme;
 
 use super::{clip_width, width};
+use crate::ui::theme::THEME_NAMES;
 
 pub const MENU_TITLES: [&str; 4] = ["File", "Navigate", "View", "Help"];
+pub const THEME_MENU: usize = 2;
 pub const MENUS: [&[&str]; 4] = [
     &["New Tab", "Close Tab", "Reload", "Quit"],
     &["Back", "Forward", "Home"],
-    &["Theme: Norton"],
+    &THEME_NAMES,
     &["Help"],
 ];
 
@@ -121,6 +123,7 @@ impl Widget for MenuBar<'_> {
 pub struct MenuPopup<'a> {
     pub menu: usize,
     pub selected: usize,
+    pub marked: Option<usize>,
     pub theme: &'a Theme,
 }
 
@@ -139,11 +142,15 @@ impl Widget for MenuPopup<'_> {
                     .bg(self.theme.bar_bg)
                     .fg(self.theme.bar_text),
             );
+        let text_width = rect
+            .width
+            .saturating_sub(2)
+            .saturating_sub(u16::from(self.marked.is_some()));
         let list_items: Vec<ListItem> = items
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                let clipped = clip_width(item, rect.width.saturating_sub(1));
+                let clipped = clip_width(item, text_width);
                 let style = if index == self.selected {
                     self.theme.selected()
                 } else {
@@ -170,13 +177,29 @@ impl Widget for MenuPopup<'_> {
             })
             .collect();
         List::new(list_items).block(block).render(rect, buf);
+        if let Some(marked) = self.marked
+            && marked < items.len()
+            && marked < usize::from(rect.height.saturating_sub(2))
+            && rect.width >= 3
+        {
+            let style = if marked == self.selected {
+                self.theme.selected()
+            } else {
+                Style::default()
+                    .bg(self.theme.bar_bg)
+                    .fg(self.theme.bar_text)
+            };
+            buf[(rect.right() - 2, rect.y + 1 + marked as u16)]
+                .set_symbol("•")
+                .set_style(style);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -188,7 +211,7 @@ mod tests {
                 MenuBar {
                     active,
                     open,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -216,7 +239,8 @@ mod tests {
                 MenuPopup {
                     menu: 0,
                     selected: 2,
-                    theme: &NORTON,
+                    marked: None,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -225,7 +249,7 @@ mod tests {
             terminal.backend().buffer()
         ));
         let cells = terminal.backend().buffer().content();
-        let selected = NORTON.selected();
+        let selected = DEFAULT.selected();
         assert_eq!(
             cells[4 * 80 + 4].style().bg,
             selected.bg,
@@ -235,6 +259,60 @@ mod tests {
             cells[3 * 80 + 4].style().bg,
             selected.bg,
             "unselected rows must stay on the bar background"
+        );
+    }
+
+    #[test]
+    fn view_popup_marks_the_current_theme() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                MenuPopup {
+                    menu: THEME_MENU,
+                    selected: 4,
+                    marked: Some(4),
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
+            .unwrap();
+        insta::assert_snapshot!(crate::ui::test_util::buffer_string(
+            terminal.backend().buffer()
+        ));
+    }
+
+    #[test]
+    fn clipped_view_popup_preserves_the_marker_and_final_item_hit_target() {
+        let backend = TestBackend::new(24, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                MenuPopup {
+                    menu: THEME_MENU,
+                    selected: 4,
+                    marked: Some(4),
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
+            .unwrap();
+        let rect = popup_rect(
+            terminal.backend().buffer().area,
+            terminal.backend().buffer().area,
+            THEME_MENU,
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(rect.right() - 2, rect.y + 5)].symbol(),
+            "•"
+        );
+        assert_eq!(
+            popup_item_at(
+                terminal.backend().buffer().area,
+                THEME_MENU,
+                Position::new(rect.x + 1, rect.y + 5),
+            ),
+            Some(4)
         );
     }
 }

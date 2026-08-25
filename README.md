@@ -58,6 +58,9 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - DOS/QBasic-style menu, raised tab strip with clean gaps, an aligned active-tab divider and a
   Turbo Vision `[■]` close box on every chip, navigation toolbar, grapheme-safe address editor,
   unbounded scrolling and centralized resize/mouse geometry
+- Five session-scoped retro colour schemes in the View menu: Turbo Vision, Norton, Amber CRT,
+  Green Phosphor and Paper White. Paper White also exposes a light page colour scheme to CSS;
+  the other four expose dark. Selection applies to every tab and is not persisted between runs
 - A page scrollbar on the content frame's right rail — `▲` cap, `▒` track, `█` thumb, `▼` cap — that
   takes the rail over rather than claiming a column, so nothing reflows to make room for it. Caps
   step a row, the trough pages, and the thumb drags; a drag keeps tracking after the pointer leaves
@@ -178,6 +181,9 @@ to DuckDuckGo's lite search for anything that isn't a URL.
 | `Space` / `b` · `PageDown` / `PageUp` | Page down / up |
 | `Home` / `End` | Top / bottom of page |
 | `q` | Quit |
+
+Open View with `Alt+V` (or through `F10`) to select a colour scheme. The bullet marks the current
+session choice.
 
 ## Mouse
 

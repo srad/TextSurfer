@@ -33,7 +33,7 @@ pub enum Action {
     MenuLeft,
     MenuRight,
     MenuSelect,
-    ThemeInfo,
+    SetTheme(usize),
 }
 
 pub trait Keymap {

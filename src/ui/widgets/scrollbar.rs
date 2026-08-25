@@ -145,7 +145,7 @@ impl Widget for Scrollbar<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::theme::NORTON;
+    use crate::ui::theme::DEFAULT;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -272,7 +272,7 @@ mod tests {
             .draw(|frame| {
                 Scrollbar {
                     extent,
-                    theme: &NORTON,
+                    theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })

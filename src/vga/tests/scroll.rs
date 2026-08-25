@@ -13,7 +13,7 @@ use crate::paint::DisplayList;
 use crate::ui::ChromeGeometry;
 use crate::ui::frame::FrameComposer;
 use crate::ui::test_util::draft_view;
-use crate::ui::theme::{NORTON, rgb_of};
+use crate::ui::theme::{DEFAULT, rgb_of};
 use crate::vga::{SurfaceConfig, VgaBackend};
 
 fn config(cols: u16, rows: u16) -> SurfaceConfig {
@@ -21,8 +21,8 @@ fn config(cols: u16, rows: u16) -> SurfaceConfig {
         cols,
         rows,
         scale: 1,
-        default_fg: rgb_of(NORTON.text),
-        default_bg: rgb_of(NORTON.bg),
+        default_fg: rgb_of(DEFAULT.text),
+        default_bg: rgb_of(DEFAULT.bg),
     }
 }
 

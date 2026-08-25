@@ -2,7 +2,6 @@ use std::borrow::Cow;
 
 use crate::core::focus::Focus;
 use crate::ui::chrome::ChromeView;
-use crate::ui::theme::NORTON;
 use crate::ui::widgets::content::ContentLines;
 use crate::ui::widgets::status::StatusView;
 use crate::ui::widgets::tabs::TabChip;
@@ -32,7 +31,8 @@ impl App {
         };
         ChromeView {
             geometry: self.geometry,
-            theme: NORTON,
+            theme: *self.theme(),
+            theme_index: self.theme_index(),
             can_back: active.history_pos > 0,
             can_forward: active.history_pos + 1 < active.history.len(),
             address,

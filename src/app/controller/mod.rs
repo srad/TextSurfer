@@ -6,6 +6,7 @@ mod session;
 mod state;
 #[cfg(test)]
 mod tests;
+mod theme;
 mod view;
 mod viewport;
 
@@ -42,6 +43,7 @@ pub struct App {
     menu_open: bool,
     menu_active: usize,
     menu_item: usize,
+    theme_index: usize,
     focus_before_menu: Focus,
     now: Duration,
     text_rendering: TextRendering,
@@ -87,6 +89,7 @@ impl App {
             menu_open: false,
             menu_active: 0,
             menu_item: 0,
+            theme_index: crate::ui::theme::DEFAULT_THEME_INDEX,
             focus_before_menu: Focus::Address,
             now: Duration::ZERO,
             text_rendering,

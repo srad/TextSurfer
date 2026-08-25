@@ -3,6 +3,7 @@ mod keys;
 mod mouse;
 mod navigation;
 mod state;
+mod theme;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

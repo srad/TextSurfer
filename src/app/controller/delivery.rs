@@ -1,12 +1,10 @@
 use std::time::Duration;
 
 use crate::core::geom::Size;
-use crate::css::ColorScheme;
 use crate::net::{FetchPayload, ResourceId, charset_from_content_type, decode, decode_text};
 use crate::paint::DisplayList;
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
 use crate::pipeline::render::{RenderedPage, ResponseKind, response_kind};
-use crate::ui::theme::NORTON;
 
 use super::super::tab::Tab;
 use super::App;
@@ -79,6 +77,8 @@ impl App {
         };
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
+        let palette = self.theme().palette();
+        let color_scheme = self.color_scheme();
         let mut commands = Vec::new();
         let mut cancel = false;
         let mut visible_change;
@@ -131,9 +131,9 @@ impl App {
                                     decoded.encoding,
                                     PageLoadOptions {
                                         viewport,
-                                        palette: NORTON.palette(),
+                                        palette,
                                         scripting: false,
-                                        color_scheme: ColorScheme::Dark,
+                                        color_scheme,
                                         started: self.now,
                                         text_rendering: self.text_rendering,
                                     },

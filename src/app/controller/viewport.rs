@@ -1,7 +1,6 @@
 use crate::core::geom::Size;
 use crate::pipeline::render::paint_document;
 use crate::ui::mouse::ChromeGeometry;
-use crate::ui::theme::NORTON;
 use crate::ui::widgets::scrollbar::ScrollExtent;
 
 use super::super::startpage::start_page_for;
@@ -52,6 +51,7 @@ impl App {
             rows: rows.min(usize::from(u16::MAX)) as u16,
         };
         let active = self.tabs.active_index();
+        let palette = self.theme().palette();
         for (index, tab) in self.tabs.tabs_mut().iter_mut().enumerate() {
             if tab.url.is_empty() || tab.url == "about:blank" {
                 tab.painted = start_page_for(viewport);
@@ -67,8 +67,7 @@ impl App {
             } else if tab.layout_width != width
                 && let (Some(document), Some(styles)) = (&tab.document, &tab.styles)
             {
-                tab.painted =
-                    paint_document(&document.borrow(), styles, viewport, NORTON.palette());
+                tab.painted = paint_document(&document.borrow(), styles, viewport, palette);
             }
             tab.layout_width = width;
             tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));

@@ -221,6 +221,34 @@ fn clear_returns_every_cell_to_the_background() {
 }
 
 #[test]
+fn changing_the_default_palette_repaints_the_entire_surface_once() {
+    let mut surface = surface();
+    let _ = surface.take_damage();
+    assert!(surface.set_default_palette(Palette {
+        text: Rgb::new(255, 176, 0),
+        background: Rgb::BLACK,
+        link: Rgb::new(255, 224, 102),
+        link_hover: Rgb::new(255, 255, 255),
+    }));
+    assert!(
+        surface
+            .pixels()
+            .iter()
+            .all(|&pixel| pixel == packed(Rgb::BLACK))
+    );
+    let damage = surface.take_damage().expect("full repaint");
+    assert_eq!((damage.x, damage.y), (0, 0));
+    assert_eq!((damage.width, damage.height), surface.pixel_size());
+    assert!(!surface.set_default_palette(Palette {
+        text: Rgb::new(255, 176, 0),
+        background: Rgb::BLACK,
+        link: Rgb::new(0, 0, 0),
+        link_hover: Rgb::new(0, 0, 0),
+    }));
+    assert!(surface.take_damage().is_none());
+}
+
+#[test]
 fn a_neighbour_update_does_not_erase_an_adjacent_glyph() {
     // The sparse diff delivers single cells. Painting one must leave its neighbours
     // intact; this is the same repaint path that keeps wide glyphs whole.

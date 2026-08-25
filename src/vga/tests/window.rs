@@ -6,11 +6,14 @@ use winit::dpi::PhysicalSize;
 use winit::window::CursorIcon;
 
 use crate::app::net::NoopNet;
+use crate::core::event::Key;
 use crate::core::geom::Point;
 use crate::core::style::Cursor;
 use crate::vga::VgaOptions;
+use crate::vga::surface::PixelRect;
 use crate::vga::window::{
-    CursorPresentation, CursorUpdate, VgaApp, cursor_presentation, cursor_update, union_damage,
+    CursorPresentation, CursorUpdate, VgaApp, blit_pixels, cursor_presentation, cursor_update,
+    union_damage,
 };
 
 fn vga(url: Option<&str>) -> VgaApp {
@@ -62,6 +65,55 @@ fn a_headless_redraw_does_not_schedule_another_redraw() {
     for step in 1..=200 {
         assert!(!app.tick_at(Duration::from_millis(step * 50)).redraw);
     }
+}
+
+#[test]
+fn selecting_a_theme_refreshes_the_headless_grid_and_requests_a_full_present() {
+    let mut app = vga(None);
+    drain_initial_redraw(&mut app);
+    for key in [
+        Key::F(10),
+        Key::Right,
+        Key::Right,
+        Key::Down,
+        Key::Down,
+        Key::Down,
+        Key::Down,
+        Key::Enter,
+    ] {
+        app.inject_key(key);
+    }
+    assert!(app.tick_at(Duration::from_secs(1)).redraw);
+    assert_eq!(app.theme_index(), 4);
+    app.redraw().expect("theme redraw");
+    assert!(app.force_full_present());
+}
+
+#[test]
+fn full_blit_recolors_physical_margins() {
+    let old = 0x0000AA;
+    let fill = 0xE8E4D8;
+    let pixels = vec![0x101010; 6];
+    let mut target = vec![old; 15];
+    blit_pixels(
+        &mut target,
+        (5, 3),
+        &pixels,
+        (3, 2),
+        fill,
+        true,
+        &[PixelRect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 2,
+        }],
+    );
+    assert_eq!(&target[0..3], &[0x101010; 3]);
+    assert_eq!(&target[5..8], &[0x101010; 3]);
+    assert_eq!(&target[10..15], &[fill; 5]);
+    assert_eq!(target[4], fill);
+    assert_eq!(target[9], fill);
 }
 
 #[test]
