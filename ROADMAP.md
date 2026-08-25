@@ -62,7 +62,7 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M0 — Foundations | Scaffold, traits + contract suites, chrome, I/O-free app, event loop, gates | (complete) |
 | M1-A — Parse pipeline | net + encoding + html5ever→arena DOM, `<base>`, scheme routing, tree-dump snapshot | (done — user smoke pending) |
 | M1-R — Stabilization | DOM invariants, fetch routing, resource limits, resize/scroll, terminal lifecycle, trustworthy gates | (complete) |
-| M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, centralized theme | (complete) |
+| M1.5 — Chrome redesign | DOS/QBasic rich UI: menu bar, tab strip, toolbar, bordered address field, selectable themes | (complete) |
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
 | M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, VGA-native bitmap typography | (done — user VGA smoke pending; terminal smoke deferred) |
@@ -72,8 +72,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-24): **536 lib · 13 binary · 4 fetch-pipeline ·
-14 corpus · 32 golden** with the default VGA frontend, and **452 lib · 12 binary** with
+Test counts at the last green run (2026-08-25): **594 lib · 13 binary · 4 fetch-pipeline ·
+14 corpus · 32 golden** with the default VGA frontend, and **501 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -248,8 +248,8 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   `css/ua.rs` for real, still holding hardcoded Rust. Revisit only if the UA sheet grows past what a
   typed function expresses clearly.
 - **Colour model**: `ComputedStyle::color` is `Option<Rgba>` with byte alpha while background and
-  border colours stay `Option<Rgb>`/`BorderColor`; `None` means "the theme decides", so the Norton
-  palette stays the default field and author colours override only where declared. The painter
+  border colours stay `Option<Rgb>`/`BorderColor`; `None` means "the theme decides", so the selected
+  palette supplies the default field and author colours override only where declared. The painter
   composites partial foreground alpha against the effective cell background, suppresses fully
   transparent glyphs without changing their geometry, then **contrast-corrects** the resolved
   foreground (chawan's rule) — faithfulness never outranks legibility.
