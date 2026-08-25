@@ -69,13 +69,15 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
   scripting, color scheme and CSS-pixel viewport dimensions, including MQ4 ranges. CSS absolute,
   font-relative and viewport-relative lengths resolve through a shared 8×16 cell metric; Taffy
-  sizes nested and anonymous block flow,
+  sizes nested and anonymous block and flex flow, including wrapping, gaps, alignment, ordering,
+  growth/shrinkage, explicit/min/max sizing and atomic inline-flex,
   while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
   and nested-table support; textwrap and Unicode-aware fragments reflow six whitespace modes, and
   sparse paint emits clipped terminal-cell lines and merged borders. Table cells share the normal
   Unicode/white-space formatter; nested tables retain source order, and captions keep box styling.
   CSS Display outside/inside modes survive cascade: `contents` elides its principal box without
-  losing inheritance or links, inline flow-root/table/flex/grid boxes remain atomic, and
+  losing inheritance or links, inline flow-root/table/grid boxes remain atomic, inline-flex uses
+  nested Taffy layout, and
   misparented table roles receive ownerless anonymous wrappers after contents elision
 - Generated content and list-marker support: `::before`, `::after` and `::marker` match, `content`
   supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped

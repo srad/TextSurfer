@@ -1,9 +1,11 @@
 use cssparser::{Parser, ParserInput, Token};
 
 use super::MediaContext;
+use super::flex::apply_flex_declaration;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssMargin, LegacyAlign,
-    LengthAxis, ListStyleType, MarginEdges, TableLayoutMode, TextAlign, VerticalAlign, WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssMargin, CssMaxSize,
+    CssSize, LegacyAlign, LengthAxis, ListStyleType, MarginEdges, TableLayoutMode, TextAlign,
+    VerticalAlign, WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
@@ -11,7 +13,7 @@ use crate::css::values::{
     assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
     consume_block, parse_background_color, parse_border, parse_color, parse_cursor, parse_display,
     parse_font_weight, parse_ident, parse_length_token, parse_lengths, parse_list_style_position,
-    parse_list_style_type, parse_text_decoration, parse_width,
+    parse_list_style_type, parse_size, parse_text_decoration,
 };
 
 pub(super) fn apply_declaration(
@@ -28,6 +30,9 @@ pub(super) fn apply_declaration(
         && matches!(keyword.as_str(), "initial" | "inherit" | "unset")
     {
         apply_css_wide(style, parent_style, &declaration.name, &keyword);
+        return;
+    }
+    if apply_flex_declaration(style, &declaration.name, &declaration.value, media) {
         return;
     }
     match declaration.name.as_str() {
@@ -97,16 +102,47 @@ pub(super) fn apply_declaration(
             }
         }
         "width" => {
-            if let Some(width) = parse_width(
+            if let Some(width) = parse_size(
                 &declaration.value,
                 media.cell_metric,
                 media.viewport,
                 font_px,
                 root_font_px,
+                LengthAxis::Horizontal,
             ) {
                 style.width = width;
             }
         }
+        "height" => assign_size(
+            &mut style.height,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media,
+        ),
+        "min-width" => assign_size(
+            &mut style.min_width,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media,
+        ),
+        "min-height" => assign_size(
+            &mut style.min_height,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media,
+        ),
+        "max-width" => assign_max_size(
+            &mut style.max_width,
+            &declaration.value,
+            LengthAxis::Horizontal,
+            media,
+        ),
+        "max-height" => assign_max_size(
+            &mut style.max_height,
+            &declaration.value,
+            LengthAxis::Vertical,
+            media,
+        ),
         "box-sizing" => {
             if let Some(box_sizing) =
                 parse_ident(&declaration.value).and_then(|value| match value.as_str() {
@@ -336,6 +372,40 @@ fn apply_css_wide(
             style.strike = source.strike;
         }
         "width" => style.width = source.width,
+        "height" => style.height = source.height,
+        "min-width" => style.min_width = source.min_width,
+        "min-height" => style.min_height = source.min_height,
+        "max-width" => style.max_width = source.max_width,
+        "max-height" => style.max_height = source.max_height,
+        "flex-direction" => style.flex.direction = source.flex.direction,
+        "flex-wrap" => style.flex.wrap = source.flex.wrap,
+        "flex-flow" => {
+            style.flex.direction = source.flex.direction;
+            style.flex.wrap = source.flex.wrap;
+        }
+        "flex-grow" => style.flex.grow = source.flex.grow,
+        "flex-shrink" => style.flex.shrink = source.flex.shrink,
+        "flex-basis" => style.flex.basis = source.flex.basis,
+        "flex" => {
+            style.flex.grow = source.flex.grow;
+            style.flex.shrink = source.flex.shrink;
+            style.flex.basis = source.flex.basis;
+        }
+        "order" => style.flex.order = source.flex.order,
+        "justify-content" => style.flex.justify_content = source.flex.justify_content,
+        "align-items" => style.flex.align_items = source.flex.align_items,
+        "align-self" => style.flex.align_self = source.flex.align_self,
+        "align-content" => style.flex.align_content = source.flex.align_content,
+        "row-gap" => style.flex.row_gap = source.flex.row_gap,
+        "column-gap" => style.flex.column_gap = source.flex.column_gap,
+        "gap" => {
+            style.flex.row_gap = source.flex.row_gap;
+            style.flex.column_gap = source.flex.column_gap;
+        }
+        "place-content" => {
+            style.flex.align_content = source.flex.align_content;
+            style.flex.justify_content = source.flex.justify_content;
+        }
         "box-sizing" => style.box_sizing = source.box_sizing,
         "margin" => style.margin = source.margin,
         "padding" => style.padding = source.padding,
@@ -442,6 +512,34 @@ fn assign_margin(target: &mut CssMargin, source: &str, axis: LengthAxis, media: 
         return;
     };
     *target = CssMargin::Cells(media.resolve_cells(length, axis));
+}
+
+fn assign_size(target: &mut CssSize, source: &str, axis: LengthAxis, media: MediaContext) {
+    let (font_px, root_font_px) = media.layout_font_sizes();
+    if let Some(value) = parse_size(
+        source,
+        media.cell_metric,
+        media.viewport,
+        font_px,
+        root_font_px,
+        axis,
+    ) {
+        *target = value;
+    }
+}
+
+fn assign_max_size(target: &mut CssMaxSize, source: &str, axis: LengthAxis, media: MediaContext) {
+    if parse_ident(source).as_deref() == Some("none") {
+        *target = CssMaxSize::None;
+        return;
+    }
+    let mut value = CssSize::Auto;
+    assign_size(&mut value, source, axis, media);
+    *target = match value {
+        CssSize::Cells(value) => CssMaxSize::Cells(value),
+        CssSize::Percent(value) => CssMaxSize::Percent(value),
+        CssSize::Auto => return,
+    };
 }
 
 /// `list-style` sets type, position and image; `none` may stand for either type or image, and an

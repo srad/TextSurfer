@@ -2,6 +2,7 @@ mod content;
 mod counters;
 mod declaration;
 mod document;
+mod flex;
 mod media;
 mod typography;
 

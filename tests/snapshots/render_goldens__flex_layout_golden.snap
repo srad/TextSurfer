@@ -1,0 +1,13 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"flex.html\")"
+---
+LEFT     CENTER    RIGHT
+FIRST SECONDTHIRD
+ONE   TWO
+
+THREE
+before A B  after
+
+CELL  UP
+      DOWN

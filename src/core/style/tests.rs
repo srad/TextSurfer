@@ -32,6 +32,34 @@ fn cell_style_projects_the_visual_half_of_a_computed_style() {
 }
 
 #[test]
+fn css_flex_numbers_accept_only_finite_nonnegative_values_and_canonicalize_zero() {
+    assert_eq!(CssNumber::new(0.0), Some(CssNumber::ZERO));
+    assert_eq!(CssNumber::new(-0.0), Some(CssNumber::ZERO));
+    assert_eq!(CssNumber::new(1.0), Some(CssNumber::ONE));
+    assert_eq!(CssNumber::new(2.5).unwrap().get(), 2.5);
+    assert_eq!(CssNumber::new(-1.0), None);
+    assert_eq!(CssNumber::new(f32::INFINITY), None);
+    assert_eq!(CssNumber::new(f32::NEG_INFINITY), None);
+    assert_eq!(CssNumber::new(f32::NAN), None);
+}
+
+#[test]
+fn flex_defaults_distinguish_initial_items_from_flex_none() {
+    let initial = FlexStyle::default();
+    assert_eq!(initial.grow, CssNumber::ZERO);
+    assert_eq!(initial.shrink, CssNumber::ONE);
+    assert_eq!(initial.basis, FlexBasis::Auto);
+    assert_eq!(initial.row_gap.cells(), None);
+    assert_eq!(initial.column_gap.cells(), None);
+    let none = FlexStyle::none();
+    assert_eq!(none.grow, CssNumber::ZERO);
+    assert_eq!(none.shrink, CssNumber::ZERO);
+    assert_eq!(none.basis, FlexBasis::Auto);
+    assert_eq!(none.direction, initial.direction);
+    assert_eq!(none.align_items, initial.align_items);
+}
+
+#[test]
 fn css_lengths_resolve_against_the_nominal_cell_and_viewport() {
     let metric = CellMetric::DEFAULT;
     let viewport = crate::core::geom::Size { cols: 80, rows: 24 };

@@ -72,6 +72,35 @@ fn stateful_render_reuses_one_page_load_and_restores_hover_style() {
     assert_eq!(restored.styles.get(link).color, Some(palette().link.into()));
 }
 
+#[test]
+fn dynamic_flex_restyle_reflows_and_restores_the_public_render_path() {
+    let mut load = PageLoad::new(
+        "<!doctype html><style>body{margin:0}main{display:flex;width:4ch}main:hover{flex-direction:column}span{width:2ch;flex:none}</style><main><span>A</span><span>B</span></main>",
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            viewport: Size { cols: 20, rows: 8 },
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+            text_rendering: TextRendering::Cell,
+        },
+    );
+    let first = load.force_render();
+    assert_eq!(nonempty_lines(&first), ["A B"]);
+    let target = first.painted.hit_test(0, 0).unwrap();
+    let hovered = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(target),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(nonempty_lines(&hovered), ["A", "B"]);
+    let restored = load.set_dynamic_state(DynamicState::INERT).unwrap();
+    assert_eq!(nonempty_lines(&restored), ["A B"]);
+}
+
 fn golden(name: &str) -> String {
     render(name).text_lines().join("\n")
 }
@@ -171,6 +200,31 @@ fn fixed_table_overflow_golden() {
 #[test]
 fn outer_and_inner_display_modes_golden() {
     insta::assert_snapshot!(golden("display_modes.html"));
+}
+
+#[test]
+fn flex_layout_golden() {
+    insta::assert_snapshot!(golden("flex.html"));
+}
+
+#[test]
+fn flex_visual_order_and_dom_link_order_survive_the_public_render_path() {
+    let page = render_source(
+        "<style>body{margin:0}main{display:flex;width:12ch}a{flex:none;width:6ch}a:first-child{order:2}a:last-child{order:-1}</style><main><a href=first>FIRST</a><a href=second>SECOND</a></main>",
+        20,
+    );
+    assert_eq!(page.painted.links[0].href, "first");
+    assert_eq!(page.painted.links[1].href, "second");
+    assert_eq!(page.painted.links[0].rects[0].col, 6);
+    assert_eq!(page.painted.links[1].rects[0].col, 0);
+    assert_eq!(
+        page.painted.link_at(1, 0).map(|link| link.href.as_str()),
+        Some("second")
+    );
+    assert_eq!(
+        page.painted.link_at(7, 0).map(|link| link.href.as_str()),
+        Some("first")
+    );
 }
 
 #[test]

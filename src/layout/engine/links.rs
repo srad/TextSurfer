@@ -17,6 +17,7 @@ pub(super) fn assign_link_rects(document: &Document, tree: &mut BoxTree) {
         .collect();
     let mut resolved: HashMap<NodeId, Option<usize>> = HashMap::new();
     let mut rects: Vec<Vec<LayoutRect>> = vec![Vec::new(); tree.links.len()];
+    let mut hit_nodes: Vec<Vec<NodeId>> = vec![Vec::new(); tree.links.len()];
     for fragment in &tree.fragments {
         let Some(index) = *resolved
             .entry(fragment.node)
@@ -27,6 +28,9 @@ pub(super) fn assign_link_rects(document: &Document, tree: &mut BoxTree) {
         let rect = fragment.rect();
         if rect.width == 0 {
             continue;
+        }
+        if !hit_nodes[index].contains(&fragment.node) {
+            hit_nodes[index].push(fragment.node);
         }
         match rects[index].last_mut() {
             Some(last)
@@ -41,6 +45,7 @@ pub(super) fn assign_link_rects(document: &Document, tree: &mut BoxTree) {
     }
     for (index, link) in tree.links.iter_mut().enumerate() {
         link.rects = std::mem::take(&mut rects[index]);
+        link.hit_nodes = std::mem::take(&mut hit_nodes[index]);
     }
 }
 
@@ -82,6 +87,7 @@ pub(super) fn collect_links(
                         node: id,
                         href: href.value.clone(),
                         rects: Vec::new(),
+                        hit_nodes: Vec::new(),
                     });
                 }
                 let children = document.children(id);

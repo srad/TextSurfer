@@ -25,7 +25,72 @@ pub(super) struct FlowBox {
     pub(super) marker: Option<Marker>,
 }
 
-pub(super) type InlinePiece = Piece<TableOutput>;
+#[derive(Clone)]
+pub(super) enum InlineAtomSource {
+    Ready(Box<TableOutput>),
+    Node(NodeId),
+}
+
+impl Atom for InlineAtomSource {
+    fn width(&self) -> usize {
+        match self {
+            Self::Ready(output) => output.width,
+            Self::Node(_) => 0,
+        }
+    }
+
+    fn height(&self) -> usize {
+        match self {
+            Self::Ready(output) => output.height,
+            Self::Node(_) => 0,
+        }
+    }
+
+    fn baseline(&self) -> usize {
+        match self {
+            Self::Ready(output) => output.baseline(),
+            Self::Node(_) => 0,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum InlineAtom {
+    Table(Box<TableOutput>),
+    Layout(Box<AtomicLayout>),
+}
+
+#[derive(Clone)]
+pub(super) struct AtomicLayout {
+    pub(super) tree: BoxTree,
+    pub(super) baseline: usize,
+}
+
+impl Atom for InlineAtom {
+    fn width(&self) -> usize {
+        match self {
+            Self::Table(output) => output.width,
+            Self::Layout(output) => output.tree.width,
+        }
+    }
+
+    fn height(&self) -> usize {
+        match self {
+            Self::Table(output) => output.height,
+            Self::Layout(output) => output.tree.height,
+        }
+    }
+
+    fn baseline(&self) -> usize {
+        match self {
+            Self::Table(output) => output.baseline(),
+            Self::Layout(output) => output.baseline,
+        }
+    }
+}
+
+pub(super) type InlinePiece = Piece<InlineAtomSource>;
+pub(super) type ResolvedInlinePiece = Piece<InlineAtom>;
 
 #[derive(Clone, Copy)]
 struct InlineContext {
@@ -46,6 +111,31 @@ pub(super) fn build_flow_tree(
     document: &Document,
     styles: &StyleTree,
     viewport_width: usize,
+) -> Vec<FlowBox> {
+    build_flow_tree_from(
+        document,
+        styles,
+        viewport_width,
+        document.roots().to_vec(),
+        None,
+    )
+}
+
+pub(super) fn build_flow_subtree(
+    document: &Document,
+    styles: &StyleTree,
+    viewport_width: usize,
+    root: NodeId,
+) -> Vec<FlowBox> {
+    build_flow_tree_from(document, styles, viewport_width, vec![root], Some(root))
+}
+
+fn build_flow_tree_from(
+    document: &Document,
+    styles: &StyleTree,
+    viewport_width: usize,
+    roots: Vec<NodeId>,
+    atomic_root: Option<NodeId>,
 ) -> Vec<FlowBox> {
     let mut flow = vec![FlowBox {
         owner: None,
@@ -76,10 +166,11 @@ pub(super) fn build_flow_tree(
         };
         let roots = container
             .map(|node| document.children(node))
-            .unwrap_or_else(|| document.roots().to_vec());
+            .unwrap_or_else(|| roots.clone());
         let mut events = Vec::new();
         push_children(&mut events, roots, document, styles, inherited);
         let mut buffer = Vec::new();
+        let mut children = Vec::new();
         if let Some(node) = container {
             let own = InlineContext {
                 depth: flow[flow_index].depth,
@@ -97,9 +188,23 @@ pub(super) fn build_flow_tree(
                     atom: None,
                 });
             }
-            append_pseudo(styles, node, PseudoElement::Before, own, &mut buffer);
+            if matches!(
+                flow[flow_index].style.display.inside(),
+                Some(crate::core::style::DisplayInside::Flex)
+            ) {
+                let pseudo_depth = flow[flow_index].depth.saturating_add(1);
+                append_flex_pseudo(
+                    &mut flow,
+                    &mut children,
+                    styles,
+                    node,
+                    PseudoElement::Before,
+                    pseudo_depth,
+                );
+            } else {
+                append_pseudo(styles, node, PseudoElement::Before, own, &mut buffer);
+            }
         }
-        let mut children = Vec::new();
         let mut nested_tasks = Vec::new();
         while let Some(event) = events.pop() {
             match event {
@@ -137,7 +242,7 @@ pub(super) fn build_flow_tree(
                         white_space: context.white_space,
                         depth: context.depth,
                         style: context.style,
-                        atom: Some(atom),
+                        atom: Some(InlineAtomSource::Ready(Box::new(atom))),
                     };
                     if context.inline_parent {
                         buffer.push(piece);
@@ -176,7 +281,10 @@ pub(super) fn build_flow_tree(
                         atom: None,
                     }),
                     Some(Node::Element { name, ns, attrs }) => {
-                        let style = styles.get(node);
+                        let mut style = styles.get(node);
+                        if atomic_root == Some(node) {
+                            style.display = style.display.blockify();
+                        }
                         if style.display.is_none() {
                             continue;
                         }
@@ -244,14 +352,7 @@ pub(super) fn build_flow_tree(
                                 white_space: context.white_space,
                                 depth: context.depth,
                                 style: style.cell_style(),
-                                atom: Some(
-                                    TableFormatter::new(document, styles).format_inline_atom(
-                                        node,
-                                        viewport_width,
-                                        TableLimits::default(),
-                                        0,
-                                    ),
-                                ),
+                                atom: Some(InlineAtomSource::Node(node)),
                             });
                             append_horizontal_margin(
                                 node,
@@ -351,16 +452,31 @@ pub(super) fn build_flow_tree(
             }
         }
         if let Some(node) = container {
-            append_pseudo(
-                styles,
-                node,
-                PseudoElement::After,
-                InlineContext {
-                    depth: flow[flow_index].depth,
-                    ..inherited
-                },
-                &mut buffer,
-            );
+            if matches!(
+                flow[flow_index].style.display.inside(),
+                Some(crate::core::style::DisplayInside::Flex)
+            ) {
+                let pseudo_depth = flow[flow_index].depth.saturating_add(1);
+                append_flex_pseudo(
+                    &mut flow,
+                    &mut children,
+                    styles,
+                    node,
+                    PseudoElement::After,
+                    pseudo_depth,
+                );
+            } else {
+                append_pseudo(
+                    styles,
+                    node,
+                    PseudoElement::After,
+                    InlineContext {
+                        depth: flow[flow_index].depth,
+                        ..inherited
+                    },
+                    &mut buffer,
+                );
+            }
         }
         flush_inline(
             &mut flow,
@@ -508,6 +624,38 @@ fn append_pseudo(
     });
 }
 
+fn append_flex_pseudo(
+    flow: &mut Vec<FlowBox>,
+    children: &mut Vec<usize>,
+    styles: &StyleTree,
+    node: NodeId,
+    which: PseudoElement,
+    depth: usize,
+) {
+    let Some(pseudo) = styles.pseudo(node, which) else {
+        return;
+    };
+    let child = flow.len();
+    flow.push(FlowBox {
+        owner: Some(node),
+        style: pseudo.style,
+        depth,
+        inline: vec![InlinePiece {
+            node,
+            text: pseudo.text.clone(),
+            white_space: pseudo.style.white_space,
+            depth,
+            style: pseudo.style.cell_style(),
+            atom: None,
+        }],
+        children: Vec::new(),
+        rule: false,
+        table: None,
+        marker: None,
+    });
+    children.push(child);
+}
+
 fn append_edge(
     node: NodeId,
     style: ComputedStyle,
@@ -556,7 +704,7 @@ fn append_horizontal_margin(
 
 pub(super) fn append_inline(
     tree: &mut BoxTree,
-    pieces: &[InlinePiece],
+    pieces: &[ResolvedInlinePiece],
     col: usize,
     row: usize,
     width: usize,
@@ -576,15 +724,26 @@ pub(super) fn append_inline(
         let mut current_col = col.saturating_add(offset);
         for glyph in line {
             if let Some(index) = glyph.atom {
-                if let Some(table) = &pieces[index].atom {
-                    append_table_output(
-                        tree,
-                        table.clone(),
-                        current_col,
-                        current_row + baseline.saturating_sub(table.baseline()),
-                        pieces[index].depth,
-                        merge_base.saturating_mul(1_000).saturating_add(index),
-                    );
+                if let Some(atom) = &pieces[index].atom {
+                    let row = current_row + baseline.saturating_sub(atom.baseline());
+                    match atom {
+                        InlineAtom::Table(table) => append_table_output(
+                            tree,
+                            table.as_ref().clone(),
+                            current_col,
+                            row,
+                            pieces[index].depth,
+                            merge_base.saturating_mul(1_000).saturating_add(index),
+                        ),
+                        InlineAtom::Layout(layout) => append_atomic_layout(
+                            tree,
+                            &layout.tree,
+                            current_col,
+                            row,
+                            pieces[index].depth,
+                            merge_base.saturating_mul(1_000).saturating_add(index),
+                        ),
+                    }
                 }
                 current_col = current_col.saturating_add(glyph.width);
                 continue;
@@ -619,4 +778,49 @@ pub(super) fn append_inline(
         }
         current_row += line_height;
     }
+}
+
+fn append_atomic_layout(
+    tree: &mut BoxTree,
+    nested: &BoxTree,
+    col: usize,
+    row: usize,
+    depth: usize,
+    merge_base: usize,
+) {
+    tree.height = tree.height.max(row.saturating_add(nested.height));
+    for layout_box in &nested.boxes {
+        let mut layout_box = layout_box.clone();
+        offset_rect(&mut layout_box.border_rect, col, row);
+        offset_rect(&mut layout_box.content_rect, col, row);
+        layout_box.depth = layout_box.depth.saturating_add(depth);
+        tree.boxes.push(layout_box);
+    }
+    for fill in &nested.fills {
+        let mut fill = *fill;
+        offset_rect(&mut fill.rect, col, row);
+        fill.depth = fill.depth.saturating_add(depth);
+        tree.fills.push(fill);
+    }
+    for stroke in &nested.strokes {
+        let mut stroke = *stroke;
+        offset_rect(&mut stroke.rect, col, row);
+        stroke.depth = stroke.depth.saturating_add(depth);
+        stroke.merge_group = merge_base
+            .saturating_mul(1_000_000)
+            .saturating_add(stroke.merge_group);
+        tree.strokes.push(stroke);
+    }
+    for fragment in &nested.fragments {
+        let mut fragment = fragment.clone();
+        fragment.col = fragment.col.saturating_add(col);
+        fragment.row = fragment.row.saturating_add(row);
+        fragment.depth = fragment.depth.saturating_add(depth);
+        tree.fragments.push(fragment);
+    }
+}
+
+fn offset_rect(rect: &mut super::LayoutRect, col: usize, row: usize) {
+    rect.col = rect.col.saturating_add(col);
+    rect.row = rect.row.saturating_add(row);
 }

@@ -1,12 +1,14 @@
 use super::document::elements_in_document_order;
 use super::*;
+
+mod flex;
 use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide, CssMargin,
-    CssPercentage, CssWidth, Cursor, Display, DisplayInside, DisplayOutside, EdgeSizes, FontSize,
-    Palette, PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign, TextRendering,
-    VerticalAlign, WhiteSpace,
+    CssPercentage, CssSize, CssWidth, Cursor, Display, DisplayInside, DisplayOutside, EdgeSizes,
+    FontSize, Palette, PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign,
+    TextRendering, VerticalAlign, WhiteSpace,
 };
 use crate::css::values::{parse_cursor, parse_font_weight};
 use crate::css::{ColorScheme, CssParser, CssparserParser, DynamicState};
@@ -677,7 +679,9 @@ fn display_modes_preserve_their_computed_outside_and_inside_components() {
     let sheet =
         CssparserParser.parse("p { position: absolute; inset: 4px; top: 1px; height: 50% }");
     let degraded = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
-    assert_eq!(degraded.get(p), baseline.get(p));
+    let mut expected = baseline.get(p);
+    expected.height = CssSize::Percent(CssPercentage::new(5_000));
+    assert_eq!(degraded.get(p), expected);
 }
 
 #[test]
@@ -869,15 +873,15 @@ fn bucket_normalization_matches_naive_cascade_in_quirks_mode() {
 #[test]
 fn bucketed_and_naive_cascades_agree_on_the_render_fixture_corpus() {
     for source in [
-        include_str!("../../../tests/fixtures/borders.html"),
-        include_str!("../../../tests/fixtures/headings.html"),
-        include_str!("../../../tests/fixtures/links.html"),
-        include_str!("../../../tests/fixtures/margins.html"),
-        include_str!("../../../tests/fixtures/pre.html"),
-        include_str!("../../../tests/fixtures/wide.html"),
-        include_str!("../../../tests/fixtures/lists.html"),
-        include_str!("../../../tests/fixtures/generated.html"),
-        include_str!("../../../tests/fixtures/display_modes.html"),
+        include_str!("../../../../tests/fixtures/borders.html"),
+        include_str!("../../../../tests/fixtures/headings.html"),
+        include_str!("../../../../tests/fixtures/links.html"),
+        include_str!("../../../../tests/fixtures/margins.html"),
+        include_str!("../../../../tests/fixtures/pre.html"),
+        include_str!("../../../../tests/fixtures/wide.html"),
+        include_str!("../../../../tests/fixtures/lists.html"),
+        include_str!("../../../../tests/fixtures/generated.html"),
+        include_str!("../../../../tests/fixtures/display_modes.html"),
     ] {
         let outcome = Html5everParser::new(false).parse_document(source);
         let document = outcome.document.borrow();

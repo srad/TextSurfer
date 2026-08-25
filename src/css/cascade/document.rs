@@ -4,8 +4,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::style::{
-    ComputedStyle, CssWidth, Display, ListStylePosition, Marker, PseudoBox, PseudoElement,
-    StyleTree,
+    ComputedStyle, CssMaxSize, CssSize, Display, DisplayInside, ListStylePosition, Marker,
+    PseudoBox, PseudoElement, StyleTree,
 };
 use crate::css::StyleSheet;
 use crate::css::parser::{StyleRule, parse_declarations};
@@ -106,7 +106,7 @@ pub(super) fn cascade_document(
             apply_declaration(&mut style, parent_style, &declaration, element_media);
             authored_counters.apply(&declaration);
         }
-        style.display = computed_display(document, id, style.display);
+        style.display = computed_display(document, &tree, id, style.display);
         if style.display.is_inline_flow()
             || matches!(
                 style.display,
@@ -116,7 +116,12 @@ pub(super) fn cascade_document(
                     | Display::TABLE_ROW
             )
         {
-            style.width = CssWidth::Auto;
+            style.width = CssSize::Auto;
+            style.height = CssSize::Auto;
+            style.min_width = CssSize::Auto;
+            style.min_height = CssSize::Auto;
+            style.max_width = CssMaxSize::None;
+            style.max_height = CssMaxSize::None;
         }
         tree.insert(id, style);
         if style.display.is_none() && hidden_depth.is_none() {
@@ -137,6 +142,7 @@ pub(super) fn cascade_document(
                 style,
                 &counters,
                 None,
+                pseudo_is_flex_item(document, &tree, id, style),
             ) {
                 tree.insert_pseudo(id, which, pseudo);
             }
@@ -153,6 +159,7 @@ pub(super) fn cascade_document(
                 style,
                 &counters,
                 fallback,
+                false,
             ) {
                 markers.push(PendingMarker {
                     node: id,
@@ -212,6 +219,7 @@ fn cascade_pseudo(
     origin: ComputedStyle,
     counters: &CounterScopes,
     fallback: Option<String>,
+    flex_item: bool,
 ) -> Option<PseudoBox> {
     let mut declarations = Vec::new();
     let mut order = 0usize;
@@ -278,7 +286,9 @@ fn cascade_pseudo(
             content = Some(spec);
         }
     }
-    style.display = Display::INLINE;
+    if flex_item {
+        style.display = style.display.blockify();
+    }
     let text = match content {
         Some(ContentSpec::None) => return None,
         Some(ContentSpec::Pieces(pieces)) => resolve_content(&pieces, document, id, counters),
@@ -292,7 +302,12 @@ fn cascade_pseudo(
     Some(PseudoBox { text, style })
 }
 
-fn computed_display(document: &Document, id: NodeId, display: Display) -> Display {
+fn computed_display(
+    document: &Document,
+    tree: &StyleTree,
+    id: NodeId,
+    display: Display,
+) -> Display {
     let display = if display.is_contents()
         && matches!(
             document.node(id),
@@ -330,9 +345,38 @@ fn computed_display(document: &Document, id: NodeId, display: Display) -> Displa
         } else {
             display.blockify()
         }
+    } else if nearest_box_parent_is_flex(document, tree, id) {
+        display.blockify()
     } else {
         display
     }
+}
+
+fn pseudo_is_flex_item(
+    document: &Document,
+    tree: &StyleTree,
+    id: NodeId,
+    style: ComputedStyle,
+) -> bool {
+    matches!(style.display.inside(), Some(DisplayInside::Flex))
+        || (style.display.is_contents() && nearest_box_parent_is_flex(document, tree, id))
+}
+
+fn nearest_box_parent_is_flex(document: &Document, tree: &StyleTree, id: NodeId) -> bool {
+    let mut parent = document.parent(id);
+    while let Some(node) = parent {
+        if !matches!(document.node(node), Some(Node::Element { .. })) {
+            parent = document.parent(node);
+            continue;
+        }
+        let style = tree.get(node);
+        if style.display.is_contents() {
+            parent = document.parent(node);
+            continue;
+        }
+        return matches!(style.display.inside(), Some(DisplayInside::Flex));
+    }
+    false
 }
 
 #[derive(Default)]

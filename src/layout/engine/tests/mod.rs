@@ -54,6 +54,8 @@ fn disjoint(a: LayoutRect, b: LayoutRect) -> bool {
         || b.row + b.height <= a.row
 }
 
+mod flex;
+
 proptest! {
     #[test]
     fn wider_viewports_never_increase_single_block_height(

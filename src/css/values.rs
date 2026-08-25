@@ -8,7 +8,7 @@ use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
 use crate::core::geom::Size;
 use crate::core::style::{
     BorderColor, BorderEdges, BorderLineStyle, BorderSide, CellMetric, CssLength, CssLengthUnit,
-    CssPercentage, CssWidth, Cursor, Display, DisplayBox, DisplayInternal, DisplayOutside,
+    CssPercentage, CssSize, Cursor, Display, DisplayBox, DisplayInternal, DisplayOutside,
     EdgeSizes, LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
 };
 
@@ -579,15 +579,16 @@ pub(super) fn assign_edges(
     }
 }
 
-pub(super) fn parse_width(
+pub(super) fn parse_size(
     source: &str,
     metric: CellMetric,
     viewport: Size,
     font_px: f64,
     root_font_px: f64,
-) -> Option<CssWidth> {
+    axis: LengthAxis,
+) -> Option<CssSize> {
     if parse_ident(source).as_deref() == Some("auto") {
-        return Some(CssWidth::Auto);
+        return Some(CssSize::Auto);
     }
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
@@ -600,14 +601,14 @@ pub(super) fn parse_width(
         && unit_value >= 0.0
         && parser.is_exhausted()
     {
-        return Some(CssWidth::Percent(CssPercentage::new(
+        return Some(CssSize::Percent(CssPercentage::new(
             (unit_value * 10_000.0).round().min(u32::MAX as f32) as u32,
         )));
     }
     parse_length(source).map(|value| {
-        CssWidth::Cells(metric.resolve_cells_with_fonts(
+        CssSize::Cells(metric.resolve_cells_with_fonts(
             value,
-            LengthAxis::Horizontal,
+            axis,
             viewport,
             font_px,
             root_font_px,

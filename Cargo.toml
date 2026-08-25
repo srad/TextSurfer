@@ -15,7 +15,7 @@ mediatype = "0.23.0"
 precomputed-hash = "0.1.1"
 ratatui = { version = "0.30.2", features = ["scrolling-regions"] }
 selectors = "0.40.0"
-taffy = { version = "0.14.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "content_size"] }
+taffy = { version = "0.14.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "content_size", "flexbox"] }
 textwrap = { version = "0.16.2", default-features = false, features = ["unicode-linebreak", "unicode-width"] }
 unicode-segmentation = "1.13.3"
 url = "2.5.8"

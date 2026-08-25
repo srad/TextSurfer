@@ -72,8 +72,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-25): **594 lib · 13 binary · 4 fetch-pipeline ·
-14 corpus · 32 golden** with the default VGA frontend, and **501 lib · 12 binary** with
+Test counts at the last green run (2026-08-25): **638 lib · 13 binary · 4 fetch-pipeline ·
+14 corpus · 35 golden** with the default VGA frontend, and **545 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -286,9 +286,9 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 ### Deferred — decision gates with explicit triggers
 - M5 gate: if Boa's async (fetch promises / timers / top-level await) can't keep the UI responsive
   after contract suite + fixture, switch to Deno Core (V8) — same `JsEngine` trait.
-- Taffy owns block box calculation; terminal inline formatting uses textwrap fragments + Unicode
-  cell/grapheme libraries because Taffy has no inline layout. M1-D adds table layout in-house; M6
-  enables Taffy flex/grid; floats wait for line-flow-around-float conformance.
+- Taffy owns block and flex box calculation; terminal inline formatting uses textwrap fragments +
+  Unicode cell/grapheme libraries because Taffy has no inline layout. M1-D adds table layout
+  in-house; M6 enables Taffy grid after flex; floats wait for line-flow-around-float conformance.
 - **Incremental and multi-process rendering** (chawan's model: paint while the body streams, one
   process per buffer) is deferred, not rejected: our DOM is single-thread-owned by design and the
   fetch pool delivers whole bodies. Revisit if large-page latency becomes a complaint.
@@ -498,13 +498,14 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
       inside, box-generation and table-internal categories, including strict legacy and
       multi-keyword grammar. The private flow tree elides `contents` principal boxes after cascade
       inheritance while keeping pseudo content, link ancestry and unusual-element computed-value
-      rules. Inline flow-root/table/flex/grid boxes are atomic, use shrink-to-fit normal-flow
-      content, horizontal margins and a last-content-line baseline; block flow-root/flex/grid use
-      normal flow, with real flex/grid layout still owned by M6. Anonymous table wrappers group
+      rules. Inline flow-root/table/grid boxes are atomic, use shrink-to-fit normal-flow content,
+      horizontal margins and a last-content-line baseline; inline flex uses Taffy shrink-to-fit and
+      its first flex-line baseline. Block flow-root/grid keep normal flow while block flex uses
+      Taffy; real grid layout remains owned by M6. Anonymous table wrappers group
       consecutive internal roles after `contents` elision, have no fabricated DOM owner, fill
       missing row/table parents, and preserve text under resource-limit degradation. *Proof:* strict
       cascade grammar and computed-value tests; formatting-tree tests for box elision, inheritance,
-      link geometry, atomic baseline/margins, normal-flow fallbacks and misparented roles; one public
+      link geometry, atomic baseline/margins, the grid normal-flow fallback and misparented roles; one public
       render golden spanning the modes.
 - [x] **Length units and the cell metric** *(done)* — `parse_length_token` previously ignored the unit and the axis, so
       `1px`, `1em`, `1rem`, `1pt` and `1vw` are all one cell: `padding: 20px` eats a quarter of an
@@ -637,11 +638,9 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       the raw `href`, and same-document fragments deferred to M2's anchor item instead of refetching.
 - [x] Hover *(done)*: status-bar URL preview, repaint only on target change, re-derived after scroll,
       navigation, tab switch and resize; `CursorIcon::Pointer` over links in the window frontend.
-- **Hit-test resolution contract:** hover targets resolve by depth and text-over-box paint kind against
-      the live document. Link activation remains document-ordered through `DisplayList::link_at`,
-      which equals Ladybird's topmost-in-paint-order rule only while nothing overlaps — true until M6
-      adds positioned, floated and flex/grid boxes. **Trigger:** when M6 lands any of those, switch
-      activation to the same paint-order resolution and index the now-fragment-dense hit list.
+- **Hit-test resolution contract:** hover and link activation use one row-indexed,
+  topmost-in-paint-order resolver against the live document; DOM-ordered link storage remains the
+  keyboard-navigation contract.
 
 **Slice 2 — live dynamic state (in progress — interactive launch regression under diagnosis)**
 
@@ -753,7 +752,24 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
 - [x] **Taffy 0.14 baseline upgrade** *(done)* — pin 0.14.0 with the existing
       block-only features, adapt the 0.14 leaf-measure callback without changing render output,
       and require unchanged goldens plus the complete feature gate matrix before flexbox begins.
-- [ ] Taffy flex/grid enabled; conformant float flow with line-flow-around-float.
+- [x] **Flexbox** *(done)* — Taffy's flexbox engine owns block, inline and nested flex geometry.
+      The cascade supports the flex direction/wrap/flow, grow/shrink/basis/shorthand, order,
+      justify/align, gap/place-content, height and min/max sizing families with atomic invalid-value
+      handling and computed flex-item blockification through `display: contents`. Constraint-keyed
+      deferred atoms share table and nested inline-flex formatting across intrinsic measurement and
+      fragment emission; text baselines reach Taffy's baseline alignment. Generated content and
+      tables participate as flex items, while stable order-modified layout leaves DOM order intact.
+      Paint builds a row index over a total interaction order shared by hover and link activation.
+      Grid and float fallbacks are unchanged. *Proof:* complete supported direction/wrap,
+      shorthand, alignment and CSS-wide cascade matrices; block/column, every direction,
+      main/cross-axis distribution, grow/shrink/basis/constraints, auto margins, wrapping/gaps,
+      inline-flex shrink-to-fit, stable order, generated-item, table-item, deep nesting, baseline,
+      degenerate geometry and overlapping-link layout and paint cases; all 12 direction/wrap pairs;
+      a wrapped-flex viewport property law; an inspected public render golden, public
+      DOM-link/visual-order case and dynamic-restyle reflow case; complete local feature gate matrix
+      green.
+- [ ] **Grid** — enable Taffy's grid engine after the flex formatting and paint-order seams settle.
+- [ ] **Floats** — conformant line-flow-around-float formatting.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
       M1-B stays the fallback when no protocol is available.
 - [ ] **Perf gate**: largest corpus page layout+paint < 200 ms debug. Includes memoizing
@@ -808,6 +824,49 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-25 — **M6 rendering work split into Flexbox, Grid and Floats.** Flexbox starts first on
+  Taffy 0.14.0 with only its `flexbox` dependency feature. The slice includes height/min/max sizing,
+  constraint-aware table/inline-flex formatting, baseline propagation, total paint order and indexed
+  topmost hit/link resolution. It may land the formatter memoization and hit-index portions of the
+  later performance gate early; the 200 ms corpus target, dense-row decision and remaining resource
+  ceilings stay open.
+- 2026-08-25 — **M6 Flexbox delivered.** Taffy remains pinned at 0.14.0 and now enables only its
+  additional `flexbox` feature. CSS sizing and flex longhands/shorthands feed block, inline and
+  nested flex layout; constraint-keyed deferred atoms preserve table/inline formatting and
+  baselines. Generated items take part in stable order-modified layout. Paint interaction uses a
+  row index and one topmost order for hover and link activation while keyboard links remain in DOM
+  order. Grid, floats and the remaining perf gate stay open. The complete format, strict
+  default/all-feature/no-default Clippy and default/JS/VGA/no-default test matrix is green at 604
+  library tests (511 without defaults), 13 binary tests (12 without defaults), 4 fetch-pipeline, 14
+  corpus and 32 render-golden tests; no snapshot changed.
+- 2026-08-25 — **M6 Flexbox regression coverage expanded.** Table-driven cascade cases now cover
+  every supported direction/wrap pair, shorthand omission form, alignment keyword and CSS-wide
+  property group, plus invalid numeric/gap/sizing winners. Geometry cases cover all directions,
+  main/cross-axis distributions, growth ratios, shrink, percentage basis/gap, min/max constraints,
+  multiple auto margins, wrap-reverse, stable equal order, generated/table items and deep nested
+  flex; a property law checks that widening wrapped flex never increases height. A new inspected
+  public golden covers row distribution, growth/order, wrapping/gap, inline-flex, nested column flex
+  and a table item; another public case proves visual order and DOM link order together. The matrix
+  exposed and fixed `flex` shorthand incorrectly resetting container direction/alignment fields.
+  Format, strict default/all-feature/no-default Clippy and default/JS/VGA/no-default tests are green
+  at 617 library tests (524 without defaults), 13 binary tests (12 without defaults), 4
+  fetch-pipeline, 14 corpus and 34 render-golden tests.
+- 2026-08-25 — **M6 Flexbox branch and interaction coverage expanded again.** Primitive-value,
+  sizing-axis, gap/place-content and invalid-safety cases close the remaining computed-style parser
+  branches. Geometry now exercises all 12 direction/wrap pairs, column gaps, basis units,
+  percentage constraints, box sizing, every supported distribution alias, safe/unsafe alignment,
+  wrapped inline-flex first-line baselines and empty/zero-sized containers. A public dynamic-state
+  regression proves hover-driven row-to-column reflow and restoration. The full local gate matrix is
+  green at 626 library tests (533 without defaults), 13 binary tests (12 without defaults), 4
+  fetch-pipeline, 14 corpus and 35 render-golden tests.
+- 2026-08-25 — **M6 Flexbox tests audited and reorganized.** Cascade flex cases now share one
+  computed-style fixture, while layout coverage is separated into axis, sizing and content modules.
+  Mixed-responsibility cases were split for precise failures; fixtures resolve the container by DOM
+  identity instead of box-vector position; the viewport property now always generates a nonempty
+  flex container and a strictly wider comparison. A direct adapter case covers Taffy alignment
+  safety and physical-axis fallback mapping. The full local gate matrix is green at 638 library
+  tests (545 without defaults), 13 binary tests (12 without defaults), 4 fetch-pipeline, 14 corpus
+  and 35 render-golden tests.
 - 2026-08-20 — M0 scope accepted; delivered complete (gates green; rustc 1.97.1, edition 2024).
 - 2026-08-20 — Library-first directive: adopt the latest ready-made crate per layer (html5ever,
   cssparser, selectors, boa_engine, ureq, encoding_rs, ratatui); rcdom rejected; in-house focus is
@@ -1152,8 +1211,9 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   outside/inside, box-generation and table-internal categories through cascade and parse strict
   legacy plus multi-keyword forms. The private flow tree removes `contents` principal boxes without
   losing inheritance, pseudo content or link ancestry, and applies anonymous-table fixup after that
-  elision without synthetic DOM owners. Inline flow-root/table/flex/grid boxes are atomic with
-  shrink-to-fit normal-flow content, horizontal margins and last-content-line baselines; block
+  elision without synthetic DOM owners. Inline flow-root/table/grid boxes are atomic with
+  shrink-to-fit normal-flow content, horizontal margins and last-content-line baselines; inline
+  flex uses its first flex-line baseline; block
   flow-root/flex/grid deliberately use normal flow until M6. Bounded anonymous wrappers degrade
   without dropping their text. No dependency changed; **cssparser 0.37.0**, **Taffy 0.13.0** and
   **textwrap 0.16.2** remain current. The public display-modes golden was inspected. Final six-gate

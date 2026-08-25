@@ -22,6 +22,7 @@ pub use contrast::{legible_foreground, resolve_cell_style};
 pub struct DisplayList {
     pub rows: Vec<PaintedRow>,
     pub hits: Vec<HitRegion>,
+    pub hit_rows: BTreeMap<usize, Vec<usize>>,
     pub links: Vec<PaintedLink>,
     pub scaled_text: Vec<ScaledTextRun>,
 }
@@ -53,6 +54,7 @@ pub struct PaintedLink {
     pub node: NodeId,
     pub href: String,
     pub rects: Vec<LayoutRect>,
+    pub paint_order: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +63,7 @@ pub struct HitRegion {
     pub rect: LayoutRect,
     pub depth: usize,
     pub kind: HitKind,
+    pub paint_order: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -107,27 +110,38 @@ impl DisplayList {
     }
 
     pub fn hit_test(&self, col: usize, row: usize) -> Option<NodeId> {
-        self.hits
-            .iter()
+        self.hit_rows
+            .get(&row)
+            .into_iter()
+            .flatten()
+            .filter_map(|index| self.hits.get(*index))
             .filter(|hit| {
                 col >= hit.rect.col
                     && col < hit.rect.col.saturating_add(hit.rect.width)
                     && row >= hit.rect.row
                     && row < hit.rect.row.saturating_add(hit.rect.height)
             })
-            .max_by_key(|hit| (hit.depth, hit.kind))
+            .max_by_key(|hit| hit.paint_order)
             .map(|hit| hit.node)
     }
 
     pub fn link_at(&self, col: usize, row: usize) -> Option<&PaintedLink> {
-        self.links.iter().find(|link| {
-            link.rects.iter().any(|rect| {
-                row >= rect.row
-                    && row < rect.row.saturating_add(rect.height)
-                    && col >= rect.col
-                    && col < rect.col.saturating_add(rect.width)
-            })
-        })
+        let topmost = self
+            .hit_rows
+            .get(&row)
+            .into_iter()
+            .flatten()
+            .filter_map(|index| self.hits.get(*index))
+            .filter(|hit| contains(hit.rect, col, row))
+            .max_by_key(|hit| hit.paint_order);
+        let link = self
+            .links
+            .iter()
+            .filter(|link| link.rects.iter().any(|rect| contains(*rect, col, row)))
+            .max_by_key(|link| link.paint_order)?;
+        topmost
+            .is_none_or(|hit| link.paint_order == hit.paint_order)
+            .then_some(link)
     }
 }
 
@@ -231,34 +245,77 @@ impl Painter for BasicPainter {
         for (row, buffer) in rows {
             painted[row] = buffer.into_row(palette);
         }
-        DisplayList {
-            rows: painted,
-            hits: box_tree
-                .boxes
-                .iter()
-                .map(|layout_box| HitRegion {
-                    node: layout_box.node,
-                    rect: layout_box.border_rect,
-                    depth: layout_box.depth,
-                    kind: HitKind::Box,
-                })
-                .chain(box_tree.fragments.iter().map(|fragment| HitRegion {
-                    node: fragment.node,
-                    rect: fragment.rect(),
-                    depth: fragment.depth,
-                    kind: HitKind::Text,
-                }))
-                .collect(),
-            links: box_tree
-                .links
-                .iter()
-                .map(|link| PaintedLink {
+        let mut hits = Vec::new();
+        let mut boxes: Vec<_> = box_tree.boxes.iter().collect();
+        boxes.sort_by_key(|layout_box| layout_box.depth);
+        for layout_box in boxes {
+            hits.push(HitRegion {
+                node: layout_box.node,
+                rect: layout_box.border_rect,
+                depth: layout_box.depth,
+                kind: HitKind::Box,
+                paint_order: hits.len(),
+            });
+        }
+        let mut hit_fragments: Vec<_> = box_tree.fragments.iter().collect();
+        hit_fragments.sort_by_key(|fragment| (fragment.depth, fragment.row, fragment.col));
+        for fragment in hit_fragments {
+            hits.push(HitRegion {
+                node: fragment.node,
+                rect: fragment.rect(),
+                depth: fragment.depth,
+                kind: HitKind::Text,
+                paint_order: hits.len(),
+            });
+        }
+        let mut hit_rows: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (index, hit) in hits.iter().enumerate() {
+            for row in hit.rect.row..hit.rect.row.saturating_add(hit.rect.height) {
+                hit_rows.entry(row).or_default().push(index);
+            }
+        }
+        let links = box_tree
+            .links
+            .iter()
+            .map(|link| {
+                let paint_order = hits
+                    .iter()
+                    .filter(|hit| {
+                        hit.kind == HitKind::Text
+                            && link.hit_nodes.contains(&hit.node)
+                            && link.rects.iter().any(|rect| covers(*rect, hit.rect))
+                    })
+                    .map(|hit| hit.paint_order)
+                    .max()
+                    .unwrap_or(0);
+                PaintedLink {
                     node: link.node,
                     href: link.href.clone(),
                     rects: link.rects.clone(),
-                })
-                .collect(),
+                    paint_order,
+                }
+            })
+            .collect();
+        DisplayList {
+            rows: painted,
+            hits,
+            hit_rows,
+            links,
             scaled_text,
         }
     }
+}
+
+fn contains(rect: LayoutRect, col: usize, row: usize) -> bool {
+    row >= rect.row
+        && row < rect.row.saturating_add(rect.height)
+        && col >= rect.col
+        && col < rect.col.saturating_add(rect.width)
+}
+
+fn covers(outer: LayoutRect, inner: LayoutRect) -> bool {
+    inner.col >= outer.col
+        && inner.row >= outer.row
+        && inner.col.saturating_add(inner.width) <= outer.col.saturating_add(outer.width)
+        && inner.row.saturating_add(inner.height) <= outer.row.saturating_add(outer.height)
 }

@@ -1,9 +1,19 @@
 use super::Rgb;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CssWidth {
+pub enum CssSize {
     #[default]
     Auto,
+    Cells(usize),
+    Percent(CssPercentage),
+}
+
+pub type CssWidth = CssSize;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CssMaxSize {
+    #[default]
+    None,
     Cells(usize),
     Percent(CssPercentage),
 }

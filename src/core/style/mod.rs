@@ -1,6 +1,7 @@
 mod box_model;
 mod color;
 mod display;
+mod flex;
 mod length;
 mod list;
 mod table;
@@ -14,12 +15,16 @@ use std::collections::HashMap;
 use crate::core::dom::NodeId;
 
 pub use box_model::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssMargin, CssPercentage,
-    CssWidth, EdgeSizes, MarginEdges,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssMargin, CssMaxSize,
+    CssPercentage, CssSize, CssWidth, EdgeSizes, MarginEdges,
 };
 pub use color::{CellStyle, Palette, Rgb, Rgba};
 pub use display::{
     Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside,
+};
+pub use flex::{
+    Alignment, AlignmentSafety, AxisCellLength, ContentAlignment, CssGap, CssNumber, FlexBasis,
+    FlexDirection, FlexStyle, FlexWrap, ItemAlignment,
 };
 pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
@@ -118,7 +123,13 @@ pub struct ComputedStyle {
     pub display: Display,
     pub white_space: WhiteSpace,
     pub cursor: Cursor,
-    pub width: CssWidth,
+    pub width: CssSize,
+    pub height: CssSize,
+    pub min_width: CssSize,
+    pub min_height: CssSize,
+    pub max_width: CssMaxSize,
+    pub max_height: CssMaxSize,
+    pub flex: FlexStyle,
     pub box_sizing: BoxSizing,
     pub margin: MarginEdges,
     pub padding: EdgeSizes,

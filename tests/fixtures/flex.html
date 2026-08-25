@@ -1,0 +1,24 @@
+<!doctype html>
+<style>
+body { margin: 0 }
+.spread { display: flex; width: 24ch; justify-content: space-between }
+.spread span { flex: none }
+.weighted { display: flex; width: 24ch }
+.weighted span { flex: 1 1 0 }
+.weighted .wide { flex-grow: 2 }
+.weighted .first { order: -1 }
+.wrapped { display: flex; flex-wrap: wrap; gap: 16px 1ch; width: 12ch }
+.wrapped span { flex: none; width: 5ch }
+.badge { display: inline-flex }
+.badge b { flex: none; width: 2ch }
+.nested { display: flex; width: 16ch }
+.nested section { display: flex; flex: none; flex-direction: column; width: 6ch }
+.nested section i { flex: none; height: 16px }
+.nested table { border-spacing: 0; flex: none; margin: 0; order: -1; width: 6ch }
+.nested td { padding: 0 }
+</style>
+<div class="spread"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
+<div class="weighted"><span>SECOND</span><span class="wide">THIRD</span><span class="first">FIRST</span></div>
+<div class="wrapped"><span>ONE</span><span>TWO</span><span>THREE</span></div>
+<p>before <span class="badge"><b>A</b><b>B</b></span> after</p>
+<div class="nested"><section><i>UP</i><i>DOWN</i></section><table><tr><td>CELL</td></tr></table></div>

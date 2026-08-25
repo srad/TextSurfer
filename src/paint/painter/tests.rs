@@ -71,6 +71,7 @@ fn scaled_text_is_reserved_and_emitted_as_an_explicit_run() {
             node,
             href: "https://example.com".to_string(),
             rects: vec![rect],
+            hit_nodes: vec![node],
         }],
         ..Default::default()
     };
@@ -435,6 +436,7 @@ fn transparent_text_loses_ink_but_keeps_layout_and_interaction_geometry() {
             node: hidden,
             href: "https://example.com/".to_string(),
             rects: vec![hidden_rect],
+            hit_nodes: vec![hidden],
         }],
         ..Default::default()
     };
@@ -489,6 +491,7 @@ fn links_carry_their_geometry_into_the_display_list() {
             node,
             href: "https://example.com/".to_string(),
             rects: vec![rect],
+            hit_nodes: Vec::new(),
         }],
         ..Default::default()
     };
@@ -499,6 +502,52 @@ fn links_carry_their_geometry_into_the_display_list() {
         Some("https://example.com/")
     );
     assert!(display.link_at(6, 0).is_none());
+}
+
+#[test]
+fn topmost_paint_order_is_shared_by_hit_testing_and_link_activation() {
+    let mut document = Document::new();
+    let link = document.insert_element(None, "a", ElementNs::Html, vec![]);
+    let overlay = document.insert_element(None, "span", ElementNs::Html, vec![]);
+    let rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 4,
+        height: 1,
+    };
+    let tree = BoxTree {
+        width: 4,
+        height: 1,
+        fragments: vec![
+            TextFragment {
+                node: link,
+                col: 0,
+                row: 0,
+                text: "link".to_string(),
+                depth: 0,
+                style: CellStyle::default(),
+            },
+            TextFragment {
+                node: overlay,
+                col: 0,
+                row: 0,
+                text: "top!".to_string(),
+                depth: 1,
+                style: CellStyle::default(),
+            },
+        ],
+        links: vec![crate::layout::LinkBox {
+            node: link,
+            href: "https://example.com/".to_string(),
+            rects: vec![rect],
+            hit_nodes: vec![link],
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    assert_eq!(display.hit_test(2, 0), Some(overlay));
+    assert!(display.link_at(2, 0).is_none());
+    assert_eq!(display.hit_rows.get(&0).map(Vec::len), Some(2));
 }
 
 #[test]
