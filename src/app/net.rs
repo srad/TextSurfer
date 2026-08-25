@@ -3,7 +3,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::net::pool::FetchPool;
-use crate::net::{FetchPayload, FetchRequest, ResourceId};
+use crate::net::{FetchPoll, FetchRequest, ResourceId, Submitted};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Route {
@@ -24,9 +24,14 @@ pub fn route(url: &Url) -> Route {
 }
 
 pub trait Navigate: Send {
-    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url);
+    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) -> Submitted;
     fn cancel(&self, _tab_id: u64, _generation: u64) {}
-    fn poll_result(&self) -> Option<FetchPayload>;
+    fn poll_result(&self) -> FetchPoll;
+
+    /// Stop accepting work and return without joining. Quitting must not wait on a
+    /// worker parked inside the 30 s fetch timeout, so the frontends call this before
+    /// the pool's own `Drop` — which joins — can run.
+    fn shutdown(&self) {}
 }
 
 pub struct PoolNet {
@@ -40,27 +45,42 @@ impl PoolNet {
 }
 
 impl Navigate for PoolNet {
-    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) {
+    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) -> Submitted {
         self.pool
-            .submit(tab_id, generation, resource_id, FetchRequest { url });
+            .submit(tab_id, generation, resource_id, FetchRequest { url })
     }
 
     fn cancel(&self, tab_id: u64, generation: u64) {
         self.pool.cancel(tab_id, generation);
     }
 
-    fn poll_result(&self) -> Option<FetchPayload> {
+    fn poll_result(&self) -> FetchPoll {
         self.pool.try_recv()
+    }
+
+    fn shutdown(&self) {
+        self.pool.shutdown_without_waiting();
     }
 }
 
 pub struct NoopNet;
 
 impl Navigate for NoopNet {
-    fn submit(&self, _tab_id: u64, _generation: u64, _resource_id: ResourceId, _url: Url) {}
+    fn submit(
+        &self,
+        _tab_id: u64,
+        _generation: u64,
+        _resource_id: ResourceId,
+        _url: Url,
+    ) -> Submitted {
+        // `Queued`, not `Closed`: the no-op net accepts the job and simply never
+        // completes it. Reporting `Closed` would make every navigation in an
+        // I/O-free composition look like a failed load.
+        Submitted::Queued
+    }
 
-    fn poll_result(&self) -> Option<FetchPayload> {
-        None
+    fn poll_result(&self) -> FetchPoll {
+        FetchPoll::Empty
     }
 }
 

@@ -24,7 +24,7 @@ impl DeferredCssNet {
 }
 
 impl Navigate for DeferredCssNet {
-    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) {
+    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) -> Submitted {
         self.submitted
             .lock()
             .unwrap()
@@ -36,15 +36,21 @@ impl Navigate for DeferredCssNet {
                 resource_id,
                 result: Ok(FetchResponse {
                     final_url: url,
+                    status: 200,
                     body: self.html.clone(),
-                    content_type: None,
+                    content_type: Some("text/html; charset=utf-8".to_string()),
                 }),
             });
         }
+        Submitted::Queued
     }
 
-    fn poll_result(&self) -> Option<FetchPayload> {
-        self.pending.lock().unwrap().pop()
+    fn poll_result(&self) -> FetchPoll {
+        self.pending
+            .lock()
+            .unwrap()
+            .pop()
+            .map_or(FetchPoll::Empty, FetchPoll::Ready)
     }
 }
 
@@ -403,6 +409,7 @@ fn resize_and_late_stylesheet_delivery_refresh_a_parked_pointer() {
         resource_id,
         result: Ok(FetchResponse {
             final_url: url,
+            status: 200,
             body: b"a { display: none }".to_vec(),
             content_type: Some("text/css".to_string()),
         }),

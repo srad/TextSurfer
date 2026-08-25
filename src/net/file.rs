@@ -30,6 +30,7 @@ impl Fetch for FileFetch {
         }
         Ok(FetchResponse {
             final_url: request.url.clone(),
+            status: 200,
             body,
             content_type: None,
         })

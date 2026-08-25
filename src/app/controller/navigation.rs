@@ -1,6 +1,6 @@
 use crate::core::focus::Focus;
 use crate::core::url::url_fix;
-use crate::net::ResourceId;
+use crate::net::{ResourceId, Submitted};
 use crate::paint::DisplayList;
 
 use super::super::net::{Route, route};
@@ -67,12 +67,19 @@ impl App {
                 }
                 self.tabs.active_mut().message = format!("loading {fixed}");
                 self.tabs.active_mut().document_pending = true;
-                self.net.submit(
+                let submitted = self.net.submit(
                     self.tabs.active().id,
                     generation,
                     ResourceId::DOCUMENT,
                     parsed,
                 );
+                if submitted != Submitted::Queued {
+                    // Nothing accepted the job, so no payload will ever arrive. Without
+                    // this the tab sits on "loading" until the user gives up.
+                    let tab = self.tabs.active_mut();
+                    tab.document_pending = false;
+                    tab.message = format!("cannot load {fixed}: the network is not running");
+                }
             }
             Route::Reject => {
                 self.tabs.active_mut().message = format!("unsupported scheme: {}", parsed.scheme());

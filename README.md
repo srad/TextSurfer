@@ -41,10 +41,17 @@ M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; M3 slice 1
 — done, with wheel, links, toolbar and menu confirmed by hand in the VGA window; terminal smoke
 deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human smoke pending)**
 
-- Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
-  certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
-  same-scheme: a remote page cannot name `file:///…` in a `<link>` and have the browser read local
-  files for it
+- Real HTTP(S) and `file://` loading via a fixed 4-worker fetch pool (ureq, OS-native certificate
+  roots) with timeouts, cancellation and a 10 MiB response limit. Quitting detaches the workers
+  rather than joining them, so a request parked in its timeout cannot hold the window open.
+  Subresources are same-scheme: a remote page cannot name `file:///…` in a `<link>` and have the
+  browser read local files for it
+- A server's own 4xx/5xx page renders, with the status shown in the context bar; an error status
+  that carries no readable body says so instead. An error response is never accepted as a
+  stylesheet, so a 404 page cannot be parsed as CSS
+- Bounded rendering: block nesting is capped, past which the page is truncated with a notice rather
+  than overflowing the stack, and a layout the engine refuses degrades to an empty page with a
+  message instead of aborting the process
 - Full HTML5 parsing through html5ever into an indextree-backed DOM boundary (`<base href>`, quirks
   mode, foreign content, adoption agency, foster parenting, detached template fragments)
 - Standards-grade encoding detection: BOM → HTTP header → `<meta charset>` prescan → UTF-8

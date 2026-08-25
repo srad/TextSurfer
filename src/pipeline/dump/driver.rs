@@ -9,8 +9,8 @@ use crate::core::style::{Palette, TextRendering};
 use crate::core::url::url_fix;
 use crate::css::ColorScheme;
 use crate::net::{
-    Fetch, FetchPayload, FetchPool, FetchRequest, ResourceId, charset_from_content_type, decode,
-    decode_text,
+    Fetch, FetchPayload, FetchPoll, FetchPool, FetchRequest, ResourceId, charset_from_content_type,
+    decode, decode_text,
 };
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions, STYLESHEET_DEADLINE};
 use crate::pipeline::render::{ResponseKind, response_kind};
@@ -27,10 +27,16 @@ pub fn dump_lines(
     let pool = FetchPool::spawn(fetch, 4);
     pool.submit(0, 0, ResourceId::DOCUMENT, FetchRequest { url: parsed });
     let response = loop {
-        if let Some(payload) = pool.try_recv() {
-            break payload
-                .result
-                .map_err(|error| io::Error::other(error.to_string()))?;
+        match pool.try_recv() {
+            FetchPoll::Ready(payload) => {
+                break payload
+                    .result
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+            }
+            FetchPoll::Disconnected => {
+                return Err(io::Error::other("every fetch worker stopped"));
+            }
+            FetchPoll::Empty => {}
         }
         std::thread::sleep(Duration::from_millis(1));
     };
@@ -72,15 +78,18 @@ pub fn dump_lines(
                     pool.cancel(0, 0);
                     break;
                 }
-                if let Some(FetchPayload {
-                    resource_id,
-                    result,
-                    ..
-                }) = pool.try_recv()
-                {
-                    let _ = load.deliver(resource_id, result);
-                } else {
-                    std::thread::sleep(Duration::from_millis(1));
+                match pool.try_recv() {
+                    FetchPoll::Ready(FetchPayload {
+                        resource_id,
+                        result,
+                        ..
+                    }) => {
+                        let _ = load.deliver(resource_id, result);
+                    }
+                    // Losing the workers mid-load is not fatal here: the stylesheets
+                    // that did arrive still render, so settle instead of spinning.
+                    FetchPoll::Disconnected => break,
+                    FetchPoll::Empty => std::thread::sleep(Duration::from_millis(1)),
                 }
             }
             load.force_render().painted.text_lines()

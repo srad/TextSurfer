@@ -10,6 +10,7 @@ fn scrolled_page_waiting_for_late_stylesheet() -> (App, FetchPayload) {
     assert!(app.deliver_fetch(FetchPayload {
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/page").unwrap(),
+            status: 200,
             body: format!(
                 "<!doctype html><html><head><link rel=stylesheet href=late.css></head><body>{paragraphs}</body></html>"
             )
@@ -30,6 +31,7 @@ fn hide_all_paragraphs(payload: FetchPayload) -> FetchPayload {
     FetchPayload {
         result: Ok(FetchResponse {
             final_url,
+            status: 200,
             body: b"p { display: none }".to_vec(),
             content_type: Some("text/css".to_string()),
         }),
@@ -50,7 +52,10 @@ fn stale_fetch_results_are_dropped_fresh_ones_accepted() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/").unwrap(),
+            status: 200,
             body: vec![],
+            // Deliberately undeclared and empty: zero bytes carry no evidence, so
+            // sniffing leaves this as HTML rather than guessing plain text.
             content_type: None,
         }),
     }));
@@ -61,7 +66,10 @@ fn stale_fetch_results_are_dropped_fresh_ones_accepted() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/").unwrap(),
+            status: 200,
             body: vec![],
+            // Deliberately undeclared and empty: zero bytes carry no evidence, so
+            // sniffing leaves this as HTML rather than guessing plain text.
             content_type: None,
         }),
     }));
@@ -81,6 +89,7 @@ fn a_background_tabs_current_fetch_is_delivered_to_that_tab() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://a.example/final").unwrap(),
+            status: 200,
             body: b"<p>background complete</p>".to_vec(),
             content_type: Some("text/html; charset=\"utf-8\"".to_string()),
         }),
@@ -122,6 +131,7 @@ fn closing_the_front_tab_renders_the_one_that_takes_its_place() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://a.example/final").unwrap(),
+            status: 200,
             body: b"<p>background complete</p>".to_vec(),
             content_type: Some("text/html; charset=\"utf-8\"".to_string()),
         }),
@@ -194,16 +204,27 @@ fn fetch_errors_land_in_the_tab_content() {
         pending: Mutex<Vec<FetchPayload>>,
     }
     impl Navigate for ErrorNet {
-        fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, _url: Url) {
+        fn submit(
+            &self,
+            tab_id: u64,
+            generation: u64,
+            resource_id: ResourceId,
+            _url: Url,
+        ) -> Submitted {
             self.pending.lock().unwrap().push(FetchPayload {
                 tab_id,
                 generation,
                 resource_id,
                 result: Err(FetchError::HttpStatus(404)),
             });
+            Submitted::Queued
         }
-        fn poll_result(&self) -> Option<FetchPayload> {
-            self.pending.lock().unwrap().pop()
+        fn poll_result(&self) -> FetchPoll {
+            self.pending
+                .lock()
+                .unwrap()
+                .pop()
+                .map_or(FetchPoll::Empty, FetchPoll::Ready)
         }
     }
     let fake: Arc<dyn Navigate> = Arc::new(ErrorNet {
@@ -235,6 +256,7 @@ fn plain_text_is_rendered_without_html_parsing() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/plain").unwrap(),
+            status: 200,
             body: b"one\ntwo".to_vec(),
             content_type: Some("text/plain; charset=\"utf-8\"".to_string()),
         }),
@@ -255,6 +277,7 @@ fn unsupported_valid_media_types_are_not_parsed_as_html() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/image").unwrap(),
+            status: 200,
             body: b"not really a png".to_vec(),
             content_type: Some("image/png".to_string()),
         }),
@@ -275,6 +298,7 @@ fn embedded_author_styles_participate_in_rendering() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/styled").unwrap(),
+            status: 200,
             body: b"<style>p.secret { display: none }</style><p class=secret>hidden</p><div>shown</div>".to_vec(),
             content_type: Some("text/html".to_string()),
         }),
@@ -297,6 +321,7 @@ fn valid_imports_are_scheduled_and_late_imports_warn() {
             resource_id: ResourceId::DOCUMENT,
             result: Ok(FetchResponse {
                 final_url: Url::parse("https://example.com/").unwrap(),
+                status: 200,
                 body: br#"<!doctype html><html><head>
                 <style>@import url(one.css); p { display: block }</style>
                 <style>@media (width: 1ch) { p { display: none } } @import url(two.css);</style>
@@ -334,6 +359,7 @@ fn zero_css_warnings_preserve_the_existing_acceptance_message() {
         resource_id: ResourceId::DOCUMENT,
         result: Ok(FetchResponse {
             final_url: Url::parse("https://example.com/").unwrap(),
+            status: 200,
             body: b"<!doctype html><html><body><p>shown</p></body></html>".to_vec(),
             content_type: Some("text/html; charset=utf-8".to_string()),
         }),
@@ -353,12 +379,20 @@ fn one_step_cannot_be_starved_by_an_unending_result_source() {
     }
 
     impl Navigate for UnendingNet {
-        fn submit(&self, _tab_id: u64, _generation: u64, _resource_id: ResourceId, _url: Url) {}
+        fn submit(
+            &self,
+            _tab_id: u64,
+            _generation: u64,
+            _resource_id: ResourceId,
+            _url: Url,
+        ) -> Submitted {
+            Submitted::Queued
+        }
 
-        fn poll_result(&self) -> Option<FetchPayload> {
+        fn poll_result(&self) -> FetchPoll {
             let poll = self.polls.fetch_add(1, Ordering::Relaxed) + 1;
             assert!(poll <= 256, "one app step exceeded its result budget");
-            Some(FetchPayload {
+            FetchPoll::Ready(FetchPayload {
                 tab_id: u64::MAX,
                 generation: u64::MAX,
                 resource_id: ResourceId::DOCUMENT,
@@ -373,4 +407,75 @@ fn one_step_cannot_be_starved_by_an_unending_result_source() {
     let mut app = App::with_net(net.clone());
     app.step(Duration::ZERO);
     assert_eq!(net.polls.load(Ordering::Relaxed), 256);
+}
+
+#[test]
+fn a_lost_fetch_pool_tells_every_waiting_tab_instead_of_leaving_it_on_loading() {
+    struct DeadNet;
+
+    impl Navigate for DeadNet {
+        fn submit(
+            &self,
+            _tab_id: u64,
+            _generation: u64,
+            _resource_id: ResourceId,
+            _url: Url,
+        ) -> Submitted {
+            Submitted::Queued
+        }
+
+        fn poll_result(&self) -> FetchPoll {
+            FetchPoll::Disconnected
+        }
+    }
+
+    let mut app = App::with_net(Arc::new(DeadNet));
+    app.submit_url("https://example.com");
+    assert!(
+        app.tabs.active().document_pending,
+        "the load starts out pending"
+    );
+    app.step(Duration::ZERO);
+    assert!(
+        !app.tabs.active().document_pending,
+        "a pending load that can never complete must not stay pending"
+    );
+    assert!(
+        app.message().contains("network stopped responding"),
+        "the user is told the pool is gone, got {:?}",
+        app.message()
+    );
+}
+
+#[test]
+fn a_pool_that_refuses_the_job_does_not_leave_the_tab_loading_forever() {
+    struct ClosedNet;
+
+    impl Navigate for ClosedNet {
+        fn submit(
+            &self,
+            _tab_id: u64,
+            _generation: u64,
+            _resource_id: ResourceId,
+            _url: Url,
+        ) -> Submitted {
+            Submitted::Closed
+        }
+
+        fn poll_result(&self) -> FetchPoll {
+            FetchPoll::Empty
+        }
+    }
+
+    let mut app = App::with_net(Arc::new(ClosedNet));
+    app.submit_url("https://example.com");
+    assert!(
+        !app.tabs.active().document_pending,
+        "a job nothing accepted is not pending"
+    );
+    assert!(
+        app.message().contains("the network is not running"),
+        "got {:?}",
+        app.message()
+    );
 }

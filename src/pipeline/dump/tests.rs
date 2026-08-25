@@ -21,6 +21,7 @@ impl Fetch for ExternalDumpFetch {
         };
         Ok(FetchResponse {
             final_url: request.url.clone(),
+            status: 200,
             body,
             content_type: Some(content_type.to_string()),
         })

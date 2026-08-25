@@ -91,6 +91,7 @@ fn imports_resolve_against_final_url_and_cycles_stop() {
         root.resource_id,
         Ok(FetchResponse {
             final_url: Url::parse("https://cdn.example/css/main.css").unwrap(),
+            status: 200,
             body: b"@import 'child.css'; p { display: block }".to_vec(),
             content_type: Some("text/css".to_string()),
         }),
@@ -101,6 +102,7 @@ fn imports_resolve_against_final_url_and_cycles_stop() {
         child.resource_id,
         Ok(FetchResponse {
             final_url: child.url,
+            status: 200,
             body: b"@import 'main.css';".to_vec(),
             content_type: Some("text/css".to_string()),
         }),
@@ -118,6 +120,7 @@ fn invalid_non_css_mime_fails_only_that_resource() {
         command.resource_id,
         Ok(FetchResponse {
             final_url: command.url,
+            status: 200,
             body: b"p { display:none }".to_vec(),
             content_type: Some("image/png".to_string()),
         }),
@@ -126,11 +129,51 @@ fn invalid_non_css_mime_fails_only_that_resource() {
     assert!(load.render_if_ready(Duration::ZERO).is_some());
 }
 
+#[test]
+fn an_error_status_is_never_accepted_as_a_stylesheet() {
+    // Non-2xx bodies now reach us instead of being discarded as errors, and a missing
+    // or unparseable type otherwise defaults to CSS — so without the status check the
+    // server's 404 page would be parsed as a stylesheet and its rules applied.
+    for content_type in [
+        None,
+        Some("text/css".to_string()),
+        Some("text/html".to_string()),
+    ] {
+        let mut load = load("<!doctype html><link rel=stylesheet href='a.css'><p>x</p>");
+        let command = load.take_commands().pop().unwrap();
+        assert!(load.deliver(
+            command.resource_id,
+            Ok(FetchResponse {
+                final_url: command.url,
+                status: 404,
+                body: b"p { display:none }".to_vec(),
+                content_type: content_type.clone(),
+            }),
+        ));
+        assert_eq!(
+            load.failed_resources(),
+            1,
+            "a {content_type:?} 404 is a failed resource, not a stylesheet"
+        );
+        let page = load
+            .render_if_ready(Duration::ZERO)
+            .expect("the page still renders");
+        assert!(
+            page.painted
+                .text_lines()
+                .iter()
+                .any(|line| line.contains('x')),
+            "and the 404's rules were not applied to it"
+        );
+    }
+}
+
 fn css_response(command: FetchCommand, body: &[u8]) -> (ResourceId, FetchResponse) {
     (
         command.resource_id,
         FetchResponse {
             final_url: command.url,
+            status: 200,
             body: body.to_vec(),
             content_type: Some("text/css".to_string()),
         },
@@ -326,6 +369,7 @@ fn one_fetch_can_produce_two_environment_decodings() {
             command.resource_id,
             Ok(FetchResponse {
                 final_url: command.url,
+                status: 200,
                 body: b"@import 'shared.css';".to_vec(),
                 content_type: Some(format!("text/css; charset={charset}")),
             }),
@@ -355,6 +399,7 @@ fn import_depth_is_bounded_to_eight_edges() {
             command.resource_id,
             Ok(FetchResponse {
                 final_url: command.url,
+                status: 200,
                 body: body.into_bytes(),
                 content_type: Some("text/css".to_string()),
             }),
@@ -483,6 +528,7 @@ fn css_decoding_obeys_protocol_charset_at_charset_and_bom_precedence() {
             command.resource_id,
             Ok(FetchResponse {
                 final_url: command.url,
+                status: 200,
                 body,
                 content_type,
             }),

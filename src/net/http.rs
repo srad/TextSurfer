@@ -21,6 +21,10 @@ impl UreqFetch {
             .user_agent(user_agent.into())
             .timeout_global(Some(Duration::from_secs(30)))
             .save_redirect_history(true)
+            // A browser renders a server's own 404 or 500 page. ureq turns 4xx/5xx into
+            // `Error::StatusCode` by default, which discards the body before we can read
+            // it; this only changes error reporting, not redirect following.
+            .http_status_as_error(false)
             .build()
             .new_agent();
         Self { agent }
@@ -37,15 +41,15 @@ impl Fetch for UreqFetch {
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
         let response = match self.agent.get(request.url.as_str()).call() {
             Ok(response) => response,
+            // Unreachable while `http_status_as_error` is off, and kept deliberately:
+            // if that config is ever changed back, a status must not become a network
+            // error string.
             Err(ureq::Error::StatusCode(status)) => {
                 return Err(FetchError::HttpStatus(status));
             }
             Err(error) => return Err(FetchError::Network(error.to_string())),
         };
         let status = response.status().as_u16();
-        if !(200..300).contains(&status) {
-            return Err(FetchError::HttpStatus(status));
-        }
         let final_url = response
             .get_redirect_history()
             .and_then(|history| history.last())
@@ -71,6 +75,7 @@ impl Fetch for UreqFetch {
             })?;
         Ok(FetchResponse {
             final_url,
+            status,
             body,
             content_type,
         })
@@ -126,13 +131,31 @@ mod tests {
     }
 
     #[test]
-    fn http_errors_surface_as_status() {
-        let fetch = synthetic_fetch(404, Vec::new());
+    fn an_error_status_keeps_its_body_so_the_servers_own_page_can_render() {
+        // This used to assert `Err(FetchError::HttpStatus(404))`, which threw away the
+        // page the server sent. A browser renders it.
+        let fetch = synthetic_fetch(404, b"<h1>No such page</h1>".to_vec());
         let request = FetchRequest {
             url: Url::parse("https://example.com/missing").expect("url"),
         };
-        let result = fetch.fetch(&request);
-        assert_eq!(result, Err(FetchError::HttpStatus(404)));
+        let response = fetch
+            .fetch(&request)
+            .expect("a 404 is a response, not an error");
+        assert_eq!(response.status, 404);
+        assert_eq!(response.body, b"<h1>No such page</h1>");
+        assert!(!response.is_success(), "it is still not a successful load");
+    }
+
+    #[test]
+    fn a_success_status_is_reported_as_one() {
+        let fetch = synthetic_fetch(200, b"<p>ok</p>".to_vec());
+        let response = fetch
+            .fetch(&FetchRequest {
+                url: Url::parse("https://example.com/").expect("url"),
+            })
+            .expect("fetch");
+        assert_eq!(response.status, 200);
+        assert!(response.is_success());
     }
 
     #[test]

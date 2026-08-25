@@ -183,6 +183,8 @@ impl VgaApp {
             self.sync_cursor_icon();
         }
         if self.app.should_quit() {
+            // Before the pool's `Drop` can join a worker parked in the fetch timeout.
+            self.app.shutdown_net();
             return Tick {
                 quit: true,
                 redraw: false,
@@ -232,6 +234,7 @@ impl VgaApp {
         if self.failure.is_none() {
             self.failure = Some(error);
         }
+        self.app.shutdown_net();
         event_loop.exit();
     }
 
@@ -630,7 +633,12 @@ impl ApplicationHandler for VgaApp {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                // The window's own close button never reaches `should_quit`, so the
+                // pool has to be released here too or quitting waits on a parked worker.
+                self.app.shutdown_net();
+                event_loop.exit();
+            }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(key) = from_window_key(&event.logical_key, event.state, self.modifiers)

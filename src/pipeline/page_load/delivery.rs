@@ -152,6 +152,13 @@ impl PageLoad {
     }
 
     fn accepts_stylesheet_response(&self, response: &FetchResponse) -> bool {
+        // A 4xx/5xx body now reaches us instead of being discarded as an error. It is
+        // the server's error page, not a stylesheet — and because a missing or
+        // unparseable type defaults to CSS below, without this a 404 page would be
+        // parsed as CSS.
+        if !response.is_success() {
+            return false;
+        }
         let Some(content_type) = response.content_type.as_deref() else {
             return true;
         };

@@ -1,3 +1,4 @@
+use super::flow::MAX_BLOCK_DEPTH;
 use super::*;
 use crate::core::dom::ElementNs;
 use crate::core::style::{
@@ -38,6 +39,81 @@ fn nested_document(text: &str, depth: usize) -> (Document, StyleTree) {
     document.insert_text(Some(p), text);
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     (document, styles)
+}
+
+/// Plain nested `div`s with no inline style. `nested_document` gives every level a
+/// `style` attribute, which costs a declaration parse per element — fine at the depths
+/// the other cases use, ruinous at the depths the cap has to be proven against.
+fn deeply_nested_document(text: &str, depth: usize) -> (Document, StyleTree) {
+    let mut document = Document::new();
+    let body = document.insert_element(None, "body", ElementNs::Html, vec![]);
+    let mut parent = body;
+    for _ in 0..depth {
+        parent = document.insert_element(Some(parent), "div", ElementNs::Html, vec![]);
+    }
+    let p = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
+    document.insert_text(Some(p), text);
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    (document, styles)
+}
+
+/// The stack Windows gives the main thread. The 2026-08-23 launch overflow shipped
+/// because the test harness hands its threads 2+ MiB and nothing asserted the real
+/// limit, so a depth cap has to be proven under the tight budget, not the generous one.
+const MAIN_THREAD_STACK: usize = 1024 * 1024;
+
+#[test]
+fn nesting_past_the_cap_is_truncated_instead_of_overflowing_the_stack() {
+    // Taffy's block algorithm recurses, so nesting depth is stack depth. Measured on
+    // this stack, an uncapped debug build dies between 460 and 480 levels, so 5,000 is
+    // an order of magnitude past the cliff. A stack overflow aborts the process rather
+    // than failing an assertion, so a regression takes the whole run down — that is the
+    // intended signal.
+    //
+    // The depth is 5,000 rather than 100,000 because `Document::insert_element` is
+    // quadratic in depth (indextree's `checked_append` walks every ancestor to reject a
+    // cycle), which costs 49 s to build a 100,000-deep chain against 27 ms to lay it
+    // out. That is a real hang on a hostile page, but it is a DOM defect, not a layout
+    // one; this case is about the layout cap.
+    let handle = std::thread::Builder::new()
+        .stack_size(MAIN_THREAD_STACK)
+        .spawn(|| {
+            let (document, styles) = deeply_nested_document("deep", 5_000);
+            TaffyLayoutEngine.layout(&document, &styles, Size { cols: 80, rows: 24 })
+        })
+        .expect("spawn");
+    let tree = handle
+        .join()
+        .expect("a too-deep page must not abort layout");
+    assert!(
+        tree.limits.truncated_depth,
+        "the page was cut off, so the chrome has to be told"
+    );
+    assert!(
+        !tree.limits.engine_failed,
+        "truncating is a deliberate limit, not an engine failure"
+    );
+    assert!(
+        fragment_text(&tree).concat().contains("nesting too deep"),
+        "the truncation says so where it happened, got {:?}",
+        fragment_text(&tree)
+    );
+}
+
+#[test]
+fn nesting_within_the_cap_renders_whole() {
+    // `deeply_nested_document` adds a `body` above and a `p` below, so stay clear of
+    // the boundary rather than pinning the exact off-by-one.
+    let (document, styles) = deeply_nested_document("shallow", MAX_BLOCK_DEPTH - 8);
+    let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 80, rows: 24 });
+    assert!(
+        tree.limits.is_clear(),
+        "a page inside the cap is not degraded"
+    );
+    assert!(
+        fragment_text(&tree).contains(&"shallow"),
+        "its deepest text still renders"
+    );
 }
 
 fn covers(outer: LayoutRect, inner: LayoutRect) -> bool {
@@ -236,7 +312,11 @@ fn long_words_break_to_terminal_width_even_when_author_css_requests_normal_wrapp
 fn block_min_content_width_is_the_widest_unbreakable_word() {
     let (document, styles) = paragraph("small elephant ox");
     let flow = build_flow_tree(&document, &styles, 40);
-    let inline = flow.iter().find(|box_| !box_.inline.is_empty()).unwrap();
+    let inline = flow
+        .boxes
+        .iter()
+        .find(|box_| !box_.inline.is_empty())
+        .unwrap();
     assert_eq!(min_content_width(&inline.inline), "elephant".len());
 }
 
@@ -255,7 +335,11 @@ fn mixed_preformatted_whitespace_stays_in_its_unbreakable_segment() {
     document.insert_text(Some(p), "bb");
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     let flow = build_flow_tree(&document, &styles, 40);
-    let inline = flow.iter().find(|box_| !box_.inline.is_empty()).unwrap();
+    let inline = flow
+        .boxes
+        .iter()
+        .find(|box_| !box_.inline.is_empty())
+        .unwrap();
     assert_eq!(min_content_width(&inline.inline), 11);
 }
 
@@ -274,7 +358,11 @@ fn a_wrapping_tab_breaks_after_its_first_expanded_space() {
     document.insert_text(Some(p), "aa\tbb");
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     let flow = build_flow_tree(&document, &styles, 40);
-    let inline = flow.iter().find(|box_| !box_.inline.is_empty()).unwrap();
+    let inline = flow
+        .boxes
+        .iter()
+        .find(|box_| !box_.inline.is_empty())
+        .unwrap();
     assert_eq!(min_content_width(&inline.inline), 3);
 }
 

@@ -145,20 +145,26 @@ impl crate::app::net::Navigate for FakeHtmlNet {
         generation: u64,
         resource_id: crate::net::ResourceId,
         url: url::Url,
-    ) {
+    ) -> crate::net::Submitted {
         self.pending.lock().unwrap().push(crate::net::FetchPayload {
             tab_id,
             generation,
             resource_id,
             result: Ok(crate::net::FetchResponse {
                 final_url: url,
+                status: 200,
                 body: self.body.clone(),
                 content_type: Some("text/html".to_string()),
             }),
         });
+        crate::net::Submitted::Queued
     }
-    fn poll_result(&self) -> Option<crate::net::FetchPayload> {
-        self.pending.lock().unwrap().pop()
+    fn poll_result(&self) -> crate::net::FetchPoll {
+        self.pending
+            .lock()
+            .unwrap()
+            .pop()
+            .map_or(crate::net::FetchPoll::Empty, crate::net::FetchPoll::Ready)
     }
 }
 

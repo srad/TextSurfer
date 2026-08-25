@@ -15,7 +15,7 @@ use crate::app::startpage::start_page;
 use crate::core::event::{Key, KeyEvent, KeyModifiers};
 use crate::core::focus::Focus;
 use crate::core::geom::Size;
-use crate::net::{FetchError, FetchPayload, FetchResponse, ResourceId};
+use crate::net::{FetchError, FetchPayload, FetchPoll, FetchResponse, ResourceId, Submitted};
 use crate::paint::DisplayList;
 use crate::pipeline::page_load::STYLESHEET_DEADLINE;
 use crate::ui::keymap::Action;
@@ -54,25 +54,44 @@ impl FakeNet {
 }
 
 impl Navigate for FakeNet {
-    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) {
+    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) -> Submitted {
         self.submitted
             .lock()
             .unwrap()
             .push((generation, url.clone()));
+        // Types are declared, because this fake stands in for a real server and real
+        // servers declare them; the sniffing fallback has its own cases. A request for
+        // a stylesheet is answered with one, so a test that schedules an `@import` is
+        // not silently counting it as a failed resource.
+        let stylesheet = url.path().ends_with(".css");
         self.pending.lock().unwrap().push(FetchPayload {
             tab_id,
             generation,
             resource_id,
             result: Ok(FetchResponse {
                 final_url: url,
-                body: self.body.clone(),
-                content_type: None,
+                status: 200,
+                body: if stylesheet {
+                    Vec::new()
+                } else {
+                    self.body.clone()
+                },
+                content_type: Some(if stylesheet {
+                    "text/css".to_string()
+                } else {
+                    "text/html; charset=utf-8".to_string()
+                }),
             }),
         });
+        Submitted::Queued
     }
 
-    fn poll_result(&self) -> Option<FetchPayload> {
-        self.pending.lock().unwrap().pop()
+    fn poll_result(&self) -> FetchPoll {
+        self.pending
+            .lock()
+            .unwrap()
+            .pop()
+            .map_or(FetchPoll::Empty, FetchPoll::Ready)
     }
 }
 

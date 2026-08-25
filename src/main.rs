@@ -228,6 +228,8 @@ where
             draw(app, &damage)?;
         }
         if app.should_quit() {
+            // Before the pool's `Drop` can join a worker parked in the fetch timeout.
+            app.shutdown_net();
             return Ok(());
         }
         let current = now();

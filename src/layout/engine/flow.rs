@@ -13,6 +13,29 @@ use crate::layout::text_flow::{
 use super::tables::append_table_output;
 use super::{BoxTree, TextFragment};
 
+/// How deep a page may nest block boxes before the tree is cut off.
+///
+/// Taffy's block algorithm recurses (`compute_block_layout` → `compute_child_layout`),
+/// so nesting depth is stack depth and a hostile page could otherwise abort the
+/// process. Measured on a 1 MB stack — the size Windows gives the main thread — a
+/// debug build overflows between 460 and 480 levels, about 2.2 KB per level. 256
+/// keeps roughly half the budget in reserve for the frames layout runs beneath, and
+/// sits far above any real page: Wikipedia's article body nests around 40.
+///
+/// Nested tables and inline-flex atoms recurse through a different path and are
+/// bounded separately by `TableLimits::max_nesting`.
+pub(super) const MAX_BLOCK_DEPTH: usize = 256;
+
+/// Shown in place of the subtree that [`MAX_BLOCK_DEPTH`] cut off, so a truncated
+/// page says so where it happened instead of just ending.
+pub(super) const TRUNCATED_NOTICE: &str = "[nesting too deep to render]";
+
+/// What the tree builder produced, and whether it had to stop short.
+pub(super) struct FlowTree {
+    pub(super) boxes: Vec<FlowBox>,
+    pub(super) truncated: bool,
+}
+
 #[derive(Clone)]
 pub(super) struct FlowBox {
     pub(super) owner: Option<NodeId>,
@@ -111,7 +134,7 @@ pub(super) fn build_flow_tree(
     document: &Document,
     styles: &StyleTree,
     viewport_width: usize,
-) -> Vec<FlowBox> {
+) -> FlowTree {
     build_flow_tree_from(
         document,
         styles,
@@ -126,7 +149,7 @@ pub(super) fn build_flow_subtree(
     styles: &StyleTree,
     viewport_width: usize,
     root: NodeId,
-) -> Vec<FlowBox> {
+) -> FlowTree {
     build_flow_tree_from(document, styles, viewport_width, vec![root], Some(root))
 }
 
@@ -136,7 +159,7 @@ fn build_flow_tree_from(
     viewport_width: usize,
     roots: Vec<NodeId>,
     atomic_root: Option<NodeId>,
-) -> Vec<FlowBox> {
+) -> FlowTree {
     let mut flow = vec![FlowBox {
         owner: None,
         style: ComputedStyle {
@@ -151,6 +174,7 @@ fn build_flow_tree_from(
         marker: None,
     }];
     let mut tasks = vec![(0usize, None)];
+    let mut truncated = false;
     while let Some((flow_index, container)) = tasks.pop() {
         let depth = container.map(|_| flow[flow_index].depth + 1).unwrap_or(0);
         let inherited = InlineContext {
@@ -386,7 +410,22 @@ fn build_flow_tree_from(
                                     .cloned(),
                             });
                             children.push(child);
-                            nested_tasks.push((child, Some(node)));
+                            if context.depth >= MAX_BLOCK_DEPTH {
+                                // Stop here rather than hand Taffy a box tree deeper
+                                // than its recursion can survive. The box itself stays,
+                                // so the page keeps its shape down to the cut.
+                                truncated = true;
+                                flow[child].inline = vec![InlinePiece {
+                                    node,
+                                    text: TRUNCATED_NOTICE.to_string(),
+                                    white_space: style.white_space,
+                                    depth: context.depth,
+                                    style: style.cell_style(),
+                                    atom: None,
+                                }];
+                            } else {
+                                nested_tasks.push((child, Some(node)));
+                            }
                         } else if *ns == ElementNs::Html && name == "br" {
                             buffer.push(InlinePiece {
                                 node,
@@ -488,7 +527,10 @@ fn build_flow_tree_from(
         flow[flow_index].children = children;
         tasks.extend(nested_tasks.into_iter().rev());
     }
-    flow
+    FlowTree {
+        boxes: flow,
+        truncated,
+    }
 }
 
 fn push_children(

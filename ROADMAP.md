@@ -66,14 +66,14 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M1-B — Style, layout, paint | UA cascade, box model, whitespace, **styled paint seam**, link/hit lists, `--dump`, goldens + laws | (done — user smoke pending) |
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` features | (done — user smoke pending) |
 | M1-D — Layout completeness | Table layout, generated content + list markers, length units, presentational attributes, `text-align`, VGA-native bitmap typography | (done — user VGA smoke pending; terminal smoke deferred) |
-| M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (open) |
+| M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, start page, in-page search, forms, robustness | (in progress) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
 
-Test counts at the last green run (2026-08-25): **638 lib · 13 binary · 4 fetch-pipeline ·
-14 corpus · 35 golden** with the default VGA frontend, and **545 lib · 12 binary** with
+Test counts at the last green run (2026-08-25): **647 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 35 golden** with the default VGA frontend, and **554 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -90,6 +90,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 | M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
 | ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
 | M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage; link/hit rectangles are not clipped at paint time | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. The pointer path is no longer exposed to the clipping gap — M3 slice 1 bounds-checks a click against the visible content view before converting it — but paint still emits unclipped rectangles, so keyboard link navigation must not assume they are safe |
+| M2 | **Confirmed, not a candidate: `Document::insert_element` is quadratic in depth.** indextree 4.8.1's `checked_append` walks every ancestor to reject a cycle (`id.rs:714`), so building a 100,000-deep chain measured **49 s**, against 100 ms to cascade it and 27 ms to lay it out. A hostile page hangs in the parser long before M2's block-depth cap matters, and the 10 MiB body limit still allows millions of levels | Not fixable at the call site: indextree exposes no unchecked append (`append` just unwraps `checked_append`), and `insert_with_neighbors` is private. Needs either a parse-time depth limit — which would change html5lib corpus trees and must be weighed against conformance — or a different arena. The cycle check is provably unnecessary where `Document::append` calls it, since it always passes a node it just created detached |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
 | M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row; inline-precise hover adds roughly one linear-scanned hit region per text fragment | Put explicit resource ceilings, sparse-vs-dense evidence and indexed paint-order hit/activation resolution behind the perf gate |
 | Test infrastructure | `tree_dump` is recursive on untrusted depth; UI clipping walks scalar values rather than grapheme clusters | Add bounded-depth and emoji/ZWJ cases; these do not currently establish a product crash |
@@ -552,7 +553,13 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
 - **Acceptance:** the fixture set above green; manual smoke on a table-heavy page (Wikipedia infobox)
   is readable without horizontal guessing.
 
-### M2 — Tabs & keyboard navigation (open)
+### M2 — Tabs & keyboard navigation (in progress)
+
+Started 2026-08-25 from the robustness end rather than the keyboard end, because the failure paths
+are what the browser did worst: a server's 404 was discarded, a binary body was painted as garbage,
+and a deep page could abort the process. Render robustness and the non-2xx body are done; content-type
+sniffing and the rendered error pages are next, and the keyboard items after them.
+
 
 - [ ] Keymap unification (extends the M0 keymap tests, same file): `Ctrl+L` (+ existing `a`) focuses
       the address bar so `/` is freed; `/` becomes in-page search; `Tab` in the address bar moves
@@ -569,21 +576,38 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
 - [ ] In-page search: `/` opens a prompt (reuses EditBuffer), `n`/`N` next/prev with
       scroll-into-view, match highlight distinct from link focus, `x/y` counter, `Esc`/`Enter` closes.
 - [ ] **Rendered error pages** — DNS/fetch/non-2xx/unknown-scheme failures paint a readable in-content
-      error screen. Non-2xx responses must **keep the body** (`net/http.rs` currently discards it), so
-      a server's own 404 page can be rendered when it is HTML.
+      error screen. *Half landed 2026-08-25:* non-2xx responses now **keep the body**
+      (`http_status_as_error(false)` plus `FetchResponse::status`), so a server's own 404 page renders
+      when it is HTML and non-empty, with the status in the context bar; an error status with an
+      empty or unreadable body reports the status instead. `accepts_stylesheet_response` rejects any
+      non-2xx up front, so a 404 body can never be parsed as CSS. Still open: the failure screens are
+      the old three-line stub, and the unparseable-URL and unknown-scheme paths
+      (`navigation.rs`) still paint nothing at all — both need the real themed page.
 - [ ] **Content-type honesty** — a missing or unparseable `Content-Type` currently defaults to HTML,
       so a binary body is parsed and painted as garbage. Sniff (WHATWG minimum: leading `<`,
       BOM/NUL heuristics) and otherwise refuse with the unsupported-type page.
 - [ ] **Back/forward without refetching** — keep a small per-tab document cache keyed by history
       entry so Back/Forward restore instead of re-issuing a network request; the per-load pivot still
       applies to fresh navigations.
-- [ ] **Render robustness** — cap DOM depth for layout (Taffy block layout recurses; a deeply nested
-      hostile page can exhaust the stack) and replace the eight Taffy `expect()` calls in the render
-      path with a degraded box tree plus a status-bar message. Treat fetch-pool disconnection as a
-      controlled error instead of `None`, make duplicate resource submission observable instead of
-      silently dropped, and ensure quit never waits on parked fetchers. *Proof:* a 100k-deep
-      synthetic document renders a truncation notice instead of aborting; worker failure, duplicate
-      scheduling and quit-under-stall have deterministic tests.
+- [x] **Render robustness** *(done)* — block nesting is capped at `MAX_BLOCK_DEPTH = 256`, past which
+      the flow tree stops and paints `[nesting too deep to render]` where it cut off. The cap is
+      measured, not guessed: on the 1 MB stack Windows gives the main thread, an uncapped debug build
+      overflows between **460 and 480** levels (~2.2 KB per level), so 256 keeps about half the budget
+      for the frames layout runs beneath, and sits far above any real page. The eight Taffy `expect()`
+      calls became a degraded tree; `layout` cannot write the status bar, so `LayoutLimits` rides the
+      `BoxTree` and then the `DisplayList` — the route `parse_errors`/`css_warnings` already take, and
+      the one the resize repaint can still read. `FetchPool::try_recv` separates `Disconnected` from
+      `Empty` and every waiting tab is told; `submit` returns `Queued`/`Duplicate`/`Closed` and a
+      refused job no longer strands a tab on "loading"; all four quit paths — terminal loop, VGA tick,
+      the window's own close button and the VGA failure path — call `Navigate::shutdown`, which
+      detaches instead of joining. *Proven by*
+      `nesting_past_the_cap_is_truncated_instead_of_overflowing_the_stack` (driven on a deliberately
+      1 MB stack, and observed to abort with `STATUS_STACK_OVERFLOW` when the cap is raised),
+      `nesting_within_the_cap_renders_whole`, `a_pool_with_no_senders_left_reports_disconnected_not_empty`,
+      `a_submitted_job_reports_whether_the_pool_took_it`,
+      `detaching_a_parked_worker_returns_instead_of_joining_it`,
+      `a_lost_fetch_pool_tells_every_waiting_tab_instead_of_leaving_it_on_loading` and
+      `a_pool_that_refuses_the_job_does_not_leave_the_tab_loading_forever`.
 - [x] **Designed start page** *(done)* — `about:blank` is a viewport-aware ANSI-style scene with an
       exact 78×18 default canvas. Unicode half blocks provide two independently colored vertical
       pixels per terminal cell for the TextSurfer logo, surfer, sun, beach and palm; repeated
@@ -823,6 +847,39 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 ## Roadmap updates log
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
+
+- 2026-08-25 — **M2 started at the robustness end (user).** The slice is ordered
+  robustness → non-2xx bodies → content-type sniffing → rendered error pages, ahead of the keyboard
+  items, because failure was what the browser handled worst. The first two are delivered.
+  - **The block-depth cap is a measured number, not a guess.** Taffy's `compute_block_layout`
+    recurses through `compute_child_layout`, so nesting depth is stack depth. On the 1 MB stack
+    Windows gives the main thread, an uncapped debug build overflows between **460 and 480** levels
+    (~2.2 KB per level), so `MAX_BLOCK_DEPTH = 256` keeps roughly half the budget for the frames
+    layout runs beneath. Following the 2026-08-23 launch-overflow lesson, the test drives the real
+    path on a deliberately 1 MB stack, and was observed to abort with `STATUS_STACK_OVERFLOW` when
+    the cap is raised. Table and inline-flex nesting keep their separate `TableLimits` bound.
+  - **`layout` reports limits instead of writing the status bar.** It sits below `app`, so the new
+    `LayoutLimits` rides the `BoxTree` and then the `DisplayList` — chosen over `RenderedPage`
+    because the resize repaint (`viewport.rs`) paints straight from a stored document and never
+    builds one.
+  - **ureq pin unchanged at 3.4.0, configuration corrected.** The 2026-08-23 audit recorded only
+    that 4xx/5xx-as-error is the *default*; `ConfigBuilder::http_status_as_error(false)`
+    (`config.rs:435`) turns it off, and it governs error reporting only — redirect following and
+    `get_redirect_history` are unaffected. `FetchResponse` gained `status: u16`; non-HTTP fetchers
+    report 200.
+  - **A non-2xx body is content for the document and never for a subresource.** Keeping the body
+    exposed a real hole: `accepts_stylesheet_response` treats a missing or unparseable type as CSS,
+    so a 404 page would have been parsed as a stylesheet and its rules applied. Confirmed by
+    disabling the new status check and watching the test fail. Non-2xx policy: the status always
+    shows in the context bar, the body renders only when it is HTML and non-empty, and anything else
+    reports the status.
+  - **Found and not fixed: `Document::insert_element` is quadratic in depth** — recorded in the risk
+    register with its measurements. It is a parser-side hang that arrives before the layout cap can
+    matter, and indextree 4.8.1 offers no unchecked append, so it needs its own decision.
+  - No dependency changed. Format, strict default/all-feature/no-default Clippy and the
+    default/JS/VGA/no-default test matrix are green at 647 library, 13 binary, 6 fetch-pipeline, 14
+    corpus and 35 render-golden tests; 554 library and 12 binary without default features. No
+    snapshot changed and no `.snap.new` was produced.
 
 - 2026-08-25 — **M6 rendering work split into Flexbox, Grid and Floats.** Flexbox starts first on
   Taffy 0.14.0 with only its `flexbox` dependency feature. The slice includes height/min/max sizing,

@@ -5,7 +5,7 @@ use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 
-use super::fetch::{Fetch, FetchPayload, FetchRequest, ResourceId};
+use super::fetch::{Fetch, FetchPayload, FetchPoll, FetchRequest, ResourceId, Submitted};
 
 struct Job {
     tab_id: u64,
@@ -65,32 +65,35 @@ impl FetchPool {
         generation: u64,
         resource_id: ResourceId,
         request: FetchRequest,
-    ) {
-        if !self.shared.closed.load(Ordering::Acquire) {
-            let key = (tab_id, generation, resource_id);
-            if !self
-                .shared
-                .state
-                .lock()
-                .expect("pool job state lock")
-                .live
-                .insert(key)
-            {
-                return;
-            }
-            if self
-                .jobs
-                .send(Some(Job {
-                    tab_id,
-                    generation,
-                    resource_id,
-                    request,
-                }))
-                .is_err()
-            {
-                finish(&self.shared, tab_id, generation, resource_id);
-            }
+    ) -> Submitted {
+        if self.shared.closed.load(Ordering::Acquire) {
+            return Submitted::Closed;
         }
+        let key = (tab_id, generation, resource_id);
+        if !self
+            .shared
+            .state
+            .lock()
+            .expect("pool job state lock")
+            .live
+            .insert(key)
+        {
+            return Submitted::Duplicate;
+        }
+        if self
+            .jobs
+            .send(Some(Job {
+                tab_id,
+                generation,
+                resource_id,
+                request,
+            }))
+            .is_err()
+        {
+            finish(&self.shared, tab_id, generation, resource_id);
+            return Submitted::Closed;
+        }
+        Submitted::Queued
     }
 
     pub fn cancel(&self, tab_id: u64, generation: u64) {
@@ -108,11 +111,11 @@ impl FetchPool {
         }
     }
 
-    pub fn try_recv(&self) -> Option<FetchPayload> {
+    pub fn try_recv(&self) -> FetchPoll {
         match self.results.try_recv() {
-            Ok(payload) => Some(payload),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => None,
+            Ok(payload) => FetchPoll::Ready(payload),
+            Err(TryRecvError::Empty) => FetchPoll::Empty,
+            Err(TryRecvError::Disconnected) => FetchPoll::Disconnected,
         }
     }
 
@@ -193,6 +196,7 @@ mod tests {
     use crate::net::fetch::{FetchError, FetchResponse};
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
     use url::Url;
 
     const WORKERS: usize = 4;
@@ -215,6 +219,7 @@ mod tests {
             self.current.fetch_sub(1, Ordering::SeqCst);
             Ok(FetchResponse {
                 final_url: request.url.clone(),
+                status: 200,
                 body: vec![],
                 content_type: None,
             })
@@ -244,6 +249,7 @@ mod tests {
             }
             Ok(FetchResponse {
                 final_url: request.url.clone(),
+                status: 200,
                 body: vec![],
                 content_type: None,
             })
@@ -258,6 +264,7 @@ mod tests {
             }
             Ok(FetchResponse {
                 final_url: request.url.clone(),
+                status: 200,
                 body: vec![],
                 content_type: None,
             })
@@ -411,6 +418,86 @@ mod tests {
             .collect();
         assert_eq!(ids, HashSet::from([ResourceId(1), ResourceId(2)]));
         pool.shutdown();
+    }
+
+    #[test]
+    fn a_submitted_job_reports_whether_the_pool_took_it() {
+        let (first_started_tx, first_started_rx) = unbounded();
+        let (release_tx, release_rx) = unbounded();
+        let pool = FetchPool::spawn(
+            Arc::new(GateFirst {
+                first_started: first_started_tx,
+                first_release: release_rx,
+                observed: unbounded().0,
+            }),
+            1,
+        );
+        assert_eq!(
+            pool.submit(1, 2, ResourceId(3), url("/first")),
+            Submitted::Queued
+        );
+        first_started_rx.recv().expect("first job did not start");
+        assert_eq!(
+            pool.submit(1, 2, ResourceId(3), url("/duplicate")),
+            Submitted::Duplicate,
+            "a live key is coalesced, and the caller is told so instead of waiting \
+             for a payload that will never arrive"
+        );
+        release_tx.send(()).expect("release first sender");
+        assert_eq!(drain_n(&pool, 1)[0].resource_id, ResourceId(3));
+        pool.shutdown();
+        assert_eq!(
+            pool.submit(1, 9, ResourceId(4), url("/after-shutdown")),
+            Submitted::Closed
+        );
+    }
+
+    #[test]
+    fn a_pool_with_no_senders_left_reports_disconnected_not_empty() {
+        let pool = FetchPool::spawn(
+            Arc::new(Mixed {
+                hung_started: unbounded().0,
+                hung_release: unbounded().1,
+            }),
+            1,
+        );
+        assert_eq!(pool.try_recv(), FetchPoll::Empty);
+        pool.submit(0, 0, ResourceId::DOCUMENT, url("/one"));
+        let _ = drain_n(&pool, 1);
+        pool.shutdown();
+        assert_eq!(
+            pool.try_recv(),
+            FetchPoll::Disconnected,
+            "a dead pool must not look like an idle one"
+        );
+    }
+
+    #[test]
+    fn detaching_a_parked_worker_returns_instead_of_joining_it() {
+        let (first_started_tx, first_started_rx) = unbounded();
+        let (release_tx, release_rx) = unbounded();
+        let pool = FetchPool::spawn(
+            Arc::new(GateFirst {
+                first_started: first_started_tx,
+                first_release: release_rx,
+                observed: unbounded().0,
+            }),
+            1,
+        );
+        pool.submit(1, 1, ResourceId::DOCUMENT, url("/first"));
+        first_started_rx.recv().expect("first job did not start");
+        // The worker is parked exactly as one waiting out the 30 s fetch timeout is.
+        // `shutdown` would block here; the quit path must not.
+        let started = std::time::Instant::now();
+        pool.shutdown_without_waiting();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "quitting waited on a parked worker"
+        );
+        // `Drop` must not join it either, now that `closed` is already set.
+        drop(pool);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        release_tx.send(()).expect("release detached worker");
     }
 
     #[test]

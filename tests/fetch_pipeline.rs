@@ -6,7 +6,8 @@ use std::time::Duration;
 use textsurfer::app::App;
 use textsurfer::app::net::Navigate;
 use textsurfer::net::{
-    Fetch, FetchError, FetchPayload, FetchRequest, FetchResponse, ResourceId, SchemeFetch,
+    Fetch, FetchError, FetchPayload, FetchPoll, FetchRequest, FetchResponse, ResourceId,
+    SchemeFetch, Submitted,
 };
 
 const BODY: &str = "<!doctype html><title>smoke</title><p>acceptance</p>";
@@ -15,11 +16,30 @@ struct FixtureFetch;
 
 impl Fetch for FixtureFetch {
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
+        // A gone page that sends its own HTML, the way a real server does, and a
+        // gone page that sends nothing at all.
         if request.url.path() == "/gone" {
-            return Err(FetchError::HttpStatus(410));
+            return Ok(FetchResponse {
+                final_url: request.url.clone(),
+                status: 410,
+                body: b"<h1>This page is gone</h1>".to_vec(),
+                content_type: Some("text/html; charset=utf-8".to_string()),
+            });
+        }
+        if request.url.path() == "/gone-silently" {
+            return Ok(FetchResponse {
+                final_url: request.url.clone(),
+                status: 410,
+                body: Vec::new(),
+                content_type: None,
+            });
+        }
+        if request.url.path() == "/unreachable" {
+            return Err(FetchError::Network("name not resolved".to_string()));
         }
         Ok(FetchResponse {
             final_url: request.url.clone(),
+            status: 200,
             body: BODY.as_bytes().to_vec(),
             content_type: Some("text/html; charset=utf-8".to_string()),
         })
@@ -42,6 +62,7 @@ impl Fetch for ExternalStyleFetch {
         };
         Ok(FetchResponse {
             final_url: request.url.clone(),
+            status: 200,
             body,
             content_type: Some(content_type.to_string()),
         })
@@ -54,7 +75,13 @@ struct ImmediateNet {
 }
 
 impl Navigate for ImmediateNet {
-    fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: url::Url) {
+    fn submit(
+        &self,
+        tab_id: u64,
+        generation: u64,
+        resource_id: ResourceId,
+        url: url::Url,
+    ) -> Submitted {
         let result = self.fetch.fetch(&FetchRequest { url });
         self.pending
             .lock()
@@ -65,13 +92,15 @@ impl Navigate for ImmediateNet {
                 resource_id,
                 result,
             });
+        Submitted::Queued
     }
 
-    fn poll_result(&self) -> Option<FetchPayload> {
+    fn poll_result(&self) -> FetchPoll {
         self.pending
             .lock()
             .expect("immediate result lock")
             .pop_front()
+            .map_or(FetchPoll::Empty, FetchPoll::Ready)
     }
 }
 
@@ -125,9 +154,54 @@ fn composed_pipeline_routes_file_urls_through_the_file_fetch_boundary() {
 }
 
 #[test]
-fn composed_pipeline_renders_fetch_errors_as_a_page() {
+fn composed_pipeline_renders_the_servers_own_error_page() {
+    // This used to assert a "failed to load" stub, because the 410's body was thrown
+    // away before it reached the renderer. A browser shows the page the server sent.
     let mut app = app_with_fixture_fetch();
     app.submit_url("https://example.com/gone");
+    deliver(&mut app);
+    assert!(
+        app.chrome_view()
+            .content
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("This page is gone")),
+        "the server's own body renders, got {:?}",
+        app.chrome_view().content.painted.text_lines()
+    );
+    assert!(
+        app.message().contains("HTTP 410"),
+        "and the reader is still told it is an error, got {:?}",
+        app.message()
+    );
+}
+
+#[test]
+fn composed_pipeline_reports_an_error_status_with_no_body() {
+    let mut app = app_with_fixture_fetch();
+    app.submit_url("https://example.com/gone-silently");
+    deliver(&mut app);
+    assert!(
+        app.chrome_view()
+            .content
+            .painted
+            .text_lines()
+            .first()
+            .is_some_and(|line| line.starts_with("failed to load")),
+        "nothing renderable arrived, so the reader gets an explanation"
+    );
+    assert!(
+        app.message().contains("HTTP 410"),
+        "got {:?}",
+        app.message()
+    );
+}
+
+#[test]
+fn composed_pipeline_reports_a_transport_failure() {
+    let mut app = app_with_fixture_fetch();
+    app.submit_url("https://example.com/unreachable");
     deliver(&mut app);
     assert!(
         app.chrome_view()
@@ -137,7 +211,11 @@ fn composed_pipeline_renders_fetch_errors_as_a_page() {
             .first()
             .is_some_and(|line| line.starts_with("failed to load"))
     );
-    assert!(app.message().contains("http status 410"));
+    assert!(
+        app.message().contains("name not resolved"),
+        "got {:?}",
+        app.message()
+    );
 }
 
 #[test]

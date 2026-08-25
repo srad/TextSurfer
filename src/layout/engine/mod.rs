@@ -22,8 +22,8 @@ use crate::layout::text_flow::{
 };
 
 use flow::{
-    AtomicLayout, FlowBox, InlineAtom, InlineAtomSource, ResolvedInlinePiece, append_inline,
-    build_flow_subtree, build_flow_tree,
+    AtomicLayout, FlowBox, FlowTree, InlineAtom, InlineAtomSource, ResolvedInlinePiece,
+    append_inline, build_flow_subtree, build_flow_tree,
 };
 use links::{assign_link_rects, collect_links};
 use tables::append_table_output;
@@ -38,6 +38,25 @@ pub struct BoxTree {
     pub fills: Vec<BackgroundFill>,
     pub strokes: Vec<BorderStroke>,
     pub links: Vec<LinkBox>,
+    pub limits: LayoutLimits,
+}
+
+/// Ways a page can outgrow what the engine will do for it. `layout` sits below `app`
+/// and cannot write the status bar, so it reports here and the caller says so — the
+/// same route `parse_errors` and `css_warnings` already take.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LayoutLimits {
+    /// Nesting passed [`MAX_BLOCK_DEPTH`], so boxes below the cap were not built.
+    pub truncated_depth: bool,
+    /// Taffy refused a node or a layout. Nothing in the current tree builder should
+    /// produce this; it exists so a broken invariant degrades instead of aborting.
+    pub engine_failed: bool,
+}
+
+impl LayoutLimits {
+    pub fn is_clear(self) -> bool {
+        !self.truncated_depth && !self.engine_failed
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -141,7 +160,45 @@ enum MeasureWidth {
     Definite(usize),
 }
 
+/// Lay a flow tree out, degrading instead of aborting if Taffy refuses.
+///
+/// Taffy owns block and flex geometry and every `None` below is one of its
+/// invariants — a node id we just created, a layout for a node we just computed.
+/// They are not reachable from any page we can build today, but a browser must not
+/// turn a broken invariant into a dead process, so the failure becomes an empty tree
+/// carrying [`LayoutLimits::engine_failed`] and the status bar says so.
 fn layout_flow(
+    document: &Document,
+    styles: &StyleTree,
+    viewport_width: usize,
+    flow: FlowTree,
+    root_index: usize,
+    available_width: AvailableSpace,
+    nesting: usize,
+) -> BoxTree {
+    let truncated_depth = flow.truncated;
+    let mut tree = try_layout_flow(
+        document,
+        styles,
+        viewport_width,
+        flow.boxes,
+        root_index,
+        available_width,
+        nesting,
+    )
+    .unwrap_or_else(|| BoxTree {
+        width: viewport_width,
+        limits: LayoutLimits {
+            engine_failed: true,
+            ..LayoutLimits::default()
+        },
+        ..BoxTree::default()
+    });
+    tree.limits.truncated_depth |= truncated_depth;
+    tree
+}
+
+fn try_layout_flow(
     document: &Document,
     styles: &StyleTree,
     viewport_width: usize,
@@ -149,7 +206,7 @@ fn layout_flow(
     root_index: usize,
     available_width: AvailableSpace,
     nesting: usize,
-) -> BoxTree {
+) -> Option<BoxTree> {
     let parent_direction = prepare_flow(&mut flow);
     let mut taffy: TaffyTree<usize> = TaffyTree::new();
     let mut taffy_nodes = vec![None; flow.len()];
@@ -161,22 +218,18 @@ fn layout_flow(
             parent_direction[index],
         );
         let node = if !flow[index].inline.is_empty() || flow[index].table.is_some() {
-            taffy
-                .new_leaf_with_context(style, index)
-                .expect("taffy measured leaf")
+            taffy.new_leaf_with_context(style, index).ok()?
         } else {
             let children: Vec<_> = flow[index]
                 .children
                 .iter()
-                .map(|child| taffy_nodes[*child].expect("taffy child"))
-                .collect();
-            taffy
-                .new_with_children(style, &children)
-                .expect("taffy container")
+                .map(|child| taffy_nodes[*child])
+                .collect::<Option<Vec<_>>>()?;
+            taffy.new_with_children(style, &children).ok()?
         };
         taffy_nodes[index] = Some(node);
     }
-    let root = taffy_nodes[root_index].expect("taffy root");
+    let root = taffy_nodes[root_index]?;
     let mut table_cache = HashMap::new();
     let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
     taffy
@@ -257,9 +310,9 @@ fn layout_flow(
                 output
             },
         )
-        .expect("taffy layout");
+        .ok()?;
 
-    let root_layout = *taffy.layout(root).expect("root layout");
+    let root_layout = *taffy.layout(root).ok()?;
     let mut tree = BoxTree {
         width: root_layout.size.width.max(0.0).round() as usize,
         height: root_layout.size.height.max(0.0).round() as usize,
@@ -267,8 +320,8 @@ fn layout_flow(
     };
     let mut stack = vec![(root_index, 0.0f32, 0.0f32)];
     while let Some((index, parent_col, parent_row)) = stack.pop() {
-        let node = taffy_nodes[index].expect("taffy node");
-        let layout = *taffy.layout(node).expect("node layout");
+        let node = taffy_nodes[index]?;
+        let layout = *taffy.layout(node).ok()?;
         let absolute_col = parent_col + layout.location.x;
         let absolute_row = parent_row + layout.location.y;
         if let Some(table) = flow[index].table {
@@ -387,7 +440,7 @@ fn layout_flow(
     tree.boxes.sort_by_key(|layout_box| layout_box.depth);
     tree.fragments
         .sort_by_key(|fragment| (fragment.row, fragment.col, fragment.depth));
-    tree
+    Some(tree)
 }
 
 fn prepare_flow(flow: &mut [FlowBox]) -> Vec<Option<FlexDirection>> {
@@ -466,7 +519,7 @@ fn resolve_inline(
                     ) && nesting < TableLimits::default().max_nesting =>
                 {
                     let flow = build_flow_subtree(document, styles, viewport_width, *node);
-                    let root = flow[0].children.first().copied().unwrap_or(0);
+                    let root = flow.boxes[0].children.first().copied().unwrap_or(0);
                     let width = match measure {
                         MeasureWidth::MinContent => AvailableSpace::MinContent,
                         MeasureWidth::MaxContent => AvailableSpace::MaxContent,

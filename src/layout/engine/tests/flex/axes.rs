@@ -282,7 +282,11 @@ fn taffy_alignment_mapping_preserves_safety_and_physical_fallbacks() {
         let sheet = CssparserParser.parse(&format!("main {{ display:flex;{declarations} }}"));
         let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
         let flow = crate::layout::engine::flow::build_flow_tree(&document, &styles, 20);
-        let container = flow.iter().find(|flow| flow.owner == Some(root)).unwrap();
+        let container = flow
+            .boxes
+            .iter()
+            .find(|flow| flow.owner == Some(root))
+            .unwrap();
         crate::layout::engine::taffy_style::taffy_style(container, false, 20, None)
     }
 

@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::NodeId;
 use crate::core::style::{CellStyle, Palette};
-use crate::layout::{BoxTree, LayoutRect};
+use crate::layout::{BoxTree, LayoutLimits, LayoutRect};
 
 use row::{RowBuffer, fill_background};
 use strokes::draw_strokes;
@@ -25,6 +25,10 @@ pub struct DisplayList {
     pub hit_rows: BTreeMap<usize, Vec<usize>>,
     pub links: Vec<PaintedLink>,
     pub scaled_text: Vec<ScaledTextRun>,
+    /// Carried through from layout so the chrome can say what the page did not get.
+    /// It rides the display list rather than `RenderedPage` because the resize path
+    /// repaints straight from a stored document and never builds one.
+    pub limits: LayoutLimits,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -302,6 +306,7 @@ impl Painter for BasicPainter {
             hit_rows,
             links,
             scaled_text,
+            limits: box_tree.limits,
         }
     }
 }

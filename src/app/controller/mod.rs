@@ -55,6 +55,7 @@ pub struct App {
     dynamic_pending: bool,
     pending_resize: Option<(Size, Duration)>,
     dynamic_settle: Option<Duration>,
+    net_lost: bool,
 }
 
 impl Default for App {
@@ -101,11 +102,18 @@ impl App {
             dynamic_pending: false,
             pending_resize: None,
             dynamic_settle: None,
+            net_lost: false,
         }
     }
 
     pub fn should_quit(&self) -> bool {
         self.quit
+    }
+
+    /// Release the fetch pool without joining it. A worker parked in the 30 s fetch
+    /// timeout would otherwise hold the process open through `FetchPool::drop`.
+    pub fn shutdown_net(&self) {
+        self.net.shutdown();
     }
 
     pub fn take_dirty(&mut self) -> bool {
