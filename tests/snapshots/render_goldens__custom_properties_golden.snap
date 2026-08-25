@@ -1,0 +1,7 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"variables.html\")"
+---
+Variable:   
+Alpha Beta  
+Gamma

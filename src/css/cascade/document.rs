@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use unicode_width::UnicodeWidthStr;
 
@@ -12,12 +13,13 @@ use crate::css::parser::{StyleRule, parse_declarations};
 use crate::css::presentational::presentational_hints;
 use crate::css::selectors::{BucketKey, MatchTarget, bucket_keys, matching_specificity};
 use crate::css::ua::{UaContext, inline_style, ua_style};
+use crate::css::variables::{Environment, contains_var, derive_environment, is_custom_name};
 
 use super::content::{ContentSpec, default_marker_text, parse_content, resolve_content};
-use super::counters::{AuthoredCounterOps, CounterScopes};
-use super::declaration::apply_declaration;
+use super::counters::{AuthoredCounterOps, CounterScopes, parse_counter_values};
+use super::declaration::{apply_declaration, declaration_value_is_valid};
 use super::media::{MediaContext, active_style_rules};
-use super::typography::apply_font_size;
+use super::typography::{apply_font_size, font_size_value_is_valid};
 
 pub(super) fn cascade_document(
     sheets: &[StyleSheet],
@@ -32,6 +34,8 @@ pub(super) fn cascade_document(
     let mut markers: Vec<PendingMarker> = Vec::new();
     let mut hidden_depth: Option<usize> = None;
     let mut root_font_size = media.root_font_size;
+    let root_environment = Environment::root();
+    let mut environments: HashMap<NodeId, Rc<Environment>> = HashMap::new();
     for (id, depth) in elements_in_document_order(document) {
         counters.enter(depth);
         if hidden_depth.is_some_and(|hidden| depth <= hidden) {
@@ -47,6 +51,7 @@ pub(super) fn cascade_document(
                 state: media.state,
             },
         );
+        let ua_baseline = style;
         let mut declarations = Vec::new();
         let mut order = 0usize;
         for declaration in presentational_hints(document, id) {
@@ -85,10 +90,33 @@ pub(super) fn cascade_document(
         }
         declarations
             .sort_by_key(|(important, specificity, order, _)| (*important, *specificity, *order));
+        let parent_environment = document
+            .parent(id)
+            .and_then(|parent| environments.get(&parent))
+            .cloned()
+            .unwrap_or_else(|| root_environment.clone());
+        let custom_winners = declarations
+            .iter()
+            .filter(|(_, _, _, declaration)| is_custom_name(&declaration.name))
+            .map(|(_, _, _, declaration)| (declaration.name.clone(), declaration.value.clone()))
+            .collect();
+        let environment = derive_environment(parent_environment, custom_winners);
+        environments.insert(id, environment.clone());
+        let declarations = resolve_declarations(
+            declarations,
+            &environment,
+            parent_style,
+            ua_baseline,
+            media.with_font_sizes(
+                parent_style.map_or(root_font_size, |parent| parent.font_size),
+                root_font_size,
+            ),
+        );
         for (_, _, _, declaration) in &declarations {
             apply_font_size(
                 &mut style,
                 parent_style,
+                ua_baseline,
                 declaration,
                 media.with_font_sizes(
                     parent_style.map_or(root_font_size, |parent| parent.font_size),
@@ -103,7 +131,13 @@ pub(super) fn cascade_document(
         let element_media = media.with_font_sizes(style.font_size, root_font_size);
         let mut authored_counters = AuthoredCounterOps::default();
         for (_, _, _, declaration) in declarations {
-            apply_declaration(&mut style, parent_style, &declaration, element_media);
+            apply_declaration(
+                &mut style,
+                parent_style,
+                ua_baseline,
+                &declaration,
+                element_media,
+            );
             authored_counters.apply(&declaration);
         }
         style.overflow = style.overflow.computed();
@@ -144,6 +178,7 @@ pub(super) fn cascade_document(
                 &counters,
                 None,
                 pseudo_is_flex_item(document, &tree, id, style),
+                environment.clone(),
             ) {
                 tree.insert_pseudo(id, which, pseudo);
             }
@@ -161,6 +196,7 @@ pub(super) fn cascade_document(
                 &counters,
                 fallback,
                 false,
+                environment.clone(),
             ) {
                 markers.push(PendingMarker {
                     node: id,
@@ -221,6 +257,7 @@ fn cascade_pseudo(
     counters: &CounterScopes,
     fallback: Option<String>,
     flex_item: bool,
+    origin_environment: Rc<Environment>,
 ) -> Option<PseudoBox> {
     let mut declarations = Vec::new();
     let mut order = 0usize;
@@ -273,15 +310,35 @@ fn cascade_pseudo(
         legacy_align: origin.legacy_align,
         ..Default::default()
     };
+    let ua_baseline = inherited;
+    let custom_winners = declarations
+        .iter()
+        .filter(|(_, _, _, declaration)| is_custom_name(&declaration.name))
+        .map(|(_, _, _, declaration)| (declaration.name.clone(), declaration.value.clone()))
+        .collect();
+    let environment = derive_environment(origin_environment, custom_winners);
+    let declarations = resolve_declarations(
+        declarations,
+        &environment,
+        Some(inherited),
+        ua_baseline,
+        media,
+    );
     let mut style = inherited;
     let mut content = None;
     for (_, _, _, declaration) in &declarations {
-        apply_font_size(&mut style, Some(inherited), declaration, media);
+        apply_font_size(&mut style, Some(inherited), ua_baseline, declaration, media);
     }
     style.text_presentation = style.font_size.presentation(media.text_rendering);
     let pseudo_media = media.with_font_sizes(style.font_size, media.root_font_size);
     for (_, _, _, declaration) in declarations {
-        apply_declaration(&mut style, Some(inherited), &declaration, pseudo_media);
+        apply_declaration(
+            &mut style,
+            Some(inherited),
+            ua_baseline,
+            &declaration,
+            pseudo_media,
+        );
         if declaration.name == "content"
             && let Some(spec) = parse_content(&declaration.value)
         {
@@ -306,6 +363,65 @@ fn cascade_pseudo(
         return None;
     }
     Some(PseudoBox { text, style })
+}
+
+fn resolve_declarations(
+    declarations: Vec<(bool, u32, usize, crate::css::Declaration)>,
+    environment: &Environment,
+    parent_style: Option<ComputedStyle>,
+    ua_style: ComputedStyle,
+    media: MediaContext,
+) -> Vec<(bool, u32, usize, crate::css::Declaration)> {
+    declarations
+        .into_iter()
+        .filter_map(|(important, specificity, order, mut declaration)| {
+            if is_custom_name(&declaration.name) {
+                return None;
+            }
+            if contains_var(&declaration.value) {
+                declaration.value = match environment.substitute(&declaration.value) {
+                    Ok(value)
+                        if computed_value_is_valid(
+                            &declaration.name,
+                            &value,
+                            parent_style,
+                            ua_style,
+                            media,
+                        ) =>
+                    {
+                        value
+                    }
+                    Ok(_) | Err(()) => "unset".to_string(),
+                };
+            }
+            Some((important, specificity, order, declaration))
+        })
+        .collect()
+}
+
+fn computed_value_is_valid(
+    property: &str,
+    value: &str,
+    parent_style: Option<ComputedStyle>,
+    ua_style: ComputedStyle,
+    media: MediaContext,
+) -> bool {
+    match property {
+        "font-size" => font_size_value_is_valid(value, media),
+        "content" => parse_content(value).is_some(),
+        "counter-reset" | "counter-set" => parse_counter_values(value, 0).is_some(),
+        "counter-increment" => parse_counter_values(value, 1).is_some(),
+        _ => declaration_value_is_valid(
+            parent_style,
+            ua_style,
+            &crate::css::Declaration {
+                name: property.to_string(),
+                value: value.to_string(),
+                important: false,
+            },
+            media,
+        ),
+    }
 }
 
 fn computed_display(

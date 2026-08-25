@@ -4,6 +4,7 @@ mod presentational;
 mod selectors;
 mod ua;
 mod values;
+mod variables;
 
 pub use cascade::{BasicCascade, Cascade, MediaContext};
 pub use parser::{

@@ -4,6 +4,9 @@ use cssparser::{
 };
 
 use super::ast::Declaration;
+use crate::css::variables::{
+    contains_var, is_custom_name, trim_css_whitespace, validate_declaration_value,
+};
 
 pub fn parse_declarations(source: &str) -> Vec<Declaration> {
     let mut input = cssparser::ParserInput::new(source);
@@ -32,6 +35,10 @@ impl<'i> DeclarationParser<'i> for DeclarationListParser {
         input: &mut Parser<'i, 't>,
         _declaration_start: &ParserState,
     ) -> Result<Self::Declaration, ParseError<'i, Self::Error>> {
+        let custom = name.starts_with("--");
+        if custom && !is_custom_name(&name) {
+            return Err(input.new_custom_error(()));
+        }
         let value_start = input.position();
         let mut important = false;
         let value_end = loop {
@@ -63,9 +70,22 @@ impl<'i> DeclarationParser<'i> for DeclarationListParser {
                 Err(_) => break input.position(),
             }
         };
+        let raw_value = input.slice(value_start..value_end);
+        let value = if custom {
+            trim_css_whitespace(raw_value)
+        } else {
+            raw_value.trim()
+        };
+        if (custom || contains_var(value)) && !validate_declaration_value(value, custom) {
+            return Err(input.new_custom_error(()));
+        }
         Ok(Declaration {
-            name: name.to_ascii_lowercase(),
-            value: input.slice(value_start..value_end).trim().to_string(),
+            name: if custom {
+                name.to_string()
+            } else {
+                name.to_ascii_lowercase()
+            },
+            value: value.to_string(),
             important,
         })
     }

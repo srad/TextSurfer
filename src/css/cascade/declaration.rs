@@ -17,9 +17,36 @@ use crate::css::values::{
     parse_list_style_type, parse_size, parse_text_decoration,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ApplyOutcome {
+    Applied,
+    Invalid,
+    Unsupported,
+}
+
 pub(super) fn apply_declaration(
     style: &mut ComputedStyle,
     parent_style: Option<ComputedStyle>,
+    ua_style: ComputedStyle,
+    declaration: &Declaration,
+    media: MediaContext,
+) -> ApplyOutcome {
+    if declaration.name == "font-size" || !is_supported_property(&declaration.name) {
+        return ApplyOutcome::Unsupported;
+    }
+    let before = *style;
+    apply_declaration_raw(style, parent_style, ua_style, declaration, media);
+    if *style != before || declaration_value_is_valid(parent_style, ua_style, declaration, media) {
+        ApplyOutcome::Applied
+    } else {
+        ApplyOutcome::Invalid
+    }
+}
+
+fn apply_declaration_raw(
+    style: &mut ComputedStyle,
+    parent_style: Option<ComputedStyle>,
+    ua_style: ComputedStyle,
     declaration: &Declaration,
     media: MediaContext,
 ) {
@@ -28,9 +55,9 @@ pub(super) fn apply_declaration(
     }
     let (font_px, root_font_px) = media.layout_font_sizes();
     if let Some(keyword) = parse_ident(&declaration.value)
-        && matches!(keyword.as_str(), "initial" | "inherit" | "unset")
+        && matches!(keyword.as_str(), "initial" | "inherit" | "unset" | "revert")
     {
-        apply_css_wide(style, parent_style, &declaration.name, &keyword);
+        apply_css_wide(style, parent_style, ua_style, &declaration.name, &keyword);
         return;
     }
     if apply_flex_declaration(style, &declaration.name, &declaration.value, media) {
@@ -406,15 +433,129 @@ pub(super) fn apply_declaration(
     }
 }
 
+pub(super) fn declaration_value_is_valid(
+    parent_style: Option<ComputedStyle>,
+    ua_style: ComputedStyle,
+    declaration: &Declaration,
+    media: MediaContext,
+) -> bool {
+    if parse_ident(&declaration.value).is_some_and(|keyword| {
+        matches!(keyword.as_str(), "initial" | "inherit" | "unset" | "revert")
+    }) {
+        return true;
+    }
+    let mut probes = [
+        ComputedStyle::default(),
+        ua_style,
+        parent_style.unwrap_or_default(),
+    ];
+    probes.iter_mut().any(|probe| {
+        let before = *probe;
+        apply_declaration_raw(probe, parent_style, ua_style, declaration, media);
+        *probe != before
+    })
+}
+
+fn is_supported_property(property: &str) -> bool {
+    matches!(
+        property,
+        "display"
+            | "overflow"
+            | "overflow-x"
+            | "overflow-y"
+            | "visibility"
+            | "position"
+            | "inset"
+            | "top"
+            | "right"
+            | "bottom"
+            | "left"
+            | "white-space"
+            | "cursor"
+            | "text-align"
+            | "-textsurfer-legacy-align"
+            | "vertical-align"
+            | "width"
+            | "height"
+            | "min-width"
+            | "min-height"
+            | "max-width"
+            | "max-height"
+            | "box-sizing"
+            | "margin"
+            | "padding"
+            | "margin-top"
+            | "margin-right"
+            | "margin-bottom"
+            | "margin-left"
+            | "padding-top"
+            | "padding-right"
+            | "padding-bottom"
+            | "padding-left"
+            | "border"
+            | "border-top"
+            | "border-right"
+            | "border-bottom"
+            | "border-left"
+            | "color"
+            | "background-color"
+            | "background"
+            | "font-weight"
+            | "text-decoration"
+            | "text-decoration-line"
+            | "border-style"
+            | "border-top-style"
+            | "border-right-style"
+            | "border-bottom-style"
+            | "border-left-style"
+            | "border-width"
+            | "border-top-width"
+            | "border-right-width"
+            | "border-bottom-width"
+            | "border-left-width"
+            | "border-color"
+            | "border-top-color"
+            | "border-right-color"
+            | "border-bottom-color"
+            | "border-left-color"
+            | "table-layout"
+            | "border-collapse"
+            | "border-spacing"
+            | "caption-side"
+            | "list-style-type"
+            | "list-style-position"
+            | "list-style"
+            | "flex-direction"
+            | "flex-wrap"
+            | "flex-flow"
+            | "flex-grow"
+            | "flex-shrink"
+            | "flex-basis"
+            | "flex"
+            | "order"
+            | "justify-content"
+            | "align-items"
+            | "align-self"
+            | "align-content"
+            | "row-gap"
+            | "column-gap"
+            | "gap"
+            | "place-content"
+    )
+}
+
 fn apply_css_wide(
     style: &mut ComputedStyle,
     parent_style: Option<ComputedStyle>,
+    ua_style: ComputedStyle,
     property: &str,
     keyword: &str,
 ) {
     let initial = ComputedStyle::default();
     let inherited = parent_style.unwrap_or_default();
-    let source = if keyword == "inherit" || (keyword == "unset" && is_inherited(property)) {
+    let source = if keyword == "revert" {
+        ua_style
+    } else if keyword == "inherit" || (keyword == "unset" && is_inherited(property)) {
         inherited
     } else {
         initial
@@ -437,6 +578,7 @@ fn apply_css_wide(
             style.text_align = source.text_align;
             style.legacy_align = source.legacy_align;
         }
+        "-textsurfer-legacy-align" => style.legacy_align = source.legacy_align,
         "vertical-align" => style.vertical_align = source.vertical_align,
         "color" => style.color = source.color,
         "background-color" | "background" => style.background = source.background,

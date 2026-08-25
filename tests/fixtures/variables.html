@@ -1,0 +1,7 @@
+<!doctype html>
+<style>
+body { margin: 0; --accent: #00ff00; --card-width: 12ch; --label: "Variable: " }
+#card { display: block; width: var(--card-width); color: var(--accent); background: #000000 }
+#card::before { content: var(--label) }
+</style>
+<div id="card">Alpha Beta Gamma</div>

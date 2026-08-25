@@ -89,6 +89,12 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   clips paint and hit geometry at nested padding boxes, `visibility` preserves layout while
   suppressing hidden descendants, and relative/absolute/fixed positioning uses signed insets
   without letting out-of-flow boxes inflate document height
+- CSS custom properties use stable Level 1 `var()` semantics across inline, embedded, imported and
+  media-selected declarations: case-sensitive inherited variables, nested and empty fallbacks,
+  dependency-cycle invalidation and token-safe substitution feed typography, box/flex properties,
+  counters and generated content. Invalid computed values become `unset`, custom values are bounded,
+  and dynamic pseudo-class restyles rebuild the variable environment without exposing it through the
+  public computed-style tree
 - Generated content and list-marker support: `::before`, `::after` and `::marker` match, `content`
   supports strings, `counter()`, `counters()` and `attr()`, and CSS counters run over a depth-scoped
   stack. Ordered lists number, nested lists number independently, and `list-style-type` covers
@@ -134,9 +140,10 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the rest of mouse support —
-live `:hover`/`:focus` styling and its theme states (M3 slice 2) — then keyboard links, forms and
-in-page search (M2), and the JavaScript seam/Boa integration (M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): CSS math
+(`calc()`/`min()`/`max()`/`clamp()`) is the next website-rendering slice so real-world variable-driven
+dimensions can reach layout, followed by Grid. Product work continues with keyboard links, forms and
+in-page search (M2), then the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 

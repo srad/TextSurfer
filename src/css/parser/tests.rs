@@ -17,6 +17,46 @@ fn parses_selector_rules_and_declarations() {
 }
 
 #[test]
+fn custom_declaration_names_are_case_sensitive_and_reserved_dash_dash_is_rejected() {
+    let declarations = parse_declarations(
+        "--Tone: red; --tone: blue; --: nope; COLOR: var(--Tone); --caf\\e9: green",
+    );
+    assert_eq!(
+        declarations
+            .iter()
+            .map(|declaration| declaration.name.as_str())
+            .collect::<Vec<_>>(),
+        ["--Tone", "--tone", "color", "--café"]
+    );
+}
+
+#[test]
+fn custom_values_preserve_source_and_strip_only_css_edges_and_important() {
+    let declarations = parse_declarations(
+        "--empty: ; --raw:\t Red/**/\\62 lue \r\n!important; --nbsp:\u{a0}x\u{a0}",
+    );
+    assert_eq!(declarations[0].value, "");
+    assert_eq!(declarations[1].value, "Red/**/\\62 lue");
+    assert!(declarations[1].important);
+    assert_eq!(declarations[2].value, "\u{a0}x\u{a0}");
+}
+
+#[test]
+fn malformed_custom_values_and_var_grammars_are_dropped() {
+    let declarations = parse_declarations(
+        "--ok: var(--x,,); --nested: fn(!); --bang: red ! blue; --bad: var(color); \
+         color: var(--x junk); width: var(--x, 1px, 2px); --url: url(bad\"url)",
+    );
+    assert_eq!(
+        declarations
+            .iter()
+            .map(|declaration| declaration.name.as_str())
+            .collect::<Vec<_>>(),
+        ["--ok", "--nested", "width"]
+    );
+}
+
+#[test]
 fn stylesheet_records_dynamic_dependencies_once_across_media_rules() {
     let sheet = CssparserParser.parse(
         "main:is(.note, a:hover) span { color: red }
@@ -326,9 +366,9 @@ fn mq4_dimension_ranges_parse_in_both_directions_and_chain() {
 #[test]
 fn important_uses_css_token_rules_instead_of_string_suffixes() {
     let declarations =
-        parse_declarations("display: none ! /**/ IMPORTANT; color: var(--looks-like-!important)");
+        parse_declarations("display: none ! /**/ IMPORTANT; color: 'var(--looks-like-!important)'");
     assert!(declarations[0].important);
     assert_eq!(declarations[0].value, "none");
     assert!(!declarations[1].important);
-    assert_eq!(declarations[1].value, "var(--looks-like-!important)");
+    assert_eq!(declarations[1].value, "'var(--looks-like-!important)'");
 }

@@ -4,6 +4,7 @@ use super::*;
 mod flex;
 mod overflow;
 mod positioning;
+mod variables;
 use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{

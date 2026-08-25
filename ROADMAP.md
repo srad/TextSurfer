@@ -28,6 +28,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.14 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | Presentational HTML legacy values (M1-D) | narrow standards adapter | **Custom is correct** — html5ever owns HTML parsing and cssparser/cssparser-color own CSS syntax, but none implements WHATWG's legacy non-negative integer, dimension, or color-value algorithms. Keep these untrusted-value adapters isolated under `css::presentational`; compare structure and edge cases with Ladybird commit `8baf4260d40dd53cd09c21c868d2bd0625a69149`, with WHATWG authoritative |
 | `font-size` computed-value grammar (M1-D) | narrow standards adapter | **Keep narrow adapter** — cssparser owns tokenization, dimensions, percentages, functions and recovery; the adapter maps the supported Fonts/CSS-wide keywords and length-percentage forms onto the frontend-neutral computed typography model. Full font selection and CSS math remain outside the raster-font scope |
+| CSS custom properties and `var()` (M6) | custom cascade adapter | **Keep narrow adapter** — cssparser 0.37.0 owns tokens, nesting, escapes and source positions; per-element inheritance, dependency cycles and computed-value substitution are cascade behavior. LightningCSS exposes a static build-time map and `muskitty-values` is parse-only, so neither can supply the runtime element environment. Stable Custom Properties Level 1 is implemented without a new dependency |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ### Prior-art audit (2026-08-22)
@@ -71,10 +72,10 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state, theme states | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off, pure Rust | (open) |
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
-| M6 — Stretch | Flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (open) |
+| M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-25): **665 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 35 golden** with the default VGA frontend, and **572 lib · 12 binary** with
+Test counts at the last green run (2026-08-25): **684 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 38 golden** with the default VGA frontend, and **591 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -822,6 +823,17 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       a wrapped-flex viewport property law; an inspected public render golden, public
       DOM-link/visual-order case and dynamic-restyle reflow case; complete local feature gate matrix
       green.
+- [x] **CSS custom properties and `var()`** *(done)* — stable Level 1 custom names and
+      arbitrary token values, case-sensitive inherited per-element environments, dependency-cycle
+      invalidation, token-boundary-safe fallback substitution and all supported style, typography,
+      counter and generated-content consumers. Computed custom values and substituted declarations
+      are capped at 2 MiB with bounded component nesting. `ComputedStyle` and `StyleTree` remain
+      unchanged; selector bucketing's median may not regress by more than 15%. CSSOM, `@property`,
+      animations, `env()`, dynamic Level 2 names/units and `revert-layer` remain out of scope.
+- [ ] **CSS math and layout integration** — parse and compute `calc()`, `min()`, `max()` and
+      `clamp()` after custom-property substitution, including mixed compatible units and layout-axis
+      percentage resolution. Custom properties may carry these tokens meanwhile, but consumers
+      reject the computed declaration until this item lands.
 - [ ] **Grid** — enable Taffy's grid engine after the flex formatting and paint-order seams settle.
 - [ ] **Floats** — conformant line-flow-around-float formatting.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
@@ -878,6 +890,25 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-25 — **M6 CSS custom properties started from a green baseline.** Stable Custom
+  Properties Level 1 is the target; the experimental Level 2 dynamic-name and variable-unit grammar
+  is excluded. cssparser remains pinned at 0.37.0 and owns syntax tokenization while the cascade owns
+  inherited environments, dependency cycles and substitution. CSS math is a separate open layout
+  item. The pre-change selector-cascade median is **6.487 ms**; a confirmed regression over 15%
+  blocks delivery. All eight required gates were green before implementation.
+- 2026-08-25 — **M6 CSS custom properties delivered.** cssparser 0.37.0 now validates stable
+  Level 1 custom names, arbitrary values and every `var()` grammar while retaining source spelling.
+  Case-sensitive `Rc` delta environments compute inheritance, CSS-wide values and fallback-aware
+  dependency cycles off the call stack; token-boundary-safe substitution feeds typography,
+  style/flex declarations, counters and pseudo content without enlarging `ComputedStyle` or
+  `StyleTree`. Invalid computed declarations use the shared applied/invalid/unsupported outcome to
+  become `unset`, shorthands reset atomically and `revert` restores the captured UA baseline.
+  Values and substitutions are capped at 2 MiB with component nesting capped at 64. The inspected
+  `variables.html` golden and literal-equivalence/dynamic-restyle cases cover the public render path.
+  All format, strict Clippy and default/JS/VGA/no-default gates are green at **684 library tests**
+  (**591** without default features), plus 13 binary, 6 fetch-pipeline, 14 corpus and 38 render tests.
+  The selector-cascade median moved from **6.487 ms** to **7.003 ms** (+7.95%), inside the 15% gate.
+  Human VGA and terminal interaction smoke remains pending. No dependency pin changed.
 - 2026-08-25 — **M1-E overflow and positioning started from a green default test baseline.** The
   live Wikipedia terminal dump confirmed three related failures: zero-height hidden dropdowns paint
   into the article, the clipped skip link prints one glyph per row, and a 100%-wide auto navbox

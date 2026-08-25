@@ -133,6 +133,10 @@ impl AuthoredCounterOps {
         } else {
             0
         };
+        if parse_ident(&declaration.value).is_some_and(|value| value == "revert") {
+            *slot = None;
+            return;
+        }
         if let Some(values) = parse_counter_values(&declaration.value, default) {
             *slot = Some(values);
         }
@@ -230,7 +234,7 @@ fn list_item_count(document: &Document, list: NodeId) -> i64 {
 /// list numbering — which is also why `revert` needs no separate treatment, the UA origin it
 /// reverts to *is* that implicit operation. `inherit` is approximated the same way; we do not model
 /// parent counter values.
-fn parse_counter_values(source: &str, default: i64) -> Option<Vec<(String, i64)>> {
+pub(super) fn parse_counter_values(source: &str, default: i64) -> Option<Vec<(String, i64)>> {
     if parse_ident(source).is_some_and(|value| is_css_wide_keyword(&value)) {
         return Some(Vec::new());
     }

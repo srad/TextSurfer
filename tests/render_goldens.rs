@@ -208,6 +208,77 @@ fn flex_layout_golden() {
 }
 
 #[test]
+fn custom_properties_golden() {
+    insta::assert_snapshot!(golden("variables.html"));
+}
+
+#[test]
+fn custom_properties_match_literal_style_geometry_and_text() {
+    let variable = render_source(
+        "<style>body{margin:0;--w:12ch;--c:#00ff00}#card{display:block;width:var(--w);color:var(--c)}</style><div id=card>Alpha Beta Gamma</div>",
+        30,
+    );
+    let literal = render_source(
+        "<style>body{margin:0}#card{display:block;width:12ch;color:#00ff00}</style><div id=card>Alpha Beta Gamma</div>",
+        30,
+    );
+    assert_eq!(variable.painted.text_lines(), literal.painted.text_lines());
+    let variable_node = variable.document.borrow().element_by_id("card").unwrap();
+    let literal_node = literal.document.borrow().element_by_id("card").unwrap();
+    assert_eq!(
+        variable.styles.get(variable_node),
+        literal.styles.get(literal_node)
+    );
+    assert_eq!(
+        variable
+            .painted
+            .hits
+            .iter()
+            .map(|hit| hit.rect)
+            .collect::<Vec<_>>(),
+        literal
+            .painted
+            .hits
+            .iter()
+            .map(|hit| hit.rect)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn dynamic_custom_property_restyle_reuses_the_public_page_load() {
+    let mut load = PageLoad::new(
+        "<!doctype html><style>a{--tone:#ffff00;color:var(--tone)}a:hover{--tone:#ff0000}</style><a href=/>target</a>",
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            viewport: Size { cols: 20, rows: 8 },
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+            text_rendering: TextRendering::Cell,
+        },
+    );
+    let first = load.force_render();
+    let link = first.painted.links[0].node;
+    assert_eq!(
+        first.styles.get(link).color,
+        Some(Rgba::new(255, 255, 0, 255))
+    );
+    let hovered = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(link),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        hovered.styles.get(link).color,
+        Some(Rgba::new(255, 0, 0, 255))
+    );
+}
+
+#[test]
 fn flex_visual_order_and_dom_link_order_survive_the_public_render_path() {
     let page = render_source(
         "<style>body{margin:0}main{display:flex;width:12ch}a{flex:none;width:6ch}a:first-child{order:2}a:last-child{order:-1}</style><main><a href=first>FIRST</a><a href=second>SECOND</a></main>",
