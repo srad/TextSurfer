@@ -252,6 +252,29 @@ impl VgaApp {
         true
     }
 
+    #[cfg(test)]
+    pub(super) fn inject_key(&mut self, code: crate::core::event::Key) {
+        use crate::core::event::{KeyEvent, KeyModifiers};
+        self.scheduler.push(
+            InputEvent::Key(KeyEvent {
+                code,
+                modifiers: KeyModifiers::default(),
+            }),
+            self.started.elapsed(),
+        );
+    }
+
+    #[cfg(test)]
+    pub(super) fn inject_mouse(&mut self, event: MouseEvent) {
+        self.scheduler
+            .push(InputEvent::Mouse(event), self.started.elapsed());
+    }
+
+    #[cfg(test)]
+    pub(super) fn backend(&self) -> &VgaBackend {
+        &self.backend
+    }
+
     /// Draw the chrome, then copy the pixels into the window.
     pub(super) fn redraw(&mut self) -> io::Result<()> {
         let damage = std::mem::take(&mut self.pending_damage);

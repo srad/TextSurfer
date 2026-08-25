@@ -1,6 +1,7 @@
 use super::*;
 
-use crate::core::event::{MouseButton, MouseEvent, MouseKind};
+use crate::core::event::{InputBatch, InputEvent, MouseButton, MouseEvent, MouseKind};
+use crate::core::frame::{ChromeDamage, RowDamage};
 use crate::core::geom::Point;
 use crate::ui::mouse::WHEEL_ROWS;
 use crate::ui::widgets::menu::popup_rect;
@@ -165,6 +166,29 @@ fn the_wheel_scrolls_the_content_and_nothing_else() {
     assert_eq!(app.tabs.active().scroll, 0);
     app.handle_mouse(wheel(WHEEL_ROWS, at(10, 3)));
     assert_eq!(app.tabs.active().scroll, 0, "the toolbar does not scroll");
+}
+
+#[test]
+fn a_wheel_batch_keeps_an_incremental_scroll_and_never_forces_a_full_repaint() {
+    // The retained-scroll path depends on a wheel notch producing pure `scroll_rows`
+    // damage. Dynamic state is deferred for the duration of the input batch, so nothing
+    // upgrades the frame to a full content repaint that would zero the scroll delta.
+    let mut app = loaded(&tall_page());
+    let _ = app.take_damage(); // discard the load's full damage
+    let content = at(ORIGIN.col, ORIGIN.row + 1);
+    app.advance(
+        &InputBatch::from(InputEvent::Mouse(wheel(WHEEL_ROWS, content))),
+        Duration::ZERO,
+    );
+    let damage = app.take_damage();
+    assert_eq!(app.tabs.active().scroll, WHEEL_ROWS as usize);
+    assert_eq!(damage.content.scroll_rows, WHEEL_ROWS);
+    assert!(
+        !damage.content.full,
+        "a wheel notch must stay an incremental scroll"
+    );
+    assert_eq!(damage.content.repaint, RowDamage::None);
+    assert_eq!(damage.chrome, ChromeDamage::None);
 }
 
 #[test]

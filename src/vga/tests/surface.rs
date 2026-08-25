@@ -379,47 +379,131 @@ fn dim_blends_before_reverse_and_strike_reaches_the_surface() {
     assert!(state.strike);
 }
 
-#[test]
-fn partially_scrolled_scaled_glyphs_are_clipped_whole() {
-    let mut document = Document::new();
-    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
-    let mut surface = Surface::new(config(4, 3, 1));
-    let run = ScaledTextRun {
+/// A full-block scaled run, so every visible pixel of a covered cell is foreground.
+fn block_run(node: crate::core::dom::NodeId, col: usize, row: usize, scale: u8) -> ScaledTextRun {
+    ScaledTextRun {
         node,
         rect: LayoutRect {
-            col: 0,
-            row: 0,
-            width: 2,
-            height: 2,
+            col,
+            row,
+            width: usize::from(scale),
+            height: usize::from(scale),
         },
-        text: "A".to_string(),
+        text: "█".to_string(),
         style: CellStyle {
             fg: Some(Rgba::opaque(FG)),
-            scale: 2,
+            scale,
             ..Default::default()
         },
         depth: 0,
         ink: true,
-    };
+    }
+}
+
+fn clip(cols: usize, rows: usize) -> LayoutRect {
+    LayoutRect {
+        col: 0,
+        row: 0,
+        width: cols,
+        height: rows,
+    }
+}
+
+fn test_palette() -> Palette {
+    Palette {
+        text: FG,
+        background: BG,
+        link: FG,
+        link_hover: FG,
+    }
+}
+
+#[test]
+fn a_scaled_glyph_scrolled_off_the_top_paints_its_visible_lower_rows() {
+    // A 2x block at document row 0 with scroll 1: its top cell-row is above the viewport,
+    // so only its lower cell-row is visible — and it must be painted there, not dropped.
+    let mut document = Document::new();
+    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let mut surface = Surface::new(config(4, 3, 1));
     surface.draw_scaled_text(
-        &[run],
+        &[block_run(node, 0, 0, 2)],
         (0, 0),
         1,
-        LayoutRect {
-            col: 0,
-            row: 0,
-            width: 4,
-            height: 3,
-        },
+        clip(4, 3),
         &[],
-        Palette {
-            text: FG,
-            background: BG,
-            link: FG,
-            link_hover: FG,
-        },
+        test_palette(),
     );
-    assert!(surface.pixels().iter().all(|pixel| *pixel == packed(BG)));
+    // The block spans cells (cols 0..2); its visible half lands on screen row 0.
+    assert!(
+        cell_lit(&surface, 0, 0),
+        "the clipped block paints its lower row"
+    );
+    assert!(cell_lit(&surface, 1, 0));
+    assert!(!cell_lit(&surface, 2, 0), "and no wider than its two cells");
+    // Nothing paints below the glyph's single visible row.
+    for row in 1..3 {
+        for col in 0..4 {
+            assert!(
+                !cell_lit(&surface, col, row),
+                "row {row} col {col} must stay clear"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_scaled_glyph_at_the_bottom_edge_is_trimmed_and_spares_the_status_row() {
+    // Content is rows 0..3; row 3 stands in for the status bar. A 2x block at screen rows
+    // 2..4 must paint only row 2 and must not bleed into row 3.
+    let mut document = Document::new();
+    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let mut surface = Surface::new(config(4, 4, 1));
+    surface.draw_scaled_text(
+        &[block_run(node, 0, 2, 2)],
+        (0, 0),
+        0,
+        clip(4, 3),
+        &[],
+        test_palette(),
+    );
+    assert!(
+        cell_lit(&surface, 0, 2),
+        "the visible top row of the block paints"
+    );
+    assert!(cell_lit(&surface, 1, 2));
+    for col in 0..4 {
+        assert!(
+            !cell_lit(&surface, col, 3),
+            "the status row (below the content clip) must be untouched at col {col}"
+        );
+    }
+    for col in 0..4 {
+        assert!(!cell_lit(&surface, col, 0));
+        assert!(!cell_lit(&surface, col, 1));
+    }
+}
+
+#[test]
+fn a_scaled_glyph_wider_than_the_clip_is_trimmed_at_the_right_edge() {
+    // A 2x block is two cells wide; a one-column clip must paint only its left cell.
+    let mut document = Document::new();
+    let node = document.insert_element(None, "h1", ElementNs::Html, vec![]);
+    let mut surface = Surface::new(config(4, 2, 1));
+    surface.draw_scaled_text(
+        &[block_run(node, 0, 0, 2)],
+        (0, 0),
+        0,
+        clip(1, 2),
+        &[],
+        test_palette(),
+    );
+    assert!(cell_lit(&surface, 0, 0), "the in-clip column paints");
+    assert!(cell_lit(&surface, 0, 1));
+    assert!(
+        !cell_lit(&surface, 1, 0),
+        "the column past the clip is trimmed"
+    );
+    assert!(!cell_lit(&surface, 1, 1));
 }
 
 #[test]

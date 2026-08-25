@@ -651,13 +651,17 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
 - [ ] Retain the presented Ratatui buffer and page scene. Pure scrolling moves the content-row
       region and paints only exposed/damaged rows. Continuous hover state and resize previews defer
       their conservative full render/reflow fallback until 50 ms quiet, so wheel, pointer and resize
-      streams cannot repeatedly enter cascade or layout. *(reopened: native scrolling and resize
-      remain below the required fluency despite the work-count tests)*
+      streams cannot repeatedly enter cascade or layout. *(reopened for fluency; two correctness
+      defects that made VGA scrolling render as a frozen bulk with drifting fragments are now fixed
+      — see the updates log 2026-08-25 — and guarded by real-`Surface` pixel-equivalence and
+      page-down tests. The remaining item is fluency, not correctness.)*
 - [ ] Bound VGA raster and presentation work with batched cell invalidation, retained scaled-text
       overlays, pixel damage, buffer-age-correct partial copies, and softbuffer resize only when the
       physical size changes. Damage is retained as at most 32 merged regions with a 50% full-damage
       threshold; unsolicited redraws reuse the retained surface without composition or copying.
-      *(reopened: the real window still has unresolved movement/resize/input latency)*
+      *(reopened: the real window still has unresolved movement/resize/input latency. Note the
+      softbuffer Win32 backend is a single retained DIB — `age()` is always 1 — so the
+      buffer-age/`damage_history` repair is effectively dead there; a future cleanup can drop it.)*
 
 - [x] `:hover`, `:active` and pointer focus are live inputs to the dynamic-state evaluation added in
       M1-B, dependency-gated without changing load progress or status messages.
@@ -1299,3 +1303,24 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   trace was captured while the problematic process remained open, so the next investigation must
   measure the running native and terminal processes rather than accepting deterministic tests as a
   proxy for responsiveness. Do not merge or mark M3 done until both frontends pass the manual smoke.
+- 2026-08-25 — **VGA scroll correctness repaired (three defects), with the end-to-end tests the
+  path was missing.** The retained-presentation review found the "frozen bulk with drifting
+  fragments" scroll bug had two causes plus a page-down crash, all in `src/vga/surface.rs` and all
+  invisible to the existing `TestBackend`-only composer test: (1) `Surface::scroll_rows` handed
+  `mark_damage` a *flat buffer offset* as the y coordinate and a byte length as height, so any band
+  below row 0 — i.e. every real content band under the chrome — was rejected by the bounds check and
+  reported **no pixel damage**; `present()` then re-copied only the freshly-composed exposed strip
+  and left the scrolled bulk stale. Fixed to mark real pixel coordinates. (2) Scaled headings
+  (`draw_scaled_text`) were dropped whole when they straddled a viewport edge (`contains` full
+  clip + `run.rect.row < scroll` early-drop), so edge headings popped in/out and vanished on any
+  full repaint; replaced with per-pixel clipping to the content rect via a signed origin, so partial
+  headings render clipped instead of disappearing. (3) `scroll_rows`' overlay-cell shift used
+  `then_some((col, row - amount))`, whose eager argument underflows `row - amount` for a heading
+  above the fold on a large scroll — Space/page-down crashed the window; fixed with lazy `then`.
+  New coverage in `src/vga/tests/scroll.rs`: real-`VgaBackend` incremental-vs-fresh pixel
+  equivalence across sequential scrolls, a below-the-top scroll-damage assertion, a page-sized
+  composer scroll, and a full `VgaApp` load→focus→Space page-down smoke over a fake fetcher; plus
+  rewritten surface clip tests. All format, strict Clippy and full gates green at 543 library tests.
+  Softbuffer's Win32 backend was confirmed a single retained DIB (`age()` always 1), so the
+  buffer-age/`damage_history` machinery is dead there and flagged for later removal. Native VGA
+  smoke of scrolling still owed by the user; the fluency work (item two/three above) stays open.

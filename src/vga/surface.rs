@@ -293,6 +293,9 @@ impl Surface {
             );
             self.pixels[pixel_start..pixel_start + pixel_amount].fill(pack(self.default_bg));
         }
+        // The whole scrolled band's pixels moved, so the window must re-copy all of it.
+        let region_top = usize::from(start) * row_height;
+        let region_height = usize::from(end - start) * row_height;
         let overlays = std::mem::take(&mut self.overlay_cells);
         self.overlay_cells = overlays
             .into_iter()
@@ -300,14 +303,17 @@ impl Surface {
                 if row < start || row >= end {
                     return Some((col, row));
                 }
+                // `then` (lazy) not `then_some` (eager): the shifted coordinate must only
+                // be computed when the cell stays in view, or `row - amount` underflows for
+                // a cell above the fold on a large scroll (e.g. Space/page-down).
                 if up {
-                    (row >= start + amount).then_some((col, row - amount))
+                    (row >= start + amount).then(|| (col, row - amount))
                 } else {
-                    (row + amount < end).then_some((col, row + amount))
+                    (row + amount < end).then(|| (col, row + amount))
                 }
             })
             .collect();
-        self.mark_damage(0, pixel_start, pixel_width, pixel_end - pixel_start);
+        self.mark_damage(0, region_top, pixel_width, region_height);
     }
 
     /// Resolve a ratatui cell into concrete colours and a single character.
@@ -414,13 +420,33 @@ impl Surface {
         occlusions: &[LayoutRect],
         palette: Palette,
     ) {
+        let cell_w = CELL_W.saturating_mul(self.scale);
+        let cell_h = CELL_H.saturating_mul(self.scale);
+        let clip_bottom_cell = clip.row.saturating_add(clip.height);
+        let clip_right_cell = clip.col.saturating_add(clip.width);
+        let clip_px = PixelClip {
+            left: clip.col.saturating_mul(cell_w),
+            top: clip.row.saturating_mul(cell_h),
+            right: clip_right_cell.saturating_mul(cell_w),
+            bottom: clip_bottom_cell.saturating_mul(cell_h),
+        };
         for run in runs {
             let scale = usize::from(run.style.scale);
-            if scale <= 1 || run.rect.row < scroll {
+            if scale <= 1 || !run.ink {
                 continue;
             }
+            // Signed screen row: a run whose top has scrolled above the viewport lands at
+            // a negative cell offset and is clipped by `blit_scaled`, not collapsed to the
+            // content top. Never `saturating_sub` here — that is what pinned partial
+            // headings to the first visible row.
             let screen_row =
-                usize::from(origin.1).saturating_add(run.rect.row.saturating_sub(scroll));
+                usize::from(origin.1) as isize + run.rect.row as isize - scroll as isize;
+            // Cull runs that fall entirely above or below the content band.
+            if screen_row + scale as isize <= clip.row as isize
+                || screen_row >= clip_bottom_cell as isize
+            {
+                continue;
+            }
             let mut screen_col = usize::from(origin.0).saturating_add(run.rect.col);
             let style = resolve_cell_style(run.style, palette);
             for ch in run.text.chars() {
@@ -430,23 +456,38 @@ impl Surface {
                     continue;
                 }
                 let cell_width = base_width.saturating_mul(scale);
-                let rect = LayoutRect {
-                    col: screen_col,
-                    row: screen_row,
-                    width: cell_width,
-                    height: scale,
-                };
-                if run.ink
-                    && contains(clip, rect)
-                    && !occlusions
+                // `screen_col` never sits left of the content in practice, but guard the
+                // right edge so a heading wider than the clip is trimmed, not dropped.
+                let horizontally_visible = screen_col < clip_right_cell
+                    && screen_col.saturating_add(cell_width) > clip.col;
+                if horizontally_visible {
+                    // The occlusion and overlay bookkeeping run in the clamped visible
+                    // band (non-negative, `usize`); the true signed origin drives the blit.
+                    let vis_top = screen_row.max(clip.row as isize).max(0) as usize;
+                    let vis_bottom = (screen_row + scale as isize)
+                        .min(clip_bottom_cell as isize)
+                        .max(0) as usize;
+                    let vis_left = screen_col.max(clip.col);
+                    let vis_right = screen_col.saturating_add(cell_width).min(clip_right_cell);
+                    let test_rect = LayoutRect {
+                        col: vis_left,
+                        row: vis_top,
+                        width: vis_right.saturating_sub(vis_left),
+                        height: vis_bottom.saturating_sub(vis_top),
+                    };
+                    let occluded = occlusions
                         .iter()
-                        .any(|occlusion| intersects(*occlusion, rect))
-                {
-                    self.blit_scaled(shape, rect.col, rect.row, scale, style);
-                    for row in rect.row..rect.row.saturating_add(rect.height) {
-                        for col in rect.col..rect.col.saturating_add(rect.width) {
-                            if let (Ok(col), Ok(row)) = (u16::try_from(col), u16::try_from(row)) {
-                                self.overlay_cells.push((col, row));
+                        .any(|occlusion| intersects(*occlusion, test_rect));
+                    if !occluded && test_rect.width > 0 && test_rect.height > 0 {
+                        let origin_x = screen_col as isize * cell_w as isize;
+                        let origin_y = screen_row * cell_h as isize;
+                        self.blit_scaled(shape, origin_x, origin_y, scale, style, clip_px);
+                        for row in vis_top..vis_bottom {
+                            for col in vis_left..vis_right {
+                                if let (Ok(col), Ok(row)) = (u16::try_from(col), u16::try_from(row))
+                                {
+                                    self.overlay_cells.push((col, row));
+                                }
                             }
                         }
                     }
@@ -459,13 +500,19 @@ impl Surface {
         }
     }
 
+    /// Blit one magnified glyph at a signed pixel origin, clipped to `clip`.
+    ///
+    /// The origin is signed so a glyph whose top has scrolled above the content band is
+    /// placed correctly and merely trimmed by the clip, rather than pinned to the top.
+    /// Only the foreground is drawn — the overlay lets the base cell show through.
     fn blit_scaled(
         &mut self,
         shape: super::font::Glyph,
-        col: usize,
-        row: usize,
+        origin_x: isize,
+        origin_y: isize,
         text_scale: usize,
         style: crate::core::style::CellStyle,
+        clip: PixelClip,
     ) {
         let mut fg = style.fg.map_or(self.default_fg, |color| color.rgb);
         let mut bg = style.bg.unwrap_or(self.default_bg);
@@ -481,14 +528,22 @@ impl Surface {
         let fg = pack(fg);
         let (surface_width, _) = self.pixel_size();
         let pixel_scale = text_scale.saturating_mul(self.scale);
-        let origin_x = col.saturating_mul(CELL_W).saturating_mul(self.scale);
-        let origin_y = row.saturating_mul(CELL_H).saturating_mul(self.scale);
-        self.mark_damage(
-            origin_x,
-            origin_y,
-            shape.width().pixels().saturating_mul(pixel_scale),
-            CELL_H.saturating_mul(pixel_scale),
-        );
+        let glyph_width = shape.width().pixels().saturating_mul(pixel_scale);
+        let glyph_height = CELL_H.saturating_mul(pixel_scale);
+        // Damage only the visible portion, so a trimmed glyph never reports pixels below
+        // the content (the status bar) or past its edges.
+        let dmg_left = origin_x.max(clip.left as isize);
+        let dmg_top = origin_y.max(clip.top as isize);
+        let dmg_right = (origin_x + glyph_width as isize).min(clip.right as isize);
+        let dmg_bottom = (origin_y + glyph_height as isize).min(clip.bottom as isize);
+        if dmg_right > dmg_left && dmg_bottom > dmg_top {
+            self.mark_damage(
+                dmg_left as usize,
+                dmg_top as usize,
+                (dmg_right - dmg_left) as usize,
+                (dmg_bottom - dmg_top) as usize,
+            );
+        }
         for y in 0..CELL_H {
             let decorated =
                 style.underline && y == UNDERLINE_ROW || style.strike && y == CELL_H / 2;
@@ -497,10 +552,17 @@ impl Surface {
                     continue;
                 }
                 for dy in 0..pixel_scale {
-                    let line = (origin_y + y * pixel_scale + dy) * surface_width;
+                    let py = origin_y + (y * pixel_scale + dy) as isize;
+                    if py < clip.top as isize || py >= clip.bottom as isize {
+                        continue;
+                    }
+                    let line = py as usize * surface_width;
                     for dx in 0..pixel_scale {
-                        let at = line + origin_x + x * pixel_scale + dx;
-                        if let Some(pixel) = self.pixels.get_mut(at) {
+                        let px = origin_x + (x * pixel_scale + dx) as isize;
+                        if px < clip.left as isize || px >= clip.right as isize {
+                            continue;
+                        }
+                        if let Some(pixel) = self.pixels.get_mut(line + px as usize) {
                             *pixel = fg;
                         }
                     }
@@ -575,11 +637,13 @@ fn union_pixel_rect(left: PixelRect, right: PixelRect) -> PixelRect {
     }
 }
 
-fn contains(outer: LayoutRect, inner: LayoutRect) -> bool {
-    inner.col >= outer.col
-        && inner.row >= outer.row
-        && inner.col.saturating_add(inner.width) <= outer.col.saturating_add(outer.width)
-        && inner.row.saturating_add(inner.height) <= outer.row.saturating_add(outer.height)
+/// A clip rectangle in physical pixels, used to trim scaled glyphs to the content band.
+#[derive(Clone, Copy, Debug)]
+struct PixelClip {
+    left: usize,
+    top: usize,
+    right: usize,
+    bottom: usize,
 }
 
 fn intersects(a: LayoutRect, b: LayoutRect) -> bool {
