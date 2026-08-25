@@ -16,7 +16,7 @@ terminal grid, painter, chrome/App/event loop — and for parsing only where the
 has no library. Every hand-rolled parser must be justified against the audit below before it is
 written; the audit is re-run whenever a candidate crate appears.
 
-### Custom-parser audit (2026-08-20, re-checked 2026-08-22)
+### Custom-parser audit (2026-08-20, re-checked 2026-08-25)
 
 | Parser | Status | Verdict |
 |---|---|---|
@@ -25,7 +25,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `css/parser.rs` | library adapter | **Keep** — stylesheet/rule/declaration tokenization delegates to cssparser; selector parsing and matching delegate to selectors |
 | `css/parser.rs` — terminal media-query grammar/evaluation | custom library adapter | **Keep narrow adapter** — cssparser owns tokens, blocks, delimiters, and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 is an immature raw-string port without MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui explicitly excludes `@media`, and Stylo/Blitz/MusKitty/litehtml/Ladybird require replacement DOM/style/rendering stacks |
 | `css/cascade/{content,counters}.rs` + `css/values.rs` — `content`, `counter-*` and `list-style*` value grammar | library adapter | **Keep** — cssparser owns tokenization, functions, blocks and error recovery; the adapter only maps already-tokenized values onto `ComputedStyle` fields and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration is dropped whole, per spec, rather than half-rendered |
-| Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.13 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
+| Table layout (M1-D) | custom, implemented | **Custom is correct** — Taffy 0.14 implements block/flex/grid and exposes `item_is_table`, but has no table algorithm. `super-table` 0.3.0 accepts string matrices rather than a foreign styled box tree; `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies CSS anonymous-table fixup, spans, captions, border conflict resolution, or nested box layout |
 | Presentational HTML legacy values (M1-D) | narrow standards adapter | **Custom is correct** — html5ever owns HTML parsing and cssparser/cssparser-color own CSS syntax, but none implements WHATWG's legacy non-negative integer, dimension, or color-value algorithms. Keep these untrusted-value adapters isolated under `css::presentational`; compare structure and edge cases with Ladybird commit `8baf4260d40dd53cd09c21c868d2bd0625a69149`, with WHATWG authoritative |
 | `font-size` computed-value grammar (M1-D) | narrow standards adapter | **Keep narrow adapter** — cssparser owns tokenization, dimensions, percentages, functions and recovery; the adapter maps the supported Fonts/CSS-wide keywords and length-percentage forms onto the frontend-neutral computed typography model. Full font selection and CSS math remain outside the raster-font scope |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
@@ -342,7 +342,7 @@ Landed: cssparser 0.37 + selectors 0.40 adapters with specificity and structural
 `Cascade` (UA + embedded author + inline `style`, `!important`, source order); type-only `@media`
 with injected screen context and bounded diagnostics; temporary degradation contracts
 (table/flex/grid→block before their owning milestones,
-position→static, percentage heights→auto); Taffy 0.13 block geometry with anonymous boxes, margin
+position→static, percentage heights→auto); Taffy 0.14 block geometry with anonymous boxes, margin
 collapse, padding, one-cell borders, fixed widths and content-box/border-box; six inheriting
 `white-space` modes over node-owned textwrap fragments; sparse paint with border glyphs.
 
@@ -750,6 +750,9 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
 
 ### M6 — Stretch (open)
 
+- [x] **Taffy 0.14 baseline upgrade** *(done)* — pin 0.14.0 with the existing
+      block-only features, adapt the 0.14 leaf-measure callback without changing render output,
+      and require unchanged goldens plus the complete feature gate matrix before flexbox begins.
 - [ ] Taffy flex/grid enabled; conformant float flow with line-flow-around-float.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
       M1-B stays the fallback when no protocol is available.
@@ -1424,3 +1427,16 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   features; 501 without defaults; 13 binary tests (12 without defaults), 4 fetch-pipeline, 14 corpus
   and 32 render-golden tests. Human smoke remains owed in both VGA and terminal frontends against
   `https://example.com`; no dependency pins changed.
+- 2026-08-25 — **Taffy 0.14 baseline upgrade started before M6 flexbox (user).** Upgrade Taffy
+  independently from 0.13.0 to latest published 0.14.0 while preserving the block-only feature set
+  and current rendering. The only expected source migration is the new `LayoutInput`/`LayoutOutput`
+  leaf-measure callback; flexbox, grid, float and parse remain disabled. Existing goldens and the
+  complete feature gate matrix must stay unchanged before the prerequisite is done.
+- 2026-08-25 — **Taffy 0.14 baseline upgrade delivered.** Taffy is pinned at 0.14.0 with only
+  `std`, `taffy_tree`, `block_layout` and `content_size`; the lockfile changed only the Taffy version
+  and checksum. The layout engine now routes its existing intrinsic text and table measurement
+  through Taffy's 0.14 `compute_leaf_layout` callback, preserving block-only behavior. Format and
+  strict default/all-feature/no-default Clippy are green. Default, JS and VGA runs each pass 594
+  library, 13 binary, 4 fetch-pipeline, 14 corpus and 32 render-golden tests; no-default passes 501
+  library, 12 binary and the same integration/golden sets. No snapshot changed and no `.snap.new`
+  file was produced.

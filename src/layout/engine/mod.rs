@@ -8,6 +8,7 @@ mod tests;
 
 use std::collections::HashMap;
 
+use taffy::compute_leaf_layout;
 use taffy::prelude::{AvailableSpace, Size as TaffySize, TaffyTree};
 use unicode_width::UnicodeWidthStr;
 
@@ -141,44 +142,60 @@ impl LayoutEngine for TaffyLayoutEngine {
                     width: AvailableSpace::Definite(width as f32),
                     height: AvailableSpace::MaxContent,
                 },
-                |known, available, _, context, _| {
-                    let Some(index) = context.map(|context| *context) else {
-                        return TaffySize::ZERO;
-                    };
-                    if let Some(table) = flow[index].table {
-                        let width = known.width.unwrap_or(match available.width {
-                            AvailableSpace::Definite(value) => value,
-                            AvailableSpace::MinContent => 1.0,
-                            AvailableSpace::MaxContent => width as f32,
-                        });
-                        let width = width.max(1.0) as usize;
-                        let output = table_cache.entry((table, width)).or_insert_with(|| {
-                            TableFormatter::new(document, styles).format(
-                                table,
-                                width,
-                                TableLimits::default(),
-                                0,
-                            )
-                        });
-                        return TaffySize {
-                            width: output.width as f32,
-                            height: output.height as f32,
-                        };
-                    }
-                    let natural = intrinsic_width(&flow[index].inline);
-                    let measured_width = known.width.unwrap_or_else(|| match available.width {
-                        AvailableSpace::Definite(value) => value,
-                        AvailableSpace::MinContent => min_content_width(&flow[index].inline) as f32,
-                        AvailableSpace::MaxContent => natural as f32,
-                    });
-                    let lines =
-                        format_inline(&flow[index].inline, measured_width.max(0.0) as usize);
-                    TaffySize {
-                        width: known.width.unwrap_or(measured_width),
-                        height: known
-                            .height
-                            .unwrap_or(formatted_height(&lines, &flow[index].inline) as f32),
-                    }
+                |inputs, _, context, style| {
+                    let index = context.map(|context| *context);
+                    compute_leaf_layout(
+                        inputs,
+                        style,
+                        |_, _| 0.0,
+                        |known, available| {
+                            let Some(index) = index else {
+                                return TaffySize::ZERO;
+                            };
+                            if let Some(table) = flow[index].table {
+                                let width = known.width.unwrap_or(match available.width {
+                                    AvailableSpace::Definite(value) => value,
+                                    AvailableSpace::MinContent => 1.0,
+                                    AvailableSpace::MaxContent => width as f32,
+                                });
+                                let width = width.max(1.0) as usize;
+                                let output =
+                                    table_cache.entry((table, width)).or_insert_with(|| {
+                                        TableFormatter::new(document, styles).format(
+                                            table,
+                                            width,
+                                            TableLimits::default(),
+                                            0,
+                                        )
+                                    });
+                                return TaffySize {
+                                    width: output.width as f32,
+                                    height: output.height as f32,
+                                };
+                            }
+                            let natural = intrinsic_width(&flow[index].inline);
+                            let measured_width =
+                                known.width.unwrap_or_else(|| match available.width {
+                                    AvailableSpace::Definite(value) => value,
+                                    AvailableSpace::MinContent => {
+                                        min_content_width(&flow[index].inline) as f32
+                                    }
+                                    AvailableSpace::MaxContent => natural as f32,
+                                });
+                            let lines = format_inline(
+                                &flow[index].inline,
+                                measured_width.max(0.0) as usize,
+                            );
+                            TaffySize {
+                                width: known.width.unwrap_or(measured_width),
+                                height: known.height.unwrap_or(formatted_height(
+                                    &lines,
+                                    &flow[index].inline,
+                                )
+                                    as f32),
+                            }
+                        },
+                    )
                 },
             )
             .expect("taffy block layout");
