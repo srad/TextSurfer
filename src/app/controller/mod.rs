@@ -24,7 +24,7 @@ use super::net::{Navigate, NoopNet};
 use super::startpage::start_page_for;
 use super::tabs::TabManager;
 use delivery::{apply_rendered_page, update_load_message};
-use pointer::{HoverTarget, PressedTarget};
+use pointer::{HoverTarget, PressedTarget, ScrollDrag};
 use viewport::content_viewport;
 
 const DEFAULT_SIZE: Size = Size { cols: 80, rows: 24 };
@@ -48,6 +48,7 @@ pub struct App {
     pointer: Option<Point>,
     hover: Option<HoverTarget>,
     pressed: Option<PressedTarget>,
+    scroll_drag: Option<ScrollDrag>,
     input_transaction: bool,
     dynamic_pending: bool,
     pending_resize: Option<(Size, Duration)>,
@@ -92,6 +93,7 @@ impl App {
             pointer: None,
             hover: None,
             pressed: None,
+            scroll_drag: None,
             input_transaction: false,
             dynamic_pending: false,
             pending_resize: None,

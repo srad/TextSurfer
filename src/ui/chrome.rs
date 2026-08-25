@@ -12,6 +12,7 @@ use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::Theme;
 use crate::ui::widgets::content::{Content, ContentLines};
 use crate::ui::widgets::menu::{MenuBar, MenuPopup, popup_rect};
+use crate::ui::widgets::scrollbar::{ScrollExtent, Scrollbar};
 use crate::ui::widgets::status::{StatusBar, StatusView};
 use crate::ui::widgets::tabs::{TabBar, TabChip, active_span};
 use crate::ui::widgets::toolbar::{FIELD_TEXT, Toolbar};
@@ -126,6 +127,9 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         }
         .render(rect, buffer);
     }
+    // After the content: the `Content` widget draws a rail in this column, so that any
+    // partial row repaint still leaves a whole frame, and the bar takes it back here.
+    draw_scrollbar(buffer, view, layout.scrollbar);
     if let Some(rect) = layout.status {
         StatusBar {
             view: &view.status,
@@ -165,6 +169,28 @@ pub fn compose_status(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) ->
     clear_rect(buffer, rect, Style::default().bg(view.theme.bar_bg));
     StatusBar {
         view: &view.status,
+        theme: &view.theme,
+    }
+    .render(rect, buffer);
+    Some(rect)
+}
+
+/// Repaint the scrollbar column alone.
+///
+/// A retained scroll moves a full-width region, thumb included, so every frame that
+/// touched the content owes the bar a redraw.
+pub fn compose_scrollbar(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    draw_scrollbar(buffer, view, view.geometry.layout(area).scrollbar)
+}
+
+fn draw_scrollbar(buffer: &mut Buffer, view: &ChromeView<'_>, rect: Option<Rect>) -> Option<Rect> {
+    let rect = rect?;
+    Scrollbar {
+        extent: ScrollExtent {
+            rows: rect.height,
+            doc_rows: view.content.painted.len(),
+            scroll: view.content.scroll,
+        },
         theme: &view.theme,
     }
     .render(rect, buffer);
@@ -312,7 +338,11 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(rect.x, rect.y)].symbol(), "h");
         assert_eq!(buffer[(rect.x - 1, rect.y)].symbol(), "│");
-        assert_eq!(buffer[(rect.right() - 1 + 1, rect.y)].symbol(), "│");
+        assert_eq!(
+            buffer[(rect.right() - 1 + 1, rect.y)].symbol(),
+            "▲",
+            "the right rail is the scrollbar, and its first row is the up cap",
+        );
     }
 
     #[test]
@@ -353,8 +383,8 @@ mod tests {
         view.tabs = vec![chip("first")];
         let rendered = render(&view, Size { cols: 40, rows: 8 });
         let rows: Vec<&str> = rendered.lines().collect();
-        assert!(rows[1].starts_with("│┌ first ┐ ┌ + ┐"));
-        assert!(rows[2].starts_with("│┘       └"));
+        assert!(rows[1].starts_with("│┌ first [■]┐ ┌ + ┐"));
+        assert!(rows[2].starts_with("│┘          └"));
         insta::assert_snapshot!(rendered);
     }
 

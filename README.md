@@ -22,15 +22,15 @@ delivered through a single generation-tagged channel, and time is injected. Ever
 a trait, so implementations are replaceable and testable in isolation.
 
 ```
- File  Navigate  View  Help                TextSurfer
-│┌ example.com ┐                                      │
-├───────────────┘─────────────────────────────────────┤
-│[‹] [›] [↻] [⌂]  URL: │https://example.com           │
-├─────────────────────────────────────────────────────┤
-│Example Domain                                       │
-│                                                     │
-│This domain is for use in illustrative examples.    │
-│                                                     │
+ File  Navigate  View  Help                 TextSurfer
+│┌ example.com [■]┐                                  │
+│┘                └──────────────────────────────────┤
+│[‹] [›] [↻] [⌂]  URL: │https://example.com          │
+├────────────────────────────────────────────────────┤
+│Example Domain                                      ▲
+│                                                    █
+│This domain is for use in illustrative examples.    ▒
+│                                                    ▼
 Ready                              https://example.com
 ```
 
@@ -39,7 +39,7 @@ Ready                              https://example.com
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting human smoke;
 M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; M3 slice 1 — mouse navigation
 — done, with wheel, links, toolbar and menu confirmed by hand in the VGA window; terminal smoke
-deferred)**
+deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human smoke pending)**
 
 - Real HTTP(S) and `file://` loading via a fixed, joined 4-worker fetch pool (ureq, OS-native
   certificate roots) with timeouts, cancellation and a 10 MiB response limit. Subresources are
@@ -55,9 +55,13 @@ deferred)**
   with a status error
 - Stable tab, generation and resource-tagged fetch results: concurrent document stylesheets land in
   the right load, background tabs render lazily, and superseded responses are discarded
-- DOS/QBasic-style menu, raised tab strip with clean gaps and an aligned active-tab divider,
-  navigation toolbar, grapheme-safe address editor, unbounded scrolling and centralized
-  resize/mouse geometry
+- DOS/QBasic-style menu, raised tab strip with clean gaps, an aligned active-tab divider and a
+  Turbo Vision `[■]` close box on every chip, navigation toolbar, grapheme-safe address editor,
+  unbounded scrolling and centralized resize/mouse geometry
+- A page scrollbar on the content frame's right rail — `▲` cap, `▒` track, `█` thumb, `▼` cap — that
+  takes the rail over rather than claiming a column, so nothing reflows to make room for it. Caps
+  step a row, the trough pages, and the thumb drags; a drag keeps tracking after the pointer leaves
+  the bar and ends when it leaves the window
 - Hierarchical rendering path: cssparser + selectors cascade inline, embedded, linked and recursively
   imported CSS in document order, with selector bucketing and terminal-aware `@media` features for
   scripting, color scheme and CSS-pixel viewport dimensions, including MQ4 ranges. CSS absolute,
@@ -184,6 +188,10 @@ to DuckDuckGo's lite search for anything that isn't a URL.
 | Wheel over the page | Scrolls three rows per notch (trackpad pixels accumulate) |
 | Side buttons | Back / forward, from anywhere in the window |
 | Click a tab chip / the `+` box | Switches tabs / opens one |
+| Click a chip's `[■]` | Closes that tab, background or not, without switching to it |
+| Click the scrollbar's `▲` / `▼` | Steps one row |
+| Click its track above / below the thumb | Pages up / down |
+| Drag the thumb | Scrolls to that position; keeps tracking off the bar, ends if the pointer leaves the window |
 | Click `[‹] [›] [↻] [⌂]` | Back, forward, reload, start page |
 | Click the address field | Focuses it and places the caret, keeping a half-typed URL |
 | Click a menu title or item | Opens, toggles, dispatches; a click elsewhere closes the menu |
@@ -237,7 +245,8 @@ foundations ✅ · M1-A parse pipeline ✅ · M1-R stabilization ✅ · M1.5 chr
 style/layout/paint implemented, awaiting the human terminal smoke · M1-C external CSS implemented,
 awaiting human smoke · M1-D layout completeness implemented, awaiting the human VGA smoke ·
 M3 mouse pulled ahead of M2: slice 1 navigation implemented, awaiting the human mouse smoke, slice 2
-live `:hover`/`:focus` styling open · M2 tabs/keyboard/forms · M4 JS seam · M5 Boa · M6 stretch.
+live `:hover`/`:focus` styling open, slice 3 chrome affordances implemented, awaiting smoke ·
+M2 tabs/keyboard/forms · M4 JS seam · M5 Boa · M6 stretch.
 
 ## Built on great libraries
 

@@ -1,0 +1,14 @@
+---
+source: src/ui/widgets/scrollbar.rs
+expression: "render(extent(10, 4, 0))"
+---
+▲
+█
+█
+█
+█
+█
+█
+█
+█
+▼

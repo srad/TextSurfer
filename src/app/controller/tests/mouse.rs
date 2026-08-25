@@ -191,6 +191,139 @@ fn a_wheel_batch_keeps_an_incremental_scroll_and_never_forces_a_full_repaint() {
     assert_eq!(damage.chrome, ChromeDamage::None);
 }
 
+/// The screen cell holding row `row` of the page scrollbar.
+fn bar(row: u16) -> Point {
+    at(79, ORIGIN.row + row)
+}
+
+fn bar_metrics(app: &App) -> crate::ui::widgets::scrollbar::Metrics {
+    app.scroll_extent().expect("a scrollbar").metrics()
+}
+
+#[test]
+fn the_scrollbar_caps_step_a_row_and_the_trough_pages() {
+    let mut app = loaded(&tall_page());
+    let bottom = app.max_scroll();
+    let last = app.geometry.content_rows() as u16 - 1;
+    assert!(bottom > usize::from(last), "the fixture must overflow");
+
+    app.handle_mouse(press(MouseButton::Left, bar(last)));
+    assert_eq!(app.tabs.active().scroll, 1, "the bottom cap steps one row");
+    app.handle_mouse(press(MouseButton::Left, bar(0)));
+    assert_eq!(app.tabs.active().scroll, 0, "the top cap steps back");
+
+    let metrics = bar_metrics(&app);
+    assert!(
+        metrics.thumb.end < last,
+        "room in the trough below the thumb"
+    );
+    app.handle_mouse(press(MouseButton::Left, bar(metrics.thumb.end)));
+    assert_eq!(app.tabs.active().scroll, app.page_step() as usize);
+
+    app.set_scroll(usize::MAX);
+    let metrics = bar_metrics(&app);
+    assert!(
+        metrics.thumb.start > 1,
+        "room in the trough above the thumb"
+    );
+    app.handle_mouse(press(MouseButton::Left, bar(metrics.thumb.start - 1)));
+    assert_eq!(app.tabs.active().scroll, bottom - app.page_step() as usize);
+}
+
+#[test]
+fn dragging_the_thumb_walks_the_document_to_both_ends() {
+    let mut app = loaded(&tall_page());
+    let bottom = app.max_scroll();
+    let metrics = bar_metrics(&app);
+    app.handle_mouse(press(MouseButton::Left, bar(metrics.thumb.start)));
+    app.handle_mouse(moved(bar(metrics.track.end)));
+    assert_eq!(app.tabs.active().scroll, bottom, "dragged to the end");
+    app.handle_mouse(moved(bar(0)));
+    assert_eq!(app.tabs.active().scroll, 0, "and back to the top");
+
+    app.handle_mouse(release(MouseButton::Left, bar(0)));
+    app.handle_mouse(moved(bar(metrics.track.end)));
+    assert_eq!(
+        app.tabs.active().scroll,
+        0,
+        "the drag ended with the button"
+    );
+}
+
+#[test]
+fn a_thumb_drag_owns_the_pointer_and_lights_up_nothing_it_crosses() {
+    let mut app = loaded(&tall_page());
+    let link = first_link_cell(&app);
+    let metrics = bar_metrics(&app);
+    app.handle_mouse(press(MouseButton::Left, bar(metrics.thumb.start)));
+    app.handle_mouse(moved(link));
+    assert!(!app.hovers_link(), "the drag owns the pointer");
+    assert!(app.hover.is_none());
+    assert_eq!(
+        app.tabs.active().scroll,
+        0,
+        "the drag reads the row, not the column"
+    );
+}
+
+#[test]
+fn leaving_the_window_ends_a_thumb_drag() {
+    // Nothing captures the pointer, so a button released outside is never reported and
+    // a drag kept alive here would resume under a button that is no longer down.
+    let mut app = loaded(&tall_page());
+    let metrics = bar_metrics(&app);
+    app.handle_mouse(press(MouseButton::Left, bar(metrics.thumb.start)));
+    app.pointer_left();
+    app.handle_mouse(moved(bar(metrics.track.end)));
+    assert_eq!(app.tabs.active().scroll, 0);
+}
+
+#[test]
+fn the_wheel_turns_over_the_scrollbar_as_well_as_the_page() {
+    let mut app = loaded(&tall_page());
+    app.handle_mouse(wheel(WHEEL_ROWS, bar(4)));
+    assert_eq!(app.tabs.active().scroll, WHEEL_ROWS as usize);
+}
+
+#[test]
+fn a_close_box_closes_its_own_tab_and_leaves_the_front_one_in_front() {
+    let mut app = App::new();
+    app.handle_key(super::press(Key::Esc));
+    app.submit_url("https://a.example");
+    app.new_tab();
+    app.submit_url("https://b.example");
+    assert_eq!(app.tab_count(), 2);
+
+    let chips = app.tab_chips();
+    let boxes = crate::ui::widgets::tabs::layout_tabs(&chips, app.tabs.active_index(), 78);
+    let close = boxes[0]
+        .close
+        .clone()
+        .expect("a close box on the first chip");
+    app.handle_mouse(press(MouseButton::Left, at(1 + close.start, 1)));
+    assert_eq!(app.tab_count(), 1);
+    assert_eq!(app.active_url(), "https://b.example");
+}
+
+#[test]
+fn pressing_a_chip_beside_its_close_box_still_selects_the_tab() {
+    let mut app = App::new();
+    app.handle_key(super::press(Key::Esc));
+    app.submit_url("https://a.example");
+    app.new_tab();
+    app.submit_url("https://b.example");
+
+    let chips = app.tab_chips();
+    let boxes = crate::ui::widgets::tabs::layout_tabs(&chips, app.tabs.active_index(), 78);
+    let close = boxes[0]
+        .close
+        .clone()
+        .expect("a close box on the first chip");
+    app.handle_mouse(press(MouseButton::Left, at(1 + (close.start - 1), 1)));
+    assert_eq!(app.tab_count(), 2);
+    assert_eq!(app.active_url(), "https://a.example");
+}
+
 #[test]
 fn the_side_buttons_walk_history_from_any_zone() {
     let mut app = loaded("<p>hi</p>");

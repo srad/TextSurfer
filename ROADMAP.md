@@ -677,6 +677,50 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       the layout-changing hover fixed-point regression; native and terminal launch confirmation plus
       the manual mouse walkthrough remain pending.
 
+**Slice 3 — chrome affordances (done — human smoke pending)**
+
+- [x] **Tab close box** *(done)*. Every whole chip carries a Turbo Vision `[■]` before its right
+      corner — CP437 0xFE, so the VGA face draws it from the DOS font rather than the Unifont
+      fallback tier. `layout_tabs` owns the columns, so drawing and hit-testing widen together; the
+      `+` hint and the clipped `…»` stub carry none. `TabManager::close_active` becomes
+      `close(index, fresh)` with a lazily-built `FreshTab`, closing any tab rather than only the
+      active one and never dragging the selection with a background tab that closes ahead of it.
+      Like `Tab(index)`, the close box calls the session directly: no `Action` can name a tab index.
+      *Proof:* `every_whole_chip_carries_a_close_box_and_nothing_else_does`,
+      `the_close_box_resolves_to_its_own_slot`, `a_clipped_chip_has_no_close_box_to_press`,
+      `closing_a_background_tab_leaves_the_same_tab_in_front`,
+      `a_close_box_closes_its_own_tab_and_leaves_the_front_one_in_front`,
+      `pressing_a_chip_beside_its_close_box_still_selects_the_tab`.
+- [x] **Page scrollbar** *(done)*. The content frame's right rail becomes `▲` cap, `▒` track, `█`
+      thumb, `▼` cap — always drawn, and a document that fits gets a full-track thumb. It takes over
+      the rail rather than claiming a column, so `content_cols` is unchanged and nothing reflows.
+      `ChromeLayout::scrollbar` is the one derivation both the painter and the pointer read, and the
+      VGA scaled-text overlay already clips to the band interior, so a 2x–4x glyph cannot bleed into
+      it. Caps and trough dispatch the existing `Scroll*` actions; only the thumb drag is new, since
+      no action can name an absolute position, and it round-trips exactly because placement rounds
+      down while its inverse rounds up. A drag owns the pointer — it keeps tracking off the bar,
+      hovers nothing it crosses, and ends when the pointer leaves the window, because nothing
+      captures the pointer and a button released outside is never reported.
+      *Proof:* `dragging_to_a_row_and_reading_it_back_lands_on_the_same_row`,
+      `an_unpainted_document_does_not_divide_by_zero`, `a_bar_too_short_for_caps_is_all_track`,
+      `the_scrollbar_owns_the_right_hand_column_of_the_content_band`,
+      `the_scrollbar_caps_step_a_row_and_the_trough_pages`,
+      `dragging_the_thumb_walks_the_document_to_both_ends`,
+      `a_thumb_drag_owns_the_pointer_and_lights_up_nothing_it_crosses`,
+      `leaving_the_window_ends_a_thumb_drag`.
+- [x] **Retained composition repaints the bar** *(done)*. A retained scroll moves a full-width
+      region, thumb included, so every frame that touched the content owes the column a repaint.
+      *Proof:* `a_retained_scroll_redraws_the_thumb_it_dragged_along`, plus the existing
+      `retained_scroll_matches_a_fresh_composition` and the real-pixel
+      `incremental_scroll_matches_a_fresh_full_compose_on_the_real_surface`, all three of which fail
+      without it.
+- [x] **Closing a tab renders its replacement** *(done — confirmed regression on the path)*.
+      `close_tab` never called `activate_current`, so the tab that came to the front kept showing a
+      stale page until an unrelated event poked it, while `NextTab`/`PrevTab`/`select_tab` all
+      refreshed. *Proof:* `closing_the_front_tab_renders_the_one_that_takes_its_place`.
+- **Acceptance:** the tests above are green; the human walkthrough of both affordances in the VGA
+  window and the terminal remains pending.
+
 ### M4 — JS seam (open)
 
 - [ ] `JsEngine` + `js` feature wiring in the composition root; runtime `--js=off` wins over feature.
@@ -1324,3 +1368,31 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   Softbuffer's Win32 backend was confirmed a single retained DIB (`age()` always 1), so the
   buffer-age/`damage_history` machinery is dead there and flagged for later removal. Native VGA
   smoke of scrolling still owed by the user; the fluency work (item two/three above) stays open.
+- 2026-08-25 — **M3 slice 3 added and delivered: the two chrome affordances the pointer was still
+  missing (user).** A tab could only be closed from the keyboard or the File menu — and only the
+  active one — and nothing on screen said where in a page you were. Both are now pointer targets.
+  Chips carry a Turbo Vision `[■]` close box (CP437 0xFE, so the VGA face draws it in the DOS font
+  rather than the Unifont fallback tier), three columns wider per chip, which makes the `…»` overflow
+  stub appear one tab sooner on a narrow strip — accepted over shortening `MAX_TAB_TITLE`. The
+  content frame's right rail becomes the page scrollbar (`▲ ▒ █ ▼`), taking the rail over rather
+  than claiming a column, so `content_cols` is unchanged and nothing reflows. Three decisions worth
+  keeping: the scrollbar is a *target* inside the content zone, not a zone of its own, matching how
+  toolbar buttons live inside the address zone; caps and trough dispatch the existing `Scroll*`
+  actions, and only the thumb drag is new, because no action can name an absolute position; and
+  thumb placement rounds down while its inverse rounds up, which is the only pairing that
+  round-trips a drag (rounding both ways down makes the thumb crawl backwards under the pointer —
+  caught by `dragging_to_a_row_and_reading_it_back_lands_on_the_same_row` before it ever ran).
+  Two defects found on the path and fixed here: the retained composer scrolls a full-width region,
+  so the thumb rode up with the text until every content-damaged frame was made to repaint the
+  column (all three of `retained_scroll_matches_a_fresh_composition`,
+  `a_retained_scroll_redraws_the_thumb_it_dragged_along` and the real-pixel
+  `incremental_scroll_matches_a_fresh_full_compose_on_the_real_surface` fail without it); and
+  `close_tab` never called `activate_current`, so the tab that came to the front kept a stale page
+  until an unrelated event poked it. `TabManager::close_active` became `close(index, fresh)` with a
+  lazily-built `FreshTab`, which also stops a start page being rendered for every close that throws
+  it away. All format, strict Clippy and default/JS/VGA/no-default gates green at 575 library tests
+  (543 without default features), plus 13 binary, 4 fetch-pipeline, 14 corpus and 32 render-golden.
+  **Open for the user's eye:** a document that fits paints the whole track as a solid `█` column —
+  visible in the regenerated 80x24 chrome golden. It follows from "the thumb fills the track", but
+  if it reads too loud in the window, drawing the bare `▒` track when `max_scroll == 0` is a
+  one-branch change. Human smoke of both affordances, in the VGA window and the terminal, is owed.

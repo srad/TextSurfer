@@ -2,6 +2,7 @@ use crate::core::geom::Size;
 use crate::pipeline::render::paint_document;
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::NORTON;
+use crate::ui::widgets::scrollbar::ScrollExtent;
 
 use super::super::startpage::start_page_for;
 use super::{App, apply_rendered_page};
@@ -79,6 +80,17 @@ impl App {
     pub(super) fn max_scroll(&self) -> usize {
         let rows = self.geometry.content_rows();
         self.tabs.active().painted.len().saturating_sub(rows)
+    }
+
+    /// What the page scrollbar measures. `rows` comes from the bar's own column so the
+    /// track the pointer hits is the track the painter drew.
+    pub(super) fn scroll_extent(&self) -> Option<ScrollExtent> {
+        let rect = self.geometry.scrollbar_rect()?;
+        Some(ScrollExtent {
+            rows: rect.height,
+            doc_rows: self.tabs.active().painted.len(),
+            scroll: self.tabs.active().scroll,
+        })
     }
 
     pub(super) fn page_step(&self) -> i32 {

@@ -7,6 +7,7 @@ use crate::core::geom::Point;
 use crate::ui::chrome::address_index_at;
 use crate::ui::keymap::Action;
 use crate::ui::mouse::{ChromeState, ChromeTarget};
+use crate::ui::widgets::scrollbar::{ScrollExtent, ScrollbarPart};
 
 use super::App;
 
@@ -24,9 +25,25 @@ pub(super) struct PressedTarget {
     pub(super) link: Option<NodeId>,
 }
 
+/// A scrollbar thumb being dragged, holding where inside the thumb it was grabbed so
+/// the thumb does not jump under the pointer on the first move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ScrollDrag {
+    pub(super) grab: u16,
+}
+
 impl App {
     pub fn handle_mouse(&mut self, event: MouseEvent) {
         if event.kind == MouseKind::Move && self.pointer == Some(event.at) {
+            return;
+        }
+        // A thumb drag owns the pointer until the button comes back up: it must keep
+        // tracking off the bar, and it must not light up whatever it passes over.
+        if event.kind == MouseKind::Move
+            && let Some(drag) = self.scroll_drag
+        {
+            self.pointer = Some(event.at);
+            self.drag_thumb(drag, event.at.row);
             return;
         }
         let previous_href = self.hovered_href().map(str::to_string);
@@ -76,10 +93,14 @@ impl App {
     }
 
     /// The pointer left the window, so nothing is hovered and no press is outstanding.
+    ///
+    /// A thumb drag ends here too. Nothing captures the pointer, so a button released
+    /// outside the window is never reported to us and the drag would otherwise stick.
     pub fn pointer_left(&mut self) {
         let had_href = self.hovered_href().is_some();
         self.pointer = None;
         self.pressed = None;
+        self.scroll_drag = None;
         self.hover = None;
         let painted_changed = self.sync_dynamic_state();
         if painted_changed {
@@ -102,6 +123,7 @@ impl App {
     }
 
     fn press(&mut self, target: ChromeTarget, button: MouseButton) {
+        self.scroll_drag = None;
         match button {
             MouseButton::Back => return self.apply(Action::Back),
             MouseButton::Forward => return self.apply(Action::Forward),
@@ -126,7 +148,11 @@ impl App {
         match target {
             ChromeTarget::MenuTitle(menu) => self.apply(Action::MenuOpen(menu)),
             ChromeTarget::Tab(index) => self.select_tab(index),
+            // No `Action` names a tab, so this goes straight to the session the way
+            // `Tab(index)` already does, rather than growing a second command set.
+            ChromeTarget::TabClose(index) => self.close_tab_at(index),
             ChromeTarget::NewTab => self.apply(Action::NewTab),
+            ChromeTarget::Scrollbar { row } => self.press_scrollbar(row),
             ChromeTarget::ToolbarButton(button) => match button {
                 0 => self.apply(Action::Back),
                 1 => self.apply(Action::Forward),
@@ -161,7 +187,44 @@ impl App {
         }
     }
 
+    /// Act on a press somewhere on the page scrollbar.
+    ///
+    /// The caps and the trough are the existing scroll actions — the mouse is not a
+    /// second command set. Only the thumb is new, because no action can name an
+    /// absolute position.
+    fn press_scrollbar(&mut self, row: u16) {
+        let Some(metrics) = self.scroll_extent().map(ScrollExtent::metrics) else {
+            return;
+        };
+        match metrics.part_at(row) {
+            ScrollbarPart::LineUp => self.apply(Action::ScrollUp),
+            ScrollbarPart::LineDown => self.apply(Action::ScrollDown),
+            ScrollbarPart::PageUp => self.apply(Action::ScrollPageUp),
+            ScrollbarPart::PageDown => self.apply(Action::ScrollPageDown),
+            ScrollbarPart::Thumb => {
+                self.scroll_drag = Some(ScrollDrag {
+                    grab: row - metrics.thumb.start,
+                });
+            }
+        }
+    }
+
+    fn drag_thumb(&mut self, drag: ScrollDrag, row: u16) {
+        let Some(extent) = self.scroll_extent() else {
+            return;
+        };
+        let top = self
+            .geometry
+            .scrollbar_rect()
+            .map_or(row, |rect| row.saturating_sub(rect.y));
+        let scroll = extent
+            .metrics()
+            .scroll_for_thumb_top(top.saturating_sub(drag.grab));
+        self.set_scroll(scroll);
+    }
+
     fn release(&mut self, target: ChromeTarget, button: MouseButton) {
+        self.scroll_drag = None;
         let Some(pressed) = self.pressed.as_ref().copied() else {
             return;
         };
@@ -186,7 +249,12 @@ impl App {
     }
 
     fn wheel(&mut self, target: ChromeTarget, rows: i32) {
-        if self.menu_open || !matches!(target, ChromeTarget::Content { .. }) {
+        if self.menu_open
+            || !matches!(
+                target,
+                ChromeTarget::Content { .. } | ChromeTarget::Scrollbar { .. }
+            )
+        {
             return;
         }
         self.scroll(rows);

@@ -2,4 +2,4 @@
 source: src/ui/widgets/tabs.rs
 expression: "render(&tabs, 1, 40)"
 ---
-│┌ a ┐ ┌ b ┐ ┌ c ┐ ┌ + ┐               │
+│┌ a [■]┐ ┌ b [■]┐ ┌ c [■]┐ ┌ + ┐      │

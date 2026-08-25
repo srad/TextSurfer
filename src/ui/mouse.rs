@@ -35,6 +35,9 @@ pub struct ChromeLayout {
     pub toolbar: Option<Rect>,
     pub toolbar_divider: Option<Rect>,
     pub content: Option<Rect>,
+    /// The content band's right-hand column, which the page scrollbar takes over from
+    /// the frame rail.
+    pub scrollbar: Option<Rect>,
     pub status: Option<Rect>,
 }
 
@@ -45,8 +48,14 @@ pub enum ChromeTarget {
     MenuTitle(usize),
     MenuItem(usize),
     Tab(usize),
+    /// A tab's close box, which is inside the chip but is not the chip.
+    TabClose(usize),
     NewTab,
     ToolbarButton(usize),
+    /// A cell of the page scrollbar, as a row offset inside the content band.
+    Scrollbar {
+        row: u16,
+    },
     /// A cell of the address field, as a column offset inside the toolbar row.
     Address {
         col: u16,
@@ -110,6 +119,15 @@ impl ChromeGeometry {
         self.content_view_in(Rect::new(0, 0, self.size.cols, self.size.rows))
     }
 
+    /// The column the page scrollbar owns, for its own size.
+    ///
+    /// The painter and the pointer both measure the track from this, so they cannot
+    /// disagree about how tall it is.
+    pub fn scrollbar_rect(&self) -> Option<Rect> {
+        self.layout(Rect::new(0, 0, self.size.cols, self.size.rows))
+            .scrollbar
+    }
+
     /// The same view for an area that is not the geometry's own size, which the chrome
     /// widgets are rendered into by several tests.
     pub fn content_view_in(&self, area: Rect) -> Option<ContentView> {
@@ -132,7 +150,9 @@ impl ChromeGeometry {
     ///
     /// An open dropdown is tested first: it overlays the zones below it, so a point
     /// inside it belongs to the menu however `zone_at` classifies the cell. Divider rows
-    /// are inert — only the rows a widget actually writes are live.
+    /// are inert — only the rows a widget actually writes are live. The scrollbar is a
+    /// target inside the content zone rather than a zone of its own, the way toolbar
+    /// buttons live inside the address zone.
     pub fn target_at(&self, at: Point, chrome: ChromeState<'_>) -> ChromeTarget {
         let area = Rect::new(0, 0, self.size.cols, self.size.rows);
         let position = Position::new(at.col, at.row);
@@ -142,7 +162,16 @@ impl ChromeGeometry {
             return ChromeTarget::MenuItem(item);
         }
         let layout = self.layout(area);
-        match self.zone_at(at) {
+        let zone = self.zone_at(at);
+        if zone == MouseZone::Content
+            && let Some(scrollbar) = layout.scrollbar
+            && scrollbar.contains(position)
+        {
+            return ChromeTarget::Scrollbar {
+                row: at.row - scrollbar.y,
+            };
+        }
+        match zone {
             MouseZone::Menu => title_at(at.col, self.size.cols)
                 .map_or(ChromeTarget::Inert, ChromeTarget::MenuTitle),
             MouseZone::Tabs => layout
@@ -158,6 +187,7 @@ impl ChromeGeometry {
                 })
                 .map_or(ChromeTarget::Inert, |slot| match slot {
                     TabSlot::Tab(index) => ChromeTarget::Tab(index),
+                    TabSlot::Close(index) => ChromeTarget::TabClose(index),
                     TabSlot::NewTab => ChromeTarget::NewTab,
                 }),
             MouseZone::Address => layout
@@ -219,14 +249,18 @@ impl ChromeGeometry {
         let band =
             |row: u16| (row < area.height).then(|| Rect::new(area.x, area.y + row, area.width, 1));
         let content_rows = area.height.saturating_sub(CHROME_ROWS);
+        let content =
+            (content_rows > 0).then(|| Rect::new(area.x, area.y + 5, area.width, content_rows));
         ChromeLayout {
             menu: band(0),
             tabs: band(1),
             tab_divider: band(2),
             toolbar: band(3),
             toolbar_divider: band(4),
-            content: (content_rows > 0)
-                .then(|| Rect::new(area.x, area.y + 5, area.width, content_rows)),
+            content,
+            scrollbar: content
+                .filter(|rect| rect.width >= 2)
+                .map(|rect| Rect::new(rect.right() - 1, rect.y, 1, rect.height)),
             status: (area.height >= CHROME_ROWS)
                 .then(|| Rect::new(area.x, area.bottom() - 1, area.width, 1)),
         }
@@ -322,9 +356,63 @@ mod tests {
             target(Point { col: 78, row: 22 }, None),
             ChromeTarget::Content { col: 77, row: 17 }
         );
-        // The frame rails are not the document.
+        // The left rail is not the document, and the right one is the scrollbar.
         assert_eq!(target(Point { col: 0, row: 5 }, None), ChromeTarget::Inert);
-        assert_eq!(target(Point { col: 79, row: 5 }, None), ChromeTarget::Inert);
+        assert_eq!(
+            target(Point { col: 79, row: 5 }, None),
+            ChromeTarget::Scrollbar { row: 0 }
+        );
+    }
+
+    #[test]
+    fn the_scrollbar_owns_the_right_hand_column_of_the_content_band() {
+        for (row, expected) in [(5u16, 0u16), (22, 17)] {
+            assert_eq!(
+                target(Point { col: 79, row }, None),
+                ChromeTarget::Scrollbar { row: expected },
+                "screen row {row}",
+            );
+        }
+        // Above and below the band it is chrome, not bar.
+        assert_ne!(
+            target(Point { col: 79, row: 4 }, None),
+            ChromeTarget::Scrollbar { row: 0 }
+        );
+        assert_eq!(
+            target(Point { col: 79, row: 23 }, None),
+            ChromeTarget::Inert
+        );
+    }
+
+    #[test]
+    fn an_open_dropdown_does_not_swallow_the_scrollbar_beside_it() {
+        // The popup is anchored under its title and never reaches the right edge, so
+        // the bar stays live while a menu is open.
+        assert_eq!(
+            target(Point { col: 79, row: 5 }, Some(0)),
+            ChromeTarget::Scrollbar { row: 0 }
+        );
+    }
+
+    #[test]
+    fn a_window_too_narrow_for_a_frame_has_no_scrollbar() {
+        assert_eq!(
+            ChromeGeometry::for_size(Size { cols: 1, rows: 24 }).scrollbar_rect(),
+            None
+        );
+        let bandless = ChromeGeometry::for_size(Size { cols: 40, rows: 6 });
+        assert_eq!(bandless.scrollbar_rect(), None);
+    }
+
+    #[test]
+    fn the_scrollbar_column_is_the_bands_last_and_as_tall_as_the_view() {
+        let g = geometry();
+        let rect = g.scrollbar_rect().expect("a scrollbar column");
+        let view = g.content_view().expect("a content view");
+        assert_eq!(rect.x, view.origin.col + view.cols);
+        assert_eq!(rect.width, 1);
+        assert_eq!(rect.y, view.origin.row);
+        assert_eq!(rect.height, view.rows);
     }
 
     #[test]

@@ -108,6 +108,37 @@ fn a_background_tabs_current_fetch_is_delivered_to_that_tab() {
 }
 
 #[test]
+fn closing_the_front_tab_renders_the_one_that_takes_its_place() {
+    // Closing changes which tab is in front, so like every other tab switch it owes the
+    // newcomer a render; otherwise its finished load waits for an unrelated keystroke.
+    let mut app = App::new();
+    app.submit_url("https://a.example");
+    let background_tab_id = app.tabs.active().id;
+    let background_generation = app.tabs.active().generation;
+    app.new_tab();
+    assert!(app.deliver_fetch(FetchPayload {
+        tab_id: background_tab_id,
+        generation: background_generation,
+        resource_id: ResourceId::DOCUMENT,
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://a.example/final").unwrap(),
+            body: b"<p>background complete</p>".to_vec(),
+            content_type: Some("text/html; charset=\"utf-8\"".to_string()),
+        }),
+    }));
+    app.close_tab_at(app.tabs.active_index());
+    assert_eq!(app.tab_count(), 1);
+    assert!(
+        app.tabs
+            .active()
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("background complete"))
+    );
+}
+
+#[test]
 fn late_stylesheet_repaint_clamps_active_tab_scroll() {
     let (mut app, stylesheet) = scrolled_page_waiting_for_late_stylesheet();
     assert!(app.deliver_fetch(hide_all_paragraphs(stylesheet)));

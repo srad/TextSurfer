@@ -5,7 +5,8 @@ use ratatui::layout::Rect;
 use crate::core::frame::{ChromeDamage, FrameDamage, RowDamage};
 
 use super::chrome::{
-    ChromeView, compose, compose_content_rows, compose_status, content_rect, cursor_position,
+    ChromeView, compose, compose_content_rows, compose_scrollbar, compose_status, content_rect,
+    cursor_position,
 };
 
 pub struct FrameComposer {
@@ -77,6 +78,15 @@ impl FrameComposer {
                 && let Some(content) = content_rect(view, area)
                 && let Some(rect) =
                     compose_content_rows(&mut self.current, view, area, 0..content.height)
+            {
+                regions.push(rect);
+            }
+            // The scroll region is full-width, so the thumb travelled with the text it
+            // measures; anything that touched the content owes the bar a repaint.
+            let content_changed = damage.content.scroll_rows != 0
+                || damage.content.full
+                || damage.content.repaint != RowDamage::None;
+            if content_changed && let Some(rect) = compose_scrollbar(&mut self.current, view, area)
             {
                 regions.push(rect);
             }
@@ -223,6 +233,43 @@ mod tests {
         let mut damage = FrameDamage::default();
         damage.scroll(3);
         composer.present(&mut backend, &view, &damage).unwrap();
+        let mut expected = Buffer::empty(area);
+        compose(area, &mut expected, &view);
+        assert_eq!(backend.buffer(), &expected);
+        assert!(composer.last_drawn_cells() < usize::from(area.width * area.height));
+    }
+
+    #[test]
+    fn a_retained_scroll_redraws_the_thumb_it_dragged_along() {
+        // The scroll region is full-width, so without a repaint the thumb would ride up
+        // with the text instead of measuring it.
+        let lines = (0..100).map(|row| format!("row {row}")).collect::<Vec<_>>();
+        let painted = DisplayList::from_lines(&lines);
+        let size = crate::core::geom::Size { cols: 60, rows: 24 };
+        let area = Rect::new(0, 0, size.cols, size.rows);
+        let mut view = draft_view();
+        view.geometry = crate::ui::mouse::ChromeGeometry::for_size(size);
+        view.content.painted = &painted;
+        let mut backend = TestBackend::new(size.cols, size.rows);
+        let mut composer = FrameComposer::new(area);
+        composer
+            .present(&mut backend, &view, &FrameDamage::full())
+            .unwrap();
+        let thumb_top = |backend: &TestBackend| {
+            (0..size.rows).find(|row| backend.buffer()[(size.cols - 1, *row)].symbol() == "█")
+        };
+        let before = thumb_top(&backend).expect("a thumb on a document this long");
+
+        view.content.scroll = 10;
+        let mut damage = FrameDamage::default();
+        damage.scroll(10);
+        composer.present(&mut backend, &view, &damage).unwrap();
+
+        assert_ne!(
+            thumb_top(&backend),
+            Some(before),
+            "the thumb must follow the scroll it reports"
+        );
         let mut expected = Buffer::empty(area);
         compose(area, &mut expected, &view);
         assert_eq!(backend.buffer(), &expected);

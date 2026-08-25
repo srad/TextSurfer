@@ -21,7 +21,7 @@ impl App {
         match action {
             Action::Quit => self.quit = true,
             Action::NewTab => self.new_tab(),
-            Action::CloseTab => self.close_tab(),
+            Action::CloseTab => self.close_tab_at(self.tabs.active_index()),
             Action::NextTab => {
                 self.tabs.next();
                 self.activate_current();

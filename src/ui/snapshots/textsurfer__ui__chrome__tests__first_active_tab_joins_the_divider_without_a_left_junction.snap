@@ -3,10 +3,10 @@ source: src/ui/chrome.rs
 expression: rendered
 ---
  File  Navigate  View  Help  TextSurfer 
-│┌ first ┐ ┌ + ┐                       │
-│┘       └─────────────────────────────┤
+│┌ first [■]┐ ┌ + ┐                    │
+│┘          └──────────────────────────┤
 │[‹] [›] [↻] [⌂]  URL: │https://example│
 ├──────────────────────────────────────┤
-│hello                                 │
-│                                      │
+│hello                                 █
+│                                      █
 Ready               https://example.com

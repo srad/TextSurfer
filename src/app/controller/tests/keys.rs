@@ -241,7 +241,7 @@ fn closing_a_tab_from_the_menu_syncs_the_focused_address() {
     app.new_tab();
     app.tabs.active_mut().url = "https://second.example/".to_string();
     app.address.set_text("unfinished draft");
-    app.close_tab();
+    app.close_tab_at(app.tabs.active_index());
     assert_eq!(app.focus(), Focus::Address);
     assert_eq!(app.chrome_view().address, "https://first.example/");
 }
