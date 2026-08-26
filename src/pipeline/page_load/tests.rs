@@ -21,6 +21,58 @@ fn load(source: &str) -> PageLoad {
 }
 
 #[test]
+fn scripting_off_discovers_duckduckgos_noscript_refresh() {
+    let load = load(
+        "<script>window.parent.location.replace('bad')</script>
+         <noscript><meta http-equiv='refresh'
+         content='0;URL=https://en.wikipedia.org/wiki/Central_processing_unit'></noscript>",
+    );
+    assert_eq!(
+        load.immediate_refresh().map(Url::as_str),
+        Some("https://en.wikipedia.org/wiki/Central_processing_unit")
+    );
+}
+
+#[test]
+fn declarative_refresh_uses_the_document_base_and_whatwg_prefix_grammar() {
+    for (content, expected) in [
+        ("0; URL=../next", Some("https://example.com/next")),
+        ("0,URL=\"/quoted\" tail", Some("https://example.com/quoted")),
+        (".5 /fraction", Some("https://example.com/fraction")),
+        ("nope;url=/bad", None),
+    ] {
+        let load = load(&format!(
+            "<base href='/dir/'><meta http-equiv=ReFrEsH content='{content}'>"
+        ));
+        assert_eq!(load.immediate_refresh().map(Url::as_str), expected);
+    }
+
+    let self_refresh = load("<base href='/other/'><meta http-equiv=refresh content='0'>");
+    assert_eq!(
+        self_refresh.immediate_refresh().map(Url::as_str),
+        Some("https://example.com/dir/page")
+    );
+}
+
+#[test]
+fn the_first_accepted_refresh_wins_and_delayed_or_javascript_targets_are_inert() {
+    let delayed = load(
+        "<meta http-equiv=refresh content='999999999999999999999999999999;url=/later'>
+         <meta http-equiv=refresh content='0;url=/wrong'>",
+    );
+    assert_eq!(delayed.immediate_refresh(), None);
+
+    let safe = load(
+        "<meta http-equiv=refresh content='0;javascript:alert(1)'>
+         <meta http-equiv=refresh content='0;url=/safe'>",
+    );
+    assert_eq!(
+        safe.immediate_refresh().map(Url::as_str),
+        Some("https://example.com/safe")
+    );
+}
+
+#[test]
 fn discovers_ordered_links_and_honors_base_filters_and_fragments() {
     let mut load = load(
         "<base href='/assets/'><link rel='alternate stylesheet' href='skip.css'>

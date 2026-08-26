@@ -60,10 +60,8 @@ impl App {
                 .as_mut()
                 .and_then(|load| load.render_if_ready(now));
             if let Some(page) = page {
-                let css_warnings = page.css_warnings;
-                let parse_errors = page.parse_errors;
                 apply_rendered_page(active, page, width, rows);
-                update_load_message(active, parse_errors, css_warnings);
+                update_load_message(active);
                 true
             } else {
                 false
@@ -106,6 +104,7 @@ impl App {
         let color_scheme = self.color_scheme();
         let mut commands = Vec::new();
         let mut cancel = false;
+        let mut declarative_refresh = None;
         let mut visible_change;
         let mut active_display_changed = false;
         let accepted = {
@@ -126,10 +125,8 @@ impl App {
                     .then(|| load.render_if_ready(self.now))
                     .flatten();
                 if let Some(page) = page {
-                    let css_warnings = page.css_warnings;
-                    let parse_errors = page.parse_errors;
                     apply_rendered_page(tab, page, width, rows);
-                    update_load_message(tab, parse_errors, css_warnings);
+                    update_load_message(tab);
                     visible_change = true;
                     active_display_changed = true;
                 } else if index != active_index {
@@ -189,32 +186,38 @@ impl App {
                                             started: self.now,
                                         },
                                     );
-                                    commands = load.take_commands();
-                                    cancel = load.take_cancel_requested();
-                                    let parse_errors = load.parse_errors();
-                                    let page = (index == active_index)
-                                        .then(|| load.render_if_ready(self.now))
-                                        .flatten();
                                     tab.base = Some(load.base_url().clone());
-                                    tab.load = Some(load);
-                                    if let Some(page) = page {
-                                        let css_warnings = page.css_warnings;
-                                        apply_rendered_page(tab, page, width, rows);
-                                        update_load_message(tab, parse_errors, css_warnings);
-                                        // The server's own error page renders, but the
-                                        // reader still has to know it is one.
-                                        if let Some(note) = &status_note {
-                                            tab.message = format!("{note} - {}", tab.message);
-                                        }
-                                        active_display_changed = true;
+                                    if let Some(url) = load.immediate_refresh().cloned() {
+                                        tab.message = format!("redirecting to {url}");
+                                        tab.load = Some(load);
+                                        declarative_refresh = Some(url);
                                     } else {
-                                        tab.render_dirty = index != active_index;
-                                        let count = tab
-                                            .load
-                                            .as_ref()
-                                            .map_or(0, PageLoad::external_occurrences);
-                                        tab.message =
-                                            format!("loading {} ({count} stylesheets)", tab.url);
+                                        commands = load.take_commands();
+                                        cancel = load.take_cancel_requested();
+                                        let page = (index == active_index)
+                                            .then(|| load.render_if_ready(self.now))
+                                            .flatten();
+                                        tab.load = Some(load);
+                                        if let Some(page) = page {
+                                            apply_rendered_page(tab, page, width, rows);
+                                            update_load_message(tab);
+                                            // The server's own error page renders, but the
+                                            // reader still has to know it is one.
+                                            if let Some(note) = &status_note {
+                                                tab.message = format!("{note} - {}", tab.message);
+                                            }
+                                            active_display_changed = true;
+                                        } else {
+                                            tab.render_dirty = index != active_index;
+                                            let count = tab
+                                                .load
+                                                .as_ref()
+                                                .map_or(0, PageLoad::external_occurrences);
+                                            tab.message = format!(
+                                                "loading {} ({count} stylesheets)",
+                                                tab.url
+                                            );
+                                        }
                                     }
                                 }
                                 ResponseKind::PlainText => {
@@ -230,10 +233,7 @@ impl App {
                                             .map(str::to_string)
                                             .collect::<Vec<_>>(),
                                     );
-                                    tab.message = format!(
-                                        "accepted gen {} - {} (plain text)",
-                                        generation, tab.url
-                                    );
+                                    tab.message = format!("loaded {} (plain text)", tab.url);
                                     active_display_changed = index == active_index;
                                 }
                                 ResponseKind::Unsupported(content_type) => {
@@ -263,13 +263,17 @@ impl App {
                             String::new(),
                             format!("  {error}"),
                         ]);
-                        tab.message = format!("accepted gen {generation} - load failed: {error}");
+                        tab.message = format!("load failed: {error}");
                         active_display_changed = index == active_index;
                     }
                 }
                 true
             }
         };
+        if let Some(url) = declarative_refresh {
+            self.follow_declarative_refresh(tab_id, &url);
+            return accepted;
+        }
         for command in commands {
             self.net
                 .submit(tab_id, generation, command.resource_id, command.url);
@@ -296,46 +300,37 @@ pub(super) fn apply_rendered_page(tab: &mut Tab, page: RenderedPage, width: usiz
     tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
 }
 
-/// What layout could not do for this page, or `""` when it did everything.
-fn layout_note(tab: &Tab) -> &'static str {
+/// What layout could not do for this page.
+fn layout_note(tab: &Tab) -> Option<&'static str> {
     let limits = tab.painted.limits;
     if limits.engine_failed {
-        ", layout failed"
+        Some("layout failed")
     } else if limits.truncated_depth {
-        ", nesting truncated"
+        Some("nesting truncated")
     } else {
-        ""
+        None
     }
 }
 
-pub(super) fn update_load_message(tab: &mut Tab, parse_errors: usize, css_warnings: usize) {
-    let note = layout_note(tab);
+pub(super) fn update_load_message(tab: &mut Tab) {
     let Some(load) = tab.load.as_ref() else {
         return;
     };
-    let occurrences = load.external_occurrences();
     let failures = load.failed_resources();
-    if occurrences == 0 && failures == 0 && !load.external_disabled() {
-        tab.message = if css_warnings == 0 {
-            format!(
-                "accepted gen {} - {} ({} parse errors{note})",
-                tab.generation, tab.url, parse_errors
-            )
-        } else {
-            format!(
-                "accepted gen {} - {} ({} parse errors, {} CSS warnings{note})",
-                tab.generation, tab.url, parse_errors, css_warnings
-            )
-        };
-        return;
+    let mut notes = Vec::new();
+    if failures > 0 {
+        let suffix = if failures == 1 { "" } else { "s" };
+        notes.push(format!("{failures} stylesheet{suffix} failed"));
     }
-    let disabled = if load.external_disabled() {
-        ", external CSS disabled"
+    if load.external_disabled() {
+        notes.push("external CSS disabled".to_string());
+    }
+    if let Some(note) = layout_note(tab) {
+        notes.push(note.to_string());
+    }
+    tab.message = if notes.is_empty() {
+        format!("loaded {}", tab.url)
     } else {
-        ""
+        format!("loaded {} ({})", tab.url, notes.join(", "))
     };
-    tab.message = format!(
-        "accepted gen {} - {} ({} parse errors, {} CSS warnings, {} stylesheets, {} failed{}{note})",
-        tab.generation, tab.url, parse_errors, css_warnings, occurrences, failures, disabled
-    );
 }

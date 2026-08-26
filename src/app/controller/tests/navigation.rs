@@ -78,7 +78,8 @@ fn back_and_forward_navigate_in_place_and_refetch() {
     app.step(Duration::ZERO);
     assert_eq!(app.tab_count(), 1);
     assert!(app.active_url().starts_with("https://a.example"));
-    assert!(app.message().contains("accepted gen 3"));
+    assert_eq!(app.tabs.active().generation, 3);
+    assert!(app.message().starts_with("loaded https://a.example"));
     assert!(app.chrome_view().can_forward);
     app.handle_key(alt(press(Key::Right)));
     assert_eq!(app.active_url(), "about:blank");
@@ -92,11 +93,13 @@ fn reload_refetches_the_current_url_in_place() {
     app.handle_key(press(Key::Esc));
     app.submit_url("https://a.example");
     app.step(Duration::ZERO);
-    assert!(app.message().contains("accepted gen 1"));
+    assert_eq!(app.tabs.active().generation, 1);
+    assert!(app.message().starts_with("loaded https://a.example"));
     app.handle_key(press(Key::Char('r')));
     app.step(Duration::ZERO);
     assert_eq!(app.tab_count(), 1);
-    assert!(app.message().contains("accepted gen 2"));
+    assert_eq!(app.tabs.active().generation, 2);
+    assert!(app.message().starts_with("loaded https://a.example"));
     assert!(app.active_url().starts_with("https://a.example"));
 }
 

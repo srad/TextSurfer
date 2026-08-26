@@ -30,6 +30,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | `font-size` computed-value grammar (M1-D) | narrow standards adapter | **Keep narrow adapter** — cssparser owns tokenization, dimensions, percentages, functions and recovery; the adapter maps the supported Fonts/CSS-wide keywords and length-percentage forms onto the frontend-neutral computed typography model. Full font selection remains outside the raster-font scope; M6 CSS math reuses the same token stream and typed evaluator |
 | CSS custom properties and `var()` (M6) | custom cascade adapter | **Keep narrow adapter** — cssparser 0.37.0 owns tokens, nesting, escapes and source positions; per-element inheritance, dependency cycles and computed-value substitution are cascade behavior. LightningCSS exposes a static build-time map and `muskitty-values` is parse-only, so neither can supply the runtime element environment. Stable Custom Properties Level 1 is implemented without a new dependency |
 | CSS math values (M6) | narrow standards adapter | **Keep narrow adapter** — cssparser 0.37.0 owns tokenization, functions, nested blocks and recovery. `muskitty-css-values` 0.1.0 is parse-only, uses an independent tokenizer, lacks computed-value type checking, percentage-basis evaluation, resource ceilings and `clamp(..., none, ...)`, and therefore cannot replace this bounded evaluator without importing another CSS stack |
+| Declarative refresh content (M2) | narrow standards adapter | **Keep narrow adapter** — html5ever owns HTML parsing and `<noscript>` behavior, while url 2.5.8 owns relative resolution. A 2026-08-26 crates.io search found no focused implementation of WHATWG's `meta[http-equiv=refresh]` content microsyntax; keep that scanner isolated from navigation policy and cap automatic chains in `app` |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
 ### Prior-art audit (2026-08-22)
@@ -75,8 +76,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-26): **819 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 42 golden** with the default VGA frontend, and **726 lib · 12 binary** with
+Test counts at the last green run (2026-08-26): **829 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 42 golden** with the default VGA frontend, and **736 lib · 12 binary** with
 `--no-default-features`; the WPT integration target adds 4 passing tests and one deliberately
 ignored child-worker entry.
 Cross-cutting: test infrastructure (in progress: incremental static WPT backfill, corpus error-count
@@ -639,6 +640,20 @@ sniffing and the rendered error pages are next, and the keyboard items after the
       non-2xx up front, so a 404 body can never be parsed as CSS. Still open: the failure screens are
       the old three-line stub, and the unparseable-URL and unknown-scheme paths
       (`navigation.rs`) still paint nothing at all — both need the real themed page.
+- [x] **Reader-facing load status** *(done — user smoke confirmed)* — a successfully rendered document reports that
+      it loaded, not html5ever's recoverable parse-error count, CSS parser telemetry, generation
+      numbers or accepted-resource internals. Preserve those diagnostics in their owning pipeline
+      results and tests. The status bar still surfaces actionable HTTP, fetch, stylesheet and layout
+      failures, including nesting truncation and a disabled external-CSS path.
+- [x] **Declarative refresh navigation** *(done — user smoke confirmed)* — recognize the first valid WHATWG
+      `meta[http-equiv=refresh]` directive in document order, including markup inside `<noscript>`
+      when scripting is disabled. The pipeline parses the bounded content microsyntax and resolves
+      its URL through `url`; `app` performs zero-delay navigation through the per-load pivot and
+      `--dump` follows the same bounded route. The trampoline's history entry is replaced and
+      automatic chains stop at eight. Delayed refreshes remain inert until M2 has a user-visible
+      timer/cancel interaction. *Proof:* the live
+      DuckDuckGo `cpu` → Wikipedia 200-HTML trampoline, relative/base and malformed grammar cases,
+      replace-history behavior, background-tab isolation and a bounded self-refresh chain.
 - [ ] **Content-type honesty** — a missing or unparseable `Content-Type` currently defaults to HTML,
       so a binary body is parsed and painted as garbage. Sniff (WHATWG minimum: leading `<`,
       BOM/NUL heuristics) and otherwise refuse with the unsupported-type page.
@@ -996,6 +1011,36 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-26 — **DuckDuckGo click-through smoke passed.** The user confirmed that searching for
+  `cpu` and opening the first Wikipedia result now loads the destination successfully. This closes
+  the human acceptance gate for declarative refresh navigation and the reader-facing load status.
+- 2026-08-26 — **Declarative refresh navigation delivered; human VGA click-through re-smoke
+  pending.** The isolated pipeline scanner follows the WHATWG prefix grammar, scripting-disabled
+  `<noscript>` parsing, document/base URL rules, first-accepted directive semantics and a 4 KiB
+  input ceiling. The app replaces wrapper history, preserves background-tab ownership and stops
+  automatic chains after eight pivots; dump mode follows the same bounded path. The exact live
+  DuckDuckGo `cpu` wrapper now renders Wikipedia's Central processing unit article. Format, all
+  three strict Clippy configurations and the default/JS/VGA/no-default matrices are green at 829
+  library tests (736 without defaults), 13/12 binary, 6 fetch-pipeline, 14 corpus and 42 golden.
+- 2026-08-26 — **DuckDuckGo click-through hang reproduced and declarative-refresh repair started.**
+  The `cpu` result points to DuckDuckGo's `/l/?uddg=…&rut=…` wrapper. A live fetch proves it returns
+  HTTP 200 with an empty script-driven body plus
+  `<noscript><meta http-equiv=refresh content='0;URL=https://en.wikipedia.org/...'>`; it is not an
+  HTTP redirect, so ureq correctly has nothing to follow. TextSurfer will implement the WHATWG
+  declarative-refresh seam rather than special-case DuckDuckGo. Only zero-delay navigation is
+  admitted now, with replace-history semantics, per-tab generation pivots and an eight-hop cap.
+- 2026-08-26 — **Reader-facing load status delivered; human DuckDuckGo re-smoke pending.** A
+  malformed-but-recoverable HTML controller fixture first reproduced `1 parse errors`; successful
+  HTML and plain-text loads now report `loaded <url>` without parser, CSS, generation or accepted-
+  resource telemetry. HTTP/fetch failures, stylesheet failures, external-CSS shutdown and layout
+  degradation remain visible. The focused controller and composed-fetch regressions pass, followed
+  by format, all three strict Clippy configurations and the default/JS/VGA/no-default matrices at
+  821 library tests (728 without defaults), 13/12 binary, 6 fetch-pipeline, 14 corpus and 42 golden.
+- 2026-08-26 — **Reader-facing load-status repair started from DuckDuckGo navigation evidence.** A
+  clicked result rendered, but the context bar presented html5ever's single recoverable conformance
+  error as `1 parse error`. Parse recovery is not a load failure and ordinary readers cannot act on
+  CSS warning counts or generation/resource telemetry. The M2 status path will retain actionable
+  HTTP, fetch, stylesheet and layout failures while a successful page reports only that it loaded.
 - 2026-08-26 — **Real-site smoke passed; CSS math and the static WPT pilot are done.** The user
   reports the manual smoke looks correct after the table-intersection and Wikipedia search-control
   repairs. This closes the reopened CSS-math acceptance gate and the pilot's final human gate;

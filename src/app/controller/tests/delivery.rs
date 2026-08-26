@@ -73,7 +73,7 @@ fn stale_fetch_results_are_dropped_fresh_ones_accepted() {
             content_type: None,
         }),
     }));
-    assert!(app.message().contains("accepted"));
+    assert_eq!(app.message(), "loaded https://example.com/");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn a_background_tabs_current_fetch_is_delivered_to_that_tab() {
             .iter()
             .any(|line| line.contains("background complete"))
     );
-    assert!(app.message().contains("accepted gen"));
+    assert_eq!(app.message(), "loaded https://a.example/final");
 }
 
 #[test]
@@ -192,10 +192,7 @@ fn fake_fetch_loads_the_rendered_document_into_the_tab() {
         Some("hi there")
     );
     assert_eq!(tab.title, "https://example.com/");
-    assert!(
-        app.message()
-            .contains("accepted gen 1 - https://example.com/")
-    );
+    assert_eq!(app.message(), "loaded https://example.com/");
 }
 
 #[test]
@@ -333,10 +330,7 @@ fn valid_imports_are_scheduled_and_late_imports_warn() {
     );
     assert_eq!(fake.submitted.lock().unwrap().len(), 2);
     app.step(Duration::ZERO);
-    assert_eq!(
-        app.message(),
-        "accepted gen 1 - https://example.com/ (0 parse errors, 1 CSS warnings, 1 stylesheets, 0 failed)"
-    );
+    assert_eq!(app.message(), "loaded https://example.com/");
     assert!(
         app.tabs
             .active()
@@ -348,7 +342,27 @@ fn valid_imports_are_scheduled_and_late_imports_warn() {
 }
 
 #[test]
-fn zero_css_warnings_preserve_the_existing_acceptance_message() {
+fn failed_stylesheets_remain_visible_in_the_load_status() {
+    let fake = Arc::new(FakeNet::serving(
+        "<!doctype html><link rel=stylesheet href=missing.css><p>shown</p>",
+    ));
+    let mut app = App::with_net(fake.clone());
+    app.submit_url("https://example.com");
+    let document = fake.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(document));
+    let stylesheet = fake.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Err(FetchError::Network("missing".to_string())),
+        ..stylesheet
+    }));
+    assert_eq!(
+        app.message(),
+        "loaded https://example.com/ (1 stylesheet failed)"
+    );
+}
+
+#[test]
+fn successful_html_reports_a_reader_facing_load_message() {
     let mut app = App::new();
     app.submit_url("https://example.com");
     let generation = app.tabs.active().generation;
@@ -364,10 +378,98 @@ fn zero_css_warnings_preserve_the_existing_acceptance_message() {
             content_type: Some("text/html; charset=utf-8".to_string()),
         }),
     }));
+    assert_eq!(app.message(), "loaded https://example.com/");
+}
+
+#[test]
+fn recoverable_html_parse_errors_are_not_reported_as_load_failures() {
+    let mut app = App::new();
+    app.submit_url("https://example.com");
+    let generation = app.tabs.active().generation;
+    let tab_id = app.tabs.active().id;
+    assert!(app.deliver_fetch(FetchPayload {
+        tab_id,
+        generation,
+        resource_id: ResourceId::DOCUMENT,
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/").unwrap(),
+            status: 200,
+            body: b"<!doctype html><p>shown</p".to_vec(),
+            content_type: Some("text/html; charset=utf-8".to_string()),
+        }),
+    }));
+    assert_eq!(app.message(), "loaded https://example.com/");
+}
+
+#[test]
+fn duckduckgo_noscript_refresh_replaces_the_wrapper_and_loads_wikipedia() {
+    let fake = Arc::new(FakeNet::default());
+    let mut app = App::with_net(fake.clone());
+    let wrapper = "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FCentral_processing_unit&rut=token";
+    app.submit_url(wrapper);
+    let request = fake.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse(wrapper).unwrap(),
+            status: 200,
+            body: b"<noscript><meta http-equiv='refresh' content='0;URL=https://en.wikipedia.org/wiki/Central_processing_unit'></noscript>".to_vec(),
+            content_type: Some("text/html; charset=utf-8".to_string()),
+        }),
+        ..request
+    }));
+    assert_eq!(
+        app.active_url(),
+        "https://en.wikipedia.org/wiki/Central_processing_unit"
+    );
+    assert_eq!(
+        app.tabs.active().history,
+        ["https://en.wikipedia.org/wiki/Central_processing_unit"]
+    );
+    let wikipedia = fake.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(wikipedia));
     assert_eq!(
         app.message(),
-        "accepted gen 1 - https://example.com/ (0 parse errors)"
+        "loaded https://en.wikipedia.org/wiki/Central_processing_unit"
     );
+}
+
+#[test]
+fn a_background_tabs_declarative_refresh_stays_in_that_tab() {
+    let fake = Arc::new(FakeNet::default());
+    let mut app = App::with_net(fake.clone());
+    app.submit_url("https://example.com/wrapper");
+    app.new_tab();
+    let wrapper = fake.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/wrapper").unwrap(),
+            status: 200,
+            body: b"<meta http-equiv=refresh content='0;url=/destination'>".to_vec(),
+            content_type: Some("text/html; charset=utf-8".to_string()),
+        }),
+        ..wrapper
+    }));
+    assert!(app.active_url().is_empty());
+    assert_eq!(app.tabs.tabs()[0].url, "https://example.com/destination");
+    let destination = fake.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(destination));
+    assert_eq!(
+        app.tabs.tabs()[0].message,
+        "loading https://example.com/destination (0 stylesheets)"
+    );
+    assert!(app.active_url().is_empty());
+}
+
+#[test]
+fn automatic_declarative_refresh_chains_are_bounded() {
+    let fake = Arc::new(FakeNet::serving(
+        "<meta http-equiv=refresh content='0;url=/loop'>",
+    ));
+    let mut app = App::with_net(fake);
+    app.submit_url("https://example.com/loop");
+    app.step(Duration::ZERO);
+    assert_eq!(app.message(), "automatic redirect limit reached");
+    assert!(!app.tabs.active().document_pending);
 }
 
 #[test]

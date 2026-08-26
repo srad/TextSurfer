@@ -134,7 +134,7 @@ fn composed_pipeline_loads_and_renders_http_html() {
             .iter()
             .any(|line| line.contains("acceptance"))
     );
-    assert!(app.message().contains("accepted gen 1"));
+    assert_eq!(app.message(), "loaded https://example.com/");
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn composed_pipeline_routes_file_urls_through_the_file_fetch_boundary() {
             .iter()
             .any(|line| line.contains("acceptance"))
     );
-    assert!(app.message().contains("accepted gen 1"));
+    assert_eq!(app.message(), "loaded file:///fixture.html");
 }
 
 #[test]
@@ -235,5 +235,5 @@ fn composed_pipeline_applies_external_author_styles() {
     let lines = app.chrome_view().content.painted.text_lines();
     assert!(lines.iter().any(|line| line.contains("article")));
     assert!(!lines.iter().any(|line| line.contains("sidebar")));
-    assert!(app.message().contains("1 stylesheets"));
+    assert_eq!(app.message(), "loaded https://example.com/article");
 }

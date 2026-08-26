@@ -27,6 +27,7 @@ pub struct Tab {
     pub load: Option<PageLoad>,
     pub document_pending: bool,
     pub render_dirty: bool,
+    pub automatic_redirects: u8,
     pub(crate) dom_focus: Option<FocusedNode>,
 }
 
@@ -65,6 +66,7 @@ impl Tab {
             load: None,
             document_pending: false,
             render_dirty: false,
+            automatic_redirects: 0,
             dom_focus: None,
         }
     }
@@ -77,6 +79,15 @@ impl Tab {
             self.history.push(url.to_string());
         }
         self.history_pos = self.history.len() - 1;
+    }
+
+    pub fn replace_history(&mut self, url: &str) {
+        if let Some(entry) = self.history.get_mut(self.history_pos) {
+            *entry = url.to_string();
+        } else {
+            self.history.push(url.to_string());
+            self.history_pos = 0;
+        }
     }
 
     pub fn back(&mut self) -> bool {

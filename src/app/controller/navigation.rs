@@ -2,10 +2,17 @@ use crate::core::focus::Focus;
 use crate::core::url::url_fix;
 use crate::net::{ResourceId, Submitted};
 use crate::paint::DisplayList;
+use crate::pipeline::page_load::MAX_DECLARATIVE_REFRESHES;
 
 use super::super::net::{Route, route};
 use super::super::startpage::{content_for, start_page_for};
 use super::{App, content_viewport};
+
+enum HistoryUpdate {
+    Keep,
+    Push,
+    Replace,
+}
 
 impl App {
     pub fn submit_url(&mut self, url: &str) {
@@ -31,6 +38,34 @@ impl App {
     }
 
     fn navigate(&mut self, raw: &str, record: bool) {
+        let index = self.tabs.active_index();
+        self.tabs.tabs_mut()[index].automatic_redirects = 0;
+        let history = if record {
+            HistoryUpdate::Push
+        } else {
+            HistoryUpdate::Keep
+        };
+        self.navigate_at(index, raw, history);
+    }
+
+    pub(super) fn follow_declarative_refresh(&mut self, tab_id: u64, url: &url::Url) {
+        let Some(index) = self.tabs.tabs().iter().position(|tab| tab.id == tab_id) else {
+            return;
+        };
+        if self.tabs.tabs()[index].automatic_redirects >= MAX_DECLARATIVE_REFRESHES {
+            let tab = &mut self.tabs.tabs_mut()[index];
+            tab.document_pending = false;
+            tab.load = None;
+            tab.message = "automatic redirect limit reached".to_string();
+            self.touch();
+            return;
+        }
+        self.tabs.tabs_mut()[index].automatic_redirects += 1;
+        self.tabs.tabs_mut()[index].load = None;
+        self.navigate_at(index, url.as_str(), HistoryUpdate::Replace);
+    }
+
+    fn navigate_at(&mut self, index: usize, raw: &str, history: HistoryUpdate) {
         let fixed = url_fix(raw);
         if fixed.is_empty() {
             return;
@@ -38,61 +73,66 @@ impl App {
         let parsed = match url::Url::parse(&fixed) {
             Ok(parsed) => parsed,
             Err(_) => {
-                self.tabs.active_mut().message = format!("cannot parse url: {fixed}");
+                self.tabs.tabs_mut()[index].message = format!("cannot parse url: {fixed}");
                 self.touch();
                 return;
             }
         };
         match route(&parsed) {
             Route::StartPage => {
-                self.net
-                    .cancel(self.tabs.active().id, self.tabs.active().generation);
+                let tab = &self.tabs.tabs()[index];
+                self.net.cancel(tab.id, tab.generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
                 let page = start_page_for(content_viewport(self.geometry));
-                self.repoint_active(&fixed, generation, page);
-                if record {
-                    self.tabs.active_mut().push_history(&fixed);
-                }
-                self.tabs.active_mut().message = "Ready".to_string();
+                self.repoint(index, &fixed, generation, page);
+                self.update_history(index, &fixed, history);
+                self.tabs.tabs_mut()[index].message = "Ready".to_string();
             }
             Route::Fetch => {
-                self.net
-                    .cancel(self.tabs.active().id, self.tabs.active().generation);
+                let tab = &self.tabs.tabs()[index];
+                self.net.cancel(tab.id, tab.generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
-                self.repoint_active(&fixed, generation, content_for(&fixed));
-                if record {
-                    self.tabs.active_mut().push_history(&fixed);
-                }
-                self.tabs.active_mut().message = format!("loading {fixed}");
-                self.tabs.active_mut().document_pending = true;
-                let submitted = self.net.submit(
-                    self.tabs.active().id,
-                    generation,
-                    ResourceId::DOCUMENT,
-                    parsed,
-                );
+                self.repoint(index, &fixed, generation, content_for(&fixed));
+                self.update_history(index, &fixed, history);
+                let tab = &mut self.tabs.tabs_mut()[index];
+                tab.message = format!("loading {fixed}");
+                tab.document_pending = true;
+                let submitted = self
+                    .net
+                    .submit(tab.id, generation, ResourceId::DOCUMENT, parsed);
                 if submitted != Submitted::Queued {
                     // Nothing accepted the job, so no payload will ever arrive. Without
                     // this the tab sits on "loading" until the user gives up.
-                    let tab = self.tabs.active_mut();
                     tab.document_pending = false;
                     tab.message = format!("cannot load {fixed}: the network is not running");
                 }
             }
             Route::Reject => {
-                self.tabs.active_mut().message = format!("unsupported scheme: {}", parsed.scheme());
+                self.tabs.tabs_mut()[index].message =
+                    format!("unsupported scheme: {}", parsed.scheme());
                 self.touch();
                 return;
             }
         }
-        self.focus = Focus::Content;
+        if index == self.tabs.active_index() {
+            self.focus = Focus::Content;
+        }
         self.touch();
     }
 
-    fn repoint_active(&mut self, url: &str, generation: u64, painted: DisplayList) {
-        let tab = self.tabs.active_mut();
+    fn update_history(&mut self, index: usize, url: &str, update: HistoryUpdate) {
+        let tab = &mut self.tabs.tabs_mut()[index];
+        match update {
+            HistoryUpdate::Keep => {}
+            HistoryUpdate::Push => tab.push_history(url),
+            HistoryUpdate::Replace => tab.replace_history(url),
+        }
+    }
+
+    fn repoint(&mut self, index: usize, url: &str, generation: u64, painted: DisplayList) {
+        let tab = &mut self.tabs.tabs_mut()[index];
         tab.url = url.to_string();
         tab.title = url.to_string();
         tab.painted = painted;
@@ -106,8 +146,10 @@ impl App {
         tab.base = None;
         tab.render_dirty = false;
         tab.dom_focus = None;
-        self.pressed = None;
-        self.refresh_hover();
+        if index == self.tabs.active_index() {
+            self.pressed = None;
+            self.refresh_hover();
+        }
     }
 
     pub(super) fn go_back(&mut self) {

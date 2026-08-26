@@ -49,6 +49,8 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - A server's own 4xx/5xx page renders, with the status shown in the context bar; an error status
   that carries no readable body says so instead. An error response is never accepted as a
   stylesheet, so a 404 page cannot be parsed as CSS
+- Zero-delay HTML declarative refreshes, including scripting-disabled `<noscript>` fallbacks used
+  by DuckDuckGo result links, replace their wrapper history entry and stop after eight hops
 - Bounded rendering: block nesting is capped, past which the page is truncated with a notice rather
   than overflowing the stack, and a layout the engine refuses degrades to an empty page with a
   message instead of aborting the process
@@ -131,8 +133,9 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   without disturbing a half-typed URL, and the menu bar opens, toggles and dispatches under the
   pointer. Hovering a link previews its target in the status bar and shows a hand cursor in the
   window, repainting only when the target actually changes
-- `--dump` renders a page to stdout and exits through the same stylesheet loader and painter the TUI
-  uses; `--cols` and `--rows` provide exact content dimensions for scripting and golden diffs
+- `--dump` renders a page to stdout and exits through the same stylesheet loader, declarative
+  refresh path and painter the TUI uses; `--cols` and `--rows` provide exact content dimensions for
+  scripting and golden diffs
 - **The default VGA frontend** behind the default `vga` feature opens a window and
   renders the same chrome with **our own CP437 8x16 face** instead of the host terminal's font. The
   DOS look is mostly the font, and inside a terminal the font belongs to the user — owning a

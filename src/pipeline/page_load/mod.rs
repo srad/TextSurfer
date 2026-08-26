@@ -1,5 +1,6 @@
 mod delivery;
 mod discovery;
+mod refresh;
 mod resource_url;
 mod settle;
 mod sheets;
@@ -26,6 +27,7 @@ pub const STYLESHEET_DEADLINE: Duration = Duration::from_secs(5);
 pub const MAX_EXTERNAL_OCCURRENCES: usize = 64;
 pub const MAX_IMPORT_DEPTH: usize = 8;
 pub const MAX_EXTERNAL_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_DECLARATIVE_REFRESHES: u8 = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchCommand {
@@ -78,6 +80,7 @@ pub struct PageLoad {
     document: SharedDocument,
     document_url: Url,
     effective_base: Url,
+    immediate_refresh: Option<Url>,
     html_encoding: &'static Encoding,
     parse_errors: usize,
     roots: Vec<RootSource>,
@@ -122,10 +125,13 @@ impl PageLoad {
             .as_deref()
             .and_then(|base| document_url.join(base).ok())
             .unwrap_or_else(|| document_url.clone());
+        let immediate_refresh =
+            refresh::immediate_refresh(&outcome.document, &document_url, &effective_base);
         let mut load = Self {
             document: outcome.document,
             document_url,
             effective_base: effective_base.clone(),
+            immediate_refresh,
             html_encoding,
             parse_errors: outcome.parse_errors,
             roots: Vec::new(),
@@ -230,6 +236,10 @@ impl PageLoad {
     /// or what its first `<base href>` made of it.
     pub fn base_url(&self) -> &Url {
         &self.effective_base
+    }
+
+    pub fn immediate_refresh(&self) -> Option<&Url> {
+        self.immediate_refresh.as_ref()
     }
 
     pub fn has_painted(&self) -> bool {

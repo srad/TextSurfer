@@ -55,10 +55,8 @@ impl App {
             None => None,
         };
         if let Some(page) = page {
-            let css_warnings = page.css_warnings;
-            let parse_errors = page.parse_errors;
             apply_rendered_page(tab, page, width, rows);
-            update_load_message(tab, parse_errors, css_warnings);
+            update_load_message(tab);
         }
         tab.render_dirty = false;
     }
