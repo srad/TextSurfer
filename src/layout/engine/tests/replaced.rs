@@ -292,6 +292,18 @@ fn a_control_with_overflow_hidden_still_shows_its_label() {
 }
 
 #[test]
+fn a_border_box_control_keeps_intrinsic_room_for_padding_and_border() {
+    let output = painted(
+        "<button style='display:block;box-sizing:border-box;border:1px solid;padding:0 2ch;overflow:hidden;height:48px'>Search</button>",
+        20,
+    );
+    assert!(
+        output.contains("Search"),
+        "the label must keep its intrinsic content width, got {output:?}"
+    );
+}
+
+#[test]
 fn a_bordered_control_keeps_a_content_row_when_max_height_would_crush_it() {
     // A 1px border costs a whole cell here, so Wikipedia's `max-height: 2rem` leaves zero content
     // rows and the field renders blank. The quantisation is ours, not the author's, so a replaced

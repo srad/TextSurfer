@@ -218,6 +218,17 @@ fn percentage_gap_resolves_against_the_container() {
 }
 
 #[test]
+fn math_gap_resolves_against_the_container() {
+    let fixture = flex_fixture(
+        "width:10ch;column-gap:calc(10% + 1ch)",
+        "width:2ch;height:16px;flex:none",
+        2,
+        Size { cols: 20, rows: 5 },
+    );
+    assert_eq!(box_for(&fixture.tree, fixture.items[1]).border_rect.col, 4);
+}
+
+#[test]
 fn column_wrapping_uses_vertical_main_gap_and_horizontal_cross_gap() {
     for (direction, expected) in [
         ("column", [(0, 0), (0, 2), (4, 0)]),

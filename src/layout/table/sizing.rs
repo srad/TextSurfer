@@ -234,9 +234,10 @@ pub(super) fn cell_width_hint(
 ) -> Option<usize> {
     resolved_width(style.width, basis, styles).map(|width| {
         if style.box_sizing == crate::core::style::BoxSizing::ContentBox {
+            let padding = styles.resolve_padding_edges(style.padding, basis);
             width
-                + style.padding.left
-                + style.padding.right
+                + padding.left
+                + padding.right
                 + style.border.left.layout_width()
                 + style.border.right.layout_width()
         } else {

@@ -1,4 +1,4 @@
-use super::CssPercentage;
+use super::{CssCalc, CssPercentage};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CssGap {
@@ -6,13 +6,14 @@ pub enum CssGap {
     Normal,
     Cells(usize),
     Percent(CssPercentage),
+    Calc(CssCalc),
 }
 
 impl CssGap {
     pub const fn cells(self) -> Option<usize> {
         match self {
             Self::Cells(value) => Some(value),
-            Self::Normal | Self::Percent(_) => None,
+            Self::Normal | Self::Percent(_) | Self::Calc(_) => None,
         }
     }
 }

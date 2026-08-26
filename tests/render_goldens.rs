@@ -141,6 +141,11 @@ fn margins_and_padding_golden() {
 }
 
 #[test]
+fn css_math_properties_golden() {
+    insta::assert_snapshot!(golden("css_math.html"));
+}
+
+#[test]
 fn headings_lists_and_rules_golden() {
     insta::assert_snapshot!(golden("headings.html"));
 }

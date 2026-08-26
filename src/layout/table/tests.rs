@@ -336,3 +336,27 @@ fn rect_contains(outer: LayoutRect, inner: LayoutRect) -> bool {
         && outer.col + outer.width >= inner.col + inner.width
         && outer.row + outer.height >= inner.row + inner.height
 }
+
+#[test]
+fn disjoint_table_rectangles_return_no_intersection_without_subtracting() {
+    let left = LayoutRect {
+        col: 20,
+        row: 10,
+        width: 4,
+        height: 2,
+    };
+    let right = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 5,
+        height: 3,
+    };
+    assert_eq!(super::geometry::intersect_rect(left, right), None);
+    let above = LayoutRect {
+        col: 20,
+        row: 0,
+        width: 4,
+        height: 3,
+    };
+    assert_eq!(super::geometry::intersect_rect(left, above), None);
+}

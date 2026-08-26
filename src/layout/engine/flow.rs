@@ -288,7 +288,15 @@ fn build_flow_tree_from(
                         &mut buffer,
                     );
                     if has_edge {
-                        append_edge(node, style, false, *context, &mut buffer);
+                        append_edge(
+                            node,
+                            style,
+                            false,
+                            *context,
+                            input.styles,
+                            viewport_width,
+                            &mut buffer,
+                        );
                     }
                 }
                 FlowEvent::AnonymousTable(roots, context) => {
@@ -542,7 +550,15 @@ fn build_flow_tree_from(
                                     atom: None,
                                 });
                             }
-                            append_edge(node, style, true, context, &mut buffer);
+                            append_edge(
+                                node,
+                                style,
+                                true,
+                                context,
+                                input.styles,
+                                viewport_width,
+                                &mut buffer,
+                            );
                             events.push(FlowEvent::Exit(node, style, Box::new(context), true));
                             append_pseudo(
                                 styles,
@@ -861,20 +877,18 @@ fn append_edge(
     style: ComputedStyle,
     left: bool,
     context: InlineContext,
+    styles: &StyleTree,
+    _basis: usize,
     buffer: &mut Vec<InlinePiece>,
 ) {
     let cells = if left {
-        style
-            .margin
-            .left
-            .cells()
-            .saturating_add(style.padding.left as isize)
+        styles
+            .resolve_margin(style.margin.left, 0)
+            .saturating_add(styles.resolve_padding(style.padding.left, 0) as isize)
     } else {
-        style
-            .margin
-            .right
-            .cells()
-            .saturating_add(style.padding.right as isize)
+        styles
+            .resolve_margin(style.margin.right, 0)
+            .saturating_add(styles.resolve_padding(style.padding.right, 0) as isize)
     };
     append_horizontal_margin(node, cells, context, buffer);
 }

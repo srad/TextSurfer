@@ -67,8 +67,9 @@ pub(super) fn layout_captions(
     for caption in &model.captions {
         let style = formatter.styles.get(*caption);
         let edges = EdgeInsets::from_border(style.border);
+        let padding = formatter.padding(style, caption_width);
         let content_width = caption_width
-            .saturating_sub(edges.left + edges.right + style.padding.left + style.padding.right)
+            .saturating_sub(edges.left + edges.right + padding.left + padding.right)
             .max(1);
         let metrics = formatter.cell_metrics(&[*caption], style, limits, nesting);
         let pieces = resolve_items(&metrics.items, |node| {
@@ -76,8 +77,7 @@ pub(super) fn layout_captions(
         });
         let lines = format_inline(&pieces, content_width);
         let content_height = formatted_height(&lines, &pieces);
-        let height =
-            edges.top + edges.bottom + style.padding.top + style.padding.bottom + content_height;
+        let height = edges.top + edges.bottom + padding.top + padding.bottom + content_height;
         let layout = CaptionLayout {
             node: *caption,
             style,
@@ -93,8 +93,8 @@ pub(super) fn layout_captions(
                 height,
             },
             content_rect: LayoutRect {
-                col: edges.left + style.padding.left,
-                row: edges.top + style.padding.top,
+                col: edges.left + padding.left,
+                row: edges.top + padding.top,
                 width: content_width,
                 height: content_height,
             },

@@ -5,16 +5,16 @@ use super::alignment::apply_alignment_declaration;
 use super::flex::apply_flex_declaration;
 use super::grid::apply_grid_declaration;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssInset, CssMargin,
-    CssMaxSize, CssPercentage, CssSize, InsetEdges, LegacyAlign, LengthAxis, ListStyleType,
-    MarginEdges, Overflow, Position, StyleStore, TableLayoutMode, TextAlign, VerticalAlign,
-    Visibility, WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CalcRange, CaptionSide, ComputedStyle, CssInset,
+    CssMargin, CssMaxSize, CssPadding, CssPercentage, CssSignedPercentage, CssSize, InsetEdges,
+    LegacyAlign, LengthAxis, ListStyleType, MarginEdges, Overflow, PaddingEdges, Position,
+    StyleStore, TableLayoutMode, TextAlign, VerticalAlign, Visibility, WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
     assign_border_color, assign_border_colors, assign_border_side, assign_border_style,
-    assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
-    consume_block, parse_background_color, parse_border, parse_color, parse_cursor, parse_display,
+    assign_border_styles, assign_border_width, assign_border_widths, consume_block,
+    parse_background_color, parse_border, parse_color, parse_cursor, parse_display,
     parse_font_weight, parse_ident, parse_lengths, parse_list_style_position,
     parse_list_style_type, parse_opacity, parse_size, parse_text_decoration,
 };
@@ -57,15 +57,14 @@ fn apply_declaration_raw(
     if declaration.name == "font-size" {
         return;
     }
-    let (font_px, root_font_px) = media.layout_font_sizes();
     if let Some(keyword) = parse_ident(&declaration.value)
         && matches!(keyword.as_str(), "initial" | "inherit" | "unset" | "revert")
     {
         apply_css_wide(style, parent_style, ua_style, &declaration.name, &keyword);
         return;
     }
-    if apply_flex_declaration(style, &declaration.name, &declaration.value, media)
-        || apply_alignment_declaration(style, &declaration.name, &declaration.value, media)
+    if apply_flex_declaration(style, &declaration.name, &declaration.value, media, store)
+        || apply_alignment_declaration(style, &declaration.name, &declaration.value, media, store)
         || apply_grid_declaration(style, &declaration.name, &declaration.value, media, store)
     {
         return;
@@ -126,7 +125,7 @@ fn apply_declaration_raw(
             }
         }
         "inset" => {
-            if let Some(value) = parse_insets(&declaration.value, media) {
+            if let Some(value) = parse_insets(&declaration.value, media, store) {
                 style.inset = value;
             }
         }
@@ -135,24 +134,28 @@ fn apply_declaration_raw(
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            store,
         ),
         "right" => assign_inset(
             &mut style.inset.right,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            store,
         ),
         "bottom" => assign_inset(
             &mut style.inset.bottom,
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            store,
         ),
         "left" => assign_inset(
             &mut style.inset.left,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            store,
         ),
         "white-space" => {
             if let Some(white_space) =
@@ -268,20 +271,13 @@ fn apply_declaration_raw(
             }
         }
         "margin" => {
-            if let Some(values) = parse_margins(&declaration.value, media) {
+            if let Some(values) = parse_margins(&declaration.value, media, store) {
                 style.margin = values;
             }
         }
         "padding" => {
-            if let Some(values) = parse_lengths(&declaration.value) {
-                assign_edges(
-                    &mut style.padding,
-                    &values,
-                    media.cell_metric,
-                    media.viewport,
-                    font_px,
-                    root_font_px,
-                );
+            if let Some(values) = parse_paddings(&declaration.value, media, store) {
+                style.padding = values;
             }
         }
         "margin-top" => assign_margin(
@@ -289,60 +285,56 @@ fn apply_declaration_raw(
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            store,
         ),
         "margin-right" => assign_margin(
             &mut style.margin.right,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            store,
         ),
         "margin-bottom" => assign_margin(
             &mut style.margin.bottom,
             &declaration.value,
             LengthAxis::Vertical,
             media,
+            store,
         ),
         "margin-left" => assign_margin(
             &mut style.margin.left,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
+            store,
         ),
-        "padding-top" => assign_one(
+        "padding-top" => assign_padding(
             &mut style.padding.top,
             &declaration.value,
             LengthAxis::Vertical,
-            media.cell_metric,
-            media.viewport,
-            font_px,
-            root_font_px,
+            media,
+            store,
         ),
-        "padding-right" => assign_one(
+        "padding-right" => assign_padding(
             &mut style.padding.right,
             &declaration.value,
             LengthAxis::Horizontal,
-            media.cell_metric,
-            media.viewport,
-            font_px,
-            root_font_px,
+            media,
+            store,
         ),
-        "padding-bottom" => assign_one(
+        "padding-bottom" => assign_padding(
             &mut style.padding.bottom,
             &declaration.value,
             LengthAxis::Vertical,
-            media.cell_metric,
-            media.viewport,
-            font_px,
-            root_font_px,
+            media,
+            store,
         ),
-        "padding-left" => assign_one(
+        "padding-left" => assign_padding(
             &mut style.padding.left,
             &declaration.value,
             LengthAxis::Horizontal,
-            media.cell_metric,
-            media.viewport,
-            font_px,
-            root_font_px,
+            media,
+            store,
         ),
         "border" => {
             if let Some(border) = parse_border(&declaration.value) {
@@ -785,14 +777,16 @@ fn parse_overflow(source: &str) -> Option<(Overflow, Overflow)> {
     Some((first, second))
 }
 
-#[derive(Clone, Copy)]
-enum ParsedInset {
+#[derive(Clone)]
+enum ParsedEdge {
     Auto,
     Length(crate::core::style::CssLength),
-    Percent(CssPercentage),
+    Percent(f32),
+    Math(crate::css::math::ParsedMath),
 }
 
-fn parse_insets(source: &str, media: MediaContext) -> Option<InsetEdges> {
+fn parse_insets(source: &str, media: MediaContext, store: &mut StyleStore) -> Option<InsetEdges> {
+    let checkpoint = store.checkpoint();
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let mut values = Vec::new();
@@ -800,119 +794,298 @@ fn parse_insets(source: &str, media: MediaContext) -> Option<InsetEdges> {
         if values.len() == 4 {
             return None;
         }
-        values.push(parse_inset_token(&mut parser)?);
+        values.push(parse_edge_token(&mut parser, true)?);
     }
     let [top, right, bottom, left] = match values.as_slice() {
-        [all] => [*all; 4],
-        [vertical, horizontal] => [*vertical, *horizontal, *vertical, *horizontal],
-        [top, horizontal, bottom] => [*top, *horizontal, *bottom, *horizontal],
-        [top, right, bottom, left] => [*top, *right, *bottom, *left],
+        [all] => [all.clone(), all.clone(), all.clone(), all.clone()],
+        [vertical, horizontal] => [
+            vertical.clone(),
+            horizontal.clone(),
+            vertical.clone(),
+            horizontal.clone(),
+        ],
+        [top, horizontal, bottom] => [
+            top.clone(),
+            horizontal.clone(),
+            bottom.clone(),
+            horizontal.clone(),
+        ],
+        [top, right, bottom, left] => [top.clone(), right.clone(), bottom.clone(), left.clone()],
         _ => return None,
     };
-    Some(InsetEdges {
-        top: resolve_inset(top, LengthAxis::Vertical, media),
-        right: resolve_inset(right, LengthAxis::Horizontal, media),
-        bottom: resolve_inset(bottom, LengthAxis::Vertical, media),
-        left: resolve_inset(left, LengthAxis::Horizontal, media),
-    })
+    let result = (|| {
+        Some(InsetEdges {
+            top: resolve_inset(top, LengthAxis::Vertical, media, store)?,
+            right: resolve_inset(right, LengthAxis::Horizontal, media, store)?,
+            bottom: resolve_inset(bottom, LengthAxis::Vertical, media, store)?,
+            left: resolve_inset(left, LengthAxis::Horizontal, media, store)?,
+        })
+    })();
+    if result.is_none() {
+        store.rollback(checkpoint);
+    }
+    result
 }
 
-fn assign_inset(target: &mut CssInset, source: &str, axis: LengthAxis, media: MediaContext) {
+fn assign_inset(
+    target: &mut CssInset,
+    source: &str,
+    axis: LengthAxis,
+    media: MediaContext,
+    store: &mut StyleStore,
+) {
+    let checkpoint = store.checkpoint();
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
-    if let Some(value) = parse_inset_token(&mut parser)
+    if let Some(value) = parse_edge_token(&mut parser, true)
         && parser.expect_exhausted().is_ok()
+        && let Some(value) = resolve_inset(value, axis, media, store)
     {
-        *target = resolve_inset(value, axis, media);
+        *target = value;
+    } else {
+        store.rollback(checkpoint);
     }
 }
 
-fn parse_inset_token(parser: &mut Parser<'_, '_>) -> Option<ParsedInset> {
-    if parser
-        .try_parse(|input| input.expect_ident_matching("auto"))
-        .is_ok()
+fn parse_edge_token(parser: &mut Parser<'_, '_>, allow_auto: bool) -> Option<ParsedEdge> {
+    if allow_auto
+        && parser
+            .try_parse(|input| input.expect_ident_matching("auto"))
+            .is_ok()
     {
-        return Some(ParsedInset::Auto);
+        return Some(ParsedEdge::Auto);
+    }
+    if let Some(value) = crate::css::math::parse_math_parser(parser) {
+        return Some(ParsedEdge::Math(value));
     }
     if let Ok(unit_value) = parser.try_parse(|input| {
         let token = input.next()?.clone();
         match token {
-            Token::Percentage { unit_value, .. } if unit_value.is_finite() && unit_value >= 0.0 => {
-                Ok(unit_value)
-            }
+            Token::Percentage { unit_value, .. } if unit_value.is_finite() => Ok(unit_value),
             token => Err(input.new_unexpected_token_error::<()>(token)),
         }
     }) {
-        return Some(ParsedInset::Percent(CssPercentage::new(
-            (unit_value * 10_000.0).round().min(u32::MAX as f32) as u32,
-        )));
+        return Some(ParsedEdge::Percent(unit_value));
     }
-    Some(ParsedInset::Length(
+    Some(ParsedEdge::Length(
         crate::css::values::parse_signed_length_token(parser)?,
     ))
 }
 
-fn resolve_inset(value: ParsedInset, axis: LengthAxis, media: MediaContext) -> CssInset {
-    match value {
-        ParsedInset::Auto => CssInset::Auto,
-        ParsedInset::Length(length) => CssInset::Cells(media.resolve_signed_cells(length, axis)),
-        ParsedInset::Percent(value) => CssInset::Percent(value),
+fn signed_percentage(value: f32) -> Option<CssSignedPercentage> {
+    let basis_points = (value * 10_000.0).round();
+    if !basis_points.is_finite() || basis_points < i32::MIN as f32 || basis_points > i32::MAX as f32
+    {
+        return None;
     }
+    Some(CssSignedPercentage::new(basis_points as i32))
 }
 
-fn parse_margins(source: &str, media: MediaContext) -> Option<MarginEdges> {
+fn resolve_inset(
+    value: ParsedEdge,
+    axis: LengthAxis,
+    media: MediaContext,
+    store: &mut StyleStore,
+) -> Option<CssInset> {
+    Some(match value {
+        ParsedEdge::Auto => CssInset::Auto,
+        ParsedEdge::Length(length) => CssInset::Cells(media.resolve_signed_cells(length, axis)),
+        ParsedEdge::Percent(value) => CssInset::Percent(signed_percentage(value)?),
+        ParsedEdge::Math(value) => CssInset::Calc(
+            store
+                .calculations
+                .insert(value.lower_cells(media, axis, axis)?, CalcRange::Unbounded)?,
+        ),
+    })
+}
+
+fn parse_margins(source: &str, media: MediaContext, store: &mut StyleStore) -> Option<MarginEdges> {
+    let checkpoint = store.checkpoint();
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let mut values = Vec::new();
     while !parser.is_exhausted() && values.len() < 4 {
-        let value = if parser
-            .try_parse(|input| input.expect_ident_matching("auto"))
-            .is_ok()
-        {
-            CssMargin::Auto
-        } else {
-            let length = crate::css::values::parse_signed_length_token(&mut parser)?;
-            let axis = if matches!(values.len(), 0 | 2) {
-                LengthAxis::Vertical
-            } else {
-                LengthAxis::Horizontal
-            };
-            CssMargin::Cells(media.resolve_signed_cells(length, axis))
-        };
-        values.push(value);
+        values.push(parse_edge_token(&mut parser, true)?);
     }
     if values.is_empty() || !parser.is_exhausted() {
         return None;
     }
     let (top, right, bottom, left) = match values.as_slice() {
-        [all] => (*all, *all, *all, *all),
-        [vertical, horizontal] => (*vertical, *horizontal, *vertical, *horizontal),
-        [top, horizontal, bottom] => (*top, *horizontal, *bottom, *horizontal),
-        [top, right, bottom, left] => (*top, *right, *bottom, *left),
+        [all] => (all.clone(), all.clone(), all.clone(), all.clone()),
+        [vertical, horizontal] => (
+            vertical.clone(),
+            horizontal.clone(),
+            vertical.clone(),
+            horizontal.clone(),
+        ),
+        [top, horizontal, bottom] => (
+            top.clone(),
+            horizontal.clone(),
+            bottom.clone(),
+            horizontal.clone(),
+        ),
+        [top, right, bottom, left] => (top.clone(), right.clone(), bottom.clone(), left.clone()),
         _ => return None,
     };
-    Some(MarginEdges {
-        top,
-        right,
-        bottom,
-        left,
+    let result = (|| {
+        Some(MarginEdges {
+            top: resolve_margin(top, LengthAxis::Vertical, media, store)?,
+            right: resolve_margin(right, LengthAxis::Horizontal, media, store)?,
+            bottom: resolve_margin(bottom, LengthAxis::Vertical, media, store)?,
+            left: resolve_margin(left, LengthAxis::Horizontal, media, store)?,
+        })
+    })();
+    if result.is_none() {
+        store.rollback(checkpoint);
+    }
+    result
+}
+
+fn assign_margin(
+    target: &mut CssMargin,
+    source: &str,
+    axis: LengthAxis,
+    media: MediaContext,
+    store: &mut StyleStore,
+) {
+    let checkpoint = store.checkpoint();
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    if let Some(value) = parse_edge_token(&mut parser, true)
+        && parser.expect_exhausted().is_ok()
+        && let Some(value) = resolve_margin(value, axis, media, store)
+    {
+        *target = value;
+    } else {
+        store.rollback(checkpoint);
+    }
+}
+
+fn resolve_margin(
+    value: ParsedEdge,
+    axis: LengthAxis,
+    media: MediaContext,
+    store: &mut StyleStore,
+) -> Option<CssMargin> {
+    Some(match value {
+        ParsedEdge::Auto => CssMargin::Auto,
+        ParsedEdge::Length(length) => CssMargin::Cells(media.resolve_signed_cells(length, axis)),
+        ParsedEdge::Percent(value) if axis == LengthAxis::Horizontal => {
+            CssMargin::Percent(signed_percentage(value)?)
+        }
+        ParsedEdge::Percent(value) => CssMargin::Calc(store.calculations.insert(
+            crate::css::math::ParsedMath::Percent(value).lower_cells(
+                media,
+                axis,
+                LengthAxis::Horizontal,
+            )?,
+            CalcRange::Unbounded,
+        )?),
+        ParsedEdge::Math(value) => CssMargin::Calc(store.calculations.insert(
+            value.lower_cells(media, axis, LengthAxis::Horizontal)?,
+            CalcRange::Unbounded,
+        )?),
     })
 }
 
-fn assign_margin(target: &mut CssMargin, source: &str, axis: LengthAxis, media: MediaContext) {
-    if parse_ident(source).as_deref() == Some("auto") {
-        *target = CssMargin::Auto;
-        return;
-    }
+fn parse_paddings(
+    source: &str,
+    media: MediaContext,
+    store: &mut StyleStore,
+) -> Option<PaddingEdges> {
+    let checkpoint = store.checkpoint();
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
-    let Some(length) = crate::css::values::parse_signed_length_token(&mut parser) else {
-        return;
-    };
-    if !parser.is_exhausted() {
-        return;
+    let mut values = Vec::new();
+    while !parser.is_exhausted() && values.len() < 4 {
+        values.push(parse_edge_token(&mut parser, false)?);
     }
-    *target = CssMargin::Cells(media.resolve_signed_cells(length, axis));
+    if values.is_empty() || !parser.is_exhausted() {
+        return None;
+    }
+    let (top, right, bottom, left) = match values.as_slice() {
+        [all] => (all.clone(), all.clone(), all.clone(), all.clone()),
+        [vertical, horizontal] => (
+            vertical.clone(),
+            horizontal.clone(),
+            vertical.clone(),
+            horizontal.clone(),
+        ),
+        [top, horizontal, bottom] => (
+            top.clone(),
+            horizontal.clone(),
+            bottom.clone(),
+            horizontal.clone(),
+        ),
+        [top, right, bottom, left] => (top.clone(), right.clone(), bottom.clone(), left.clone()),
+        _ => return None,
+    };
+    let result = (|| {
+        Some(PaddingEdges {
+            top: resolve_padding(top, LengthAxis::Vertical, media, store)?,
+            right: resolve_padding(right, LengthAxis::Horizontal, media, store)?,
+            bottom: resolve_padding(bottom, LengthAxis::Vertical, media, store)?,
+            left: resolve_padding(left, LengthAxis::Horizontal, media, store)?,
+        })
+    })();
+    if result.is_none() {
+        store.rollback(checkpoint);
+    }
+    result
+}
+
+fn assign_padding(
+    target: &mut CssPadding,
+    source: &str,
+    axis: LengthAxis,
+    media: MediaContext,
+    store: &mut StyleStore,
+) {
+    let checkpoint = store.checkpoint();
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    if let Some(value) = parse_edge_token(&mut parser, false)
+        && parser.expect_exhausted().is_ok()
+        && let Some(value) = resolve_padding(value, axis, media, store)
+    {
+        *target = value;
+    } else {
+        store.rollback(checkpoint);
+    }
+}
+
+fn resolve_padding(
+    value: ParsedEdge,
+    axis: LengthAxis,
+    media: MediaContext,
+    store: &mut StyleStore,
+) -> Option<CssPadding> {
+    Some(match value {
+        ParsedEdge::Auto => return None,
+        ParsedEdge::Length(length) => {
+            let cells = media.resolve_signed_cells(length, axis);
+            if cells < 0 {
+                return None;
+            }
+            CssPadding::Cells(cells as usize)
+        }
+        ParsedEdge::Percent(value) if value < 0.0 => return None,
+        ParsedEdge::Percent(value) if axis == LengthAxis::Horizontal => CssPadding::Percent(
+            CssPercentage::new((value * 10_000.0).round().min(u32::MAX as f32) as u32),
+        ),
+        ParsedEdge::Percent(value) => CssPadding::Calc(store.calculations.insert(
+            crate::css::math::ParsedMath::Percent(value).lower_cells(
+                media,
+                axis,
+                LengthAxis::Horizontal,
+            )?,
+            CalcRange::NonNegative,
+        )?),
+        ParsedEdge::Math(value) => CssPadding::Calc(store.calculations.insert(
+            value.lower_cells(media, axis, LengthAxis::Horizontal)?,
+            CalcRange::NonNegative,
+        )?),
+    })
 }
 
 fn assign_size(
@@ -928,7 +1101,9 @@ fn assign_size(
         .any(|function| source_start.starts_with(function));
     if is_math
         && let Some(value) = crate::css::math::parse_length_percentage(source, media, axis)
-        && let Some(value) = store.calculations.insert(value)
+        && let Some(value) = store
+            .calculations
+            .insert(value, crate::core::style::CalcRange::NonNegative)
     {
         *target = CssSize::Calc(value);
         return;

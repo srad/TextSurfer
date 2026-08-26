@@ -133,8 +133,9 @@ impl TableFormatter<'_> {
             } else {
                 super::geometry::EdgeInsets::from_border(style.border)
             };
+            let padding = self.padding(style, span_width);
             let inner = span_width
-                .saturating_sub(edges.left + edges.right + style.padding.left + style.padding.right)
+                .saturating_sub(edges.left + edges.right + padding.left + padding.right)
                 .max(1);
             let pieces = resolve_items(&metric.items, |node| {
                 self.format_inline_atom(node, inner, limits, nesting.saturating_add(1))
@@ -151,9 +152,13 @@ impl TableFormatter<'_> {
         let mut row_descents = vec![0usize; model.rows.len()];
         for (cell, layout) in model.cells.iter().zip(&layouts) {
             let style = self.cell_style(cell);
+            let basis = columns[cell.col..cell.col + cell.col_span]
+                .iter()
+                .sum::<usize>();
+            let padding = self.padding(style, basis);
             if cell.row_span == 1 {
-                let vertical = style.padding.top
-                    + style.padding.bottom
+                let vertical = padding.top
+                    + padding.bottom
                     + if geometry.collapsed {
                         0
                     } else {
@@ -163,13 +168,13 @@ impl TableFormatter<'_> {
                     row_heights[cell.row].max(layout.height().saturating_add(vertical));
             }
             if style.vertical_align == crate::core::style::VerticalAlign::Baseline {
-                let top = style.padding.top
+                let top = padding.top
                     + if geometry.collapsed {
                         0
                     } else {
                         style.border.top.layout_width()
                     };
-                let bottom = style.padding.bottom
+                let bottom = padding.bottom
                     + if geometry.collapsed {
                         0
                     } else {
@@ -197,9 +202,13 @@ impl TableFormatter<'_> {
         for (cell, layout) in model.cells.iter().zip(&layouts) {
             if cell.row_span > 1 {
                 let style = self.cell_style(cell);
+                let basis = columns[cell.col..cell.col + cell.col_span]
+                    .iter()
+                    .sum::<usize>();
+                let padding = self.padding(style, basis);
                 let required = layout.height()
-                    + style.padding.top
-                    + style.padding.bottom
+                    + padding.top
+                    + padding.bottom
                     + if geometry.collapsed {
                         0
                     } else {
@@ -228,8 +237,9 @@ impl TableFormatter<'_> {
         });
         let minimum = min_content_width(&pieces).max(1);
         let maximum = intrinsic_width(&pieces).max(1);
-        let horizontal = style.padding.left
-            + style.padding.right
+        let padding = self.padding(style, limits.max_width);
+        let horizontal = padding.left
+            + padding.right
             + style.border.left.layout_width()
             + style.border.right.layout_width();
         CellMetrics {

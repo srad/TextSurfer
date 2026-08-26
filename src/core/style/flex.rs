@@ -1,4 +1,4 @@
-use super::{CssNumber, CssPercentage};
+use super::{CssCalc, CssNumber, CssPercentage};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FlexDirection {
@@ -29,6 +29,12 @@ pub struct AxisCellLength {
     pub vertical: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AxisCalc {
+    pub horizontal: CssCalc,
+    pub vertical: CssCalc,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FlexBasis {
     #[default]
@@ -36,6 +42,7 @@ pub enum FlexBasis {
     Content,
     Cells(AxisCellLength),
     Percent(CssPercentage),
+    Calc(AxisCalc),
 }
 
 impl FlexBasis {

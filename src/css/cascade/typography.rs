@@ -34,6 +34,11 @@ fn parse_font_size(
     ua: FontSize,
     media: MediaContext,
 ) -> Option<f64> {
+    if let Some(value) = crate::css::math::parse_math(source) {
+        let value = value.lower_font_pixels(media, inherited)?;
+        let px = f64::from(value.resolve(inherited.px() as f32)?.max(0.0));
+        return FontSize::from_px(px).map(|_| px);
+    }
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let token = parser.next().cloned().ok()?;

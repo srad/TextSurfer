@@ -25,6 +25,7 @@ impl TableGeometry {
         formatter: &TableFormatter<'_>,
         table_style: ComputedStyle,
         model: &TableModel,
+        available_width: usize,
     ) -> Self {
         let collapsed = table_style.border_collapse == BorderCollapse::Collapse;
         let grid = usize::from(
@@ -68,7 +69,7 @@ impl TableGeometry {
         let table_padding = if collapsed {
             crate::core::style::EdgeSizes::default()
         } else {
-            table_style.padding
+            formatter.padding(table_style, available_width)
         };
         let fixed_overhead = table_edges.left
             + table_edges.right
@@ -353,14 +354,15 @@ pub(super) fn place_table(
         } else {
             EdgeInsets::from_border(style.border)
         };
-        let content_col = rect.col + edge.left + style.padding.left;
-        let content_row = rect.row + edge.top + style.padding.top;
+        let padding = formatter.padding(style, rect.width);
+        let content_col = rect.col + edge.left + padding.left;
+        let content_row = rect.row + edge.top + padding.top;
         let content_width = rect
             .width
-            .saturating_sub(edge.left + edge.right + style.padding.left + style.padding.right);
+            .saturating_sub(edge.left + edge.right + padding.left + padding.right);
         let content_height = rect
             .height
-            .saturating_sub(edge.top + edge.bottom + style.padding.top + style.padding.bottom);
+            .saturating_sub(edge.top + edge.bottom + padding.top + padding.bottom);
         let mut content_rect = LayoutRect {
             col: content_col,
             row: content_row,
@@ -521,7 +523,7 @@ pub(super) fn intersect_rect(left: LayoutRect, right: LayoutRect) -> Option<Layo
         .row
         .saturating_add(left.height)
         .min(right.row.saturating_add(right.height));
-    (far_col > col && far_row > row).then_some(LayoutRect {
+    (far_col > col && far_row > row).then(|| LayoutRect {
         col,
         row,
         width: far_col - col,

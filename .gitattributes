@@ -16,3 +16,5 @@ Cargo.lock text eol=lf
 testdata/*.dat -text
 testdata/*.pin -text
 testdata/*.sha256 -text
+testdata/wpt/** -text
+testdata/wpt/SHA256SUMS text eol=lf

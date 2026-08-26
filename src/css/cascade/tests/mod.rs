@@ -10,10 +10,10 @@ mod variables;
 use crate::core::dom::{Attr, Document, ElementNs, NodeId, SharedDocument};
 use crate::core::geom::Size;
 use crate::core::style::{
-    BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide, CssMargin,
-    CssPercentage, CssSize, CssWidth, Cursor, Display, DisplayInside, DisplayOutside, EdgeSizes,
-    FontSize, Palette, PseudoElement, Rgb, Rgba, StyleTree, TableLayoutMode, TextAlign,
-    TextRendering, VerticalAlign, WhiteSpace,
+    BorderCollapse, BorderColor, BorderLineStyle, BorderSpacing, BoxSizing, CaptionSide, CssGap,
+    CssInset, CssMargin, CssPadding, CssPercentage, CssSize, CssWidth, Cursor, Display,
+    DisplayInside, DisplayOutside, FlexBasis, FontSize, PaddingEdges, Palette, PseudoElement, Rgb,
+    Rgba, StyleTree, TableLayoutMode, TextAlign, TextRendering, VerticalAlign, WhiteSpace,
 };
 use crate::css::values::{parse_cursor, parse_font_weight};
 use crate::css::{ColorScheme, CssParser, CssparserParser, DynamicState};
@@ -123,9 +123,28 @@ fn font_size_computes_before_font_relative_lengths() {
         styles.get(child).font_size,
         FontSize::from_px(40.0).unwrap()
     );
-    assert_eq!(styles.get(child).padding.left, 5);
+    assert_eq!(styles.get(child).padding.left, CssPadding::Cells(5));
     assert_eq!(styles.get(child).width, CssWidth::Cells(25));
     assert_eq!(styles.get(child).text_presentation.scale, 4);
+}
+
+#[test]
+fn font_size_math_uses_the_parent_computed_size_before_descendant_lengths() {
+    let mut document = Document::new();
+    let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
+    let child = document.insert_element(Some(root), "div", ElementNs::Html, vec![]);
+    let sheet = CssparserParser
+        .parse("main { font-size: 20px } div { font-size: calc(100% + 10px); width: 1em }");
+    let styles = BasicCascade.apply(
+        &[sheet],
+        &document,
+        MediaContext::screen().with_text_rendering(TextRendering::ScaledBitmap),
+    );
+    assert_eq!(
+        styles.get(child).font_size,
+        FontSize::from_px(30.0).unwrap()
+    );
+    assert_eq!(styles.get(child).width, CssWidth::Cells(4));
 }
 
 #[test]
@@ -198,7 +217,7 @@ fn cell_profile_keeps_fixed_length_metrics_after_font_size_computes() {
         styles.get(child).font_size,
         FontSize::from_px(40.0).unwrap()
     );
-    assert_eq!(styles.get(child).padding.left, 2);
+    assert_eq!(styles.get(child).padding.left, CssPadding::Cells(2));
     assert_eq!(styles.get(child).width, CssWidth::Cells(20));
     assert_eq!(styles.get(child).text_presentation.scale, 1);
 }
@@ -780,8 +799,8 @@ fn lengths_are_strict_and_bounded_without_partial_overrides() {
             left: CssMargin::Cells(2)
         }
     );
-    assert_eq!(styles.get(p).padding.top, 0);
-    assert_eq!(styles.get(p).padding.left, 65_535);
+    assert_eq!(styles.get(p).padding.top, CssPadding::Zero);
+    assert_eq!(styles.get(p).padding.left, CssPadding::Cells(65_535));
     assert_eq!(styles.get(p).width, CssWidth::Cells(12));
 }
 
@@ -815,14 +834,44 @@ fn lengths_resolve_through_the_terminal_cell_metric_on_each_axis() {
     );
     assert_eq!(
         style.padding,
-        EdgeSizes {
-            top: 1,
-            right: 1,
-            bottom: 1,
-            left: 1
+        PaddingEdges {
+            top: CssPadding::Cells(1),
+            right: CssPadding::Cells(1),
+            bottom: CssPadding::Cells(1),
+            left: CssPadding::Cells(1)
         }
     );
     assert_eq!(style.border_spacing, BorderSpacing::new(2, 1));
+}
+
+#[test]
+fn one_value_edge_shorthands_resolve_for_each_destination_axis() {
+    let mut document = Document::new();
+    let node = document.insert_element(
+        None,
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain("style", "margin:16px;padding:16px")],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    assert_eq!(
+        styles.get(node).margin,
+        crate::core::style::MarginEdges {
+            top: CssMargin::Cells(1),
+            right: CssMargin::Cells(2),
+            bottom: CssMargin::Cells(1),
+            left: CssMargin::Cells(2),
+        }
+    );
+    assert_eq!(
+        styles.get(node).padding,
+        PaddingEdges {
+            top: CssPadding::Cells(1),
+            right: CssPadding::Cells(2),
+            bottom: CssPadding::Cells(1),
+            left: CssPadding::Cells(2),
+        }
+    );
 }
 
 #[test]
@@ -864,6 +913,81 @@ fn css_math_preserves_mixed_percentage_and_length_until_layout() {
     };
     assert_eq!(styles.resolve_calc(value, 10.0), Some(4.0));
     assert_eq!(styles.resolve_calc(value, 20.0), Some(9.0));
+}
+
+#[test]
+fn math_edges_gaps_and_flex_basis_keep_their_basis_and_range_contracts() {
+    let mut document = Document::new();
+    let node = document.insert_element(
+        None,
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain(
+            "style",
+            "display:flex;margin:calc(10% - 8px);padding:calc(10% - 100px);inset:calc(10% - 16px);gap:calc(10% - 8px);flex-basis:calc(10% + 8px)",
+        )],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let style = styles.get(node);
+
+    let CssMargin::Calc(margin_top) = style.margin.top else {
+        panic!("expected deferred top margin");
+    };
+    let CssMargin::Calc(margin_right) = style.margin.right else {
+        panic!("expected deferred right margin");
+    };
+    assert_eq!(styles.resolve_calc(margin_top, 20.0), Some(0.5));
+    assert_eq!(styles.resolve_calc(margin_right, 20.0), Some(1.0));
+
+    let CssPadding::Calc(padding_top) = style.padding.top else {
+        panic!("expected deferred top padding");
+    };
+    let CssPadding::Calc(padding_right) = style.padding.right else {
+        panic!("expected deferred right padding");
+    };
+    assert_eq!(styles.resolve_calc(padding_top, 20.0), Some(0.0));
+    assert_eq!(styles.resolve_calc(padding_right, 20.0), Some(0.0));
+
+    let CssInset::Calc(inset_top) = style.inset.top else {
+        panic!("expected deferred top inset");
+    };
+    let CssInset::Calc(inset_right) = style.inset.right else {
+        panic!("expected deferred right inset");
+    };
+    assert_eq!(styles.resolve_calc(inset_top, 20.0), Some(1.0));
+    assert_eq!(styles.resolve_calc(inset_right, 20.0), Some(0.0));
+
+    let CssGap::Calc(row_gap) = style.alignment.row_gap else {
+        panic!("expected deferred row gap");
+    };
+    let CssGap::Calc(column_gap) = style.alignment.column_gap else {
+        panic!("expected deferred column gap");
+    };
+    assert_eq!(styles.resolve_calc(row_gap, 20.0), Some(1.5));
+    assert_eq!(styles.resolve_calc(column_gap, 20.0), Some(1.0));
+
+    let FlexBasis::Calc(basis) = style.flex.basis else {
+        panic!("expected deferred flex basis");
+    };
+    assert_eq!(styles.resolve_calc(basis.horizontal, 20.0), Some(3.0));
+    assert_eq!(styles.resolve_calc(basis.vertical, 20.0), Some(2.5));
+}
+
+#[test]
+fn zero_percentage_math_remains_basis_dependent() {
+    let mut document = Document::new();
+    let node = document.insert_element(
+        None,
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain("style", "width:calc(8px + 0%)")],
+    );
+    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let CssSize::Calc(value) = styles.get(node).width else {
+        panic!("expected deferred math");
+    };
+    assert_eq!(styles.calc_depends_on_basis(value), Some(true));
+    assert_eq!(styles.resolve_calc(value, 10.0), Some(1.0));
 }
 
 #[test]

@@ -15,7 +15,7 @@ impl TableFormatter<'_> {
     ) -> TableOutput {
         let table_style = root.style;
         let metrics = self.measure_cells(&model, limits, nesting);
-        let geometry = TableGeometry::new(self, table_style, &model);
+        let geometry = TableGeometry::new(self, table_style, &model, available_width);
         let caption_natural = natural_width(self, &model, limits, nesting);
         let columns = size_columns(
             self,

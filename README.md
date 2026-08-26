@@ -145,15 +145,18 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   `--no-default-features` build keeps the terminal-only dependency profile
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
+- Static WPT terminal-cell pilot vendored at a pinned commit — 27 cases audited, 5 eligible and
+  passing, 22 explicitly skipped; each graph runs offline in an isolated child with a parent
+  watchdog. This is a TextSurfer cell-rendering and crash-safety slice, not browser pixel
+  conformance
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math slice remains in
-progress. Mixed length/percentage sizing, used-value `min()`/`max()`/`clamp()` (including `none`
-bounds), frontend render metrics, signed block/flex/inline margins and layout-time Grid track math
-have landed. Grid now provides block, inline and nested layout with named lines/areas,
-auto-placement, alignment and gaps. Typed math in margins, padding, insets, gaps, flex basis and font
-size remains, and floats are the next open M6 rendering item. Product work continues with keyboard
-links, form editing and submission, and in-page search (M2), then the JavaScript seam/Boa integration
-(M4–M5).
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math implementation
+and its real-site smoke are complete. Mixed length/percentage `calc()`/`min()`/`max()`/`clamp()`
+values now reach sizing, margins, padding, insets, gaps, flex basis, font size and Grid tracks
+through the frontend render metric and layout-time percentage bases. Grid provides block, inline
+and nested layout with named lines/areas, auto-placement, alignment and gaps. Floats are the next
+open M6 rendering item. Product work continues with keyboard links, form editing and submission,
+and in-page search (M2), then the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 
@@ -251,8 +254,8 @@ its override key (usually `Shift`) while TextSurfer has the screen.
 - **Render goldens** — fixture pages cover margins, headings, borders, links, wide
   characters, `pre`, ordered/nested/reversed lists and their marker alignment, `::before`/`::after`
   with counters and `attr()`, simple and collapsed/spanned tables, nested/captioned tables, and
-  fixed-layout overflow and outer/inner display modes, with assertions for link geometry, colour
-  contrast and `--dump` parity.
+  fixed-layout overflow, outer/inner display modes, Flex, Grid and mixed CSS math, with assertions
+  for link geometry, colour contrast and `--dump` parity.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 

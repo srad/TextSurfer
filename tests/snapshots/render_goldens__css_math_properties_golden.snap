@@ -1,0 +1,6 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"css_math.html\")"
+---
+  A       B
+   C

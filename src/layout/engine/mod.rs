@@ -281,10 +281,11 @@ fn try_layout_flow(
                 let lines = format_inline(pieces, measured_width.max(0.0) as usize);
                 baseline = lines.first().map(|line| {
                     let (_, baseline) = line_metrics(line, pieces);
-                    let inset = flow[index]
-                        .style
-                        .padding
-                        .top
+                    let inset = styles
+                        .resolve_padding(
+                            flow[index].style.padding.top,
+                            measured_width.max(0.0) as usize,
+                        )
                         .saturating_add(flow[index].style.border.top.layout_width());
                     baseline.saturating_add(inset) as f32
                 });
@@ -299,12 +300,20 @@ fn try_layout_flow(
         output.baselines = Baselines::from_first(baseline);
         output
     };
-    let calc_values = std::cell::RefCell::new(Vec::<crate::core::style::CssCalc>::new());
+    let calc_values = std::cell::RefCell::new(Vec::<taffy_style::CalcValue>::new());
     let mut taffy = LayoutTree::new(&mut measure, |value, basis| {
         calc_values
             .borrow()
             .get((value.addr() >> 3).saturating_sub(1))
-            .and_then(|value| styles.resolve_calc(*value, basis))
+            .and_then(|value| {
+                let resolved = match value.source {
+                    taffy_style::CalcSource::Stored(handle) => {
+                        styles.resolve_calc(handle, basis)?
+                    }
+                    taffy_style::CalcSource::Percent(factor) => basis * factor,
+                };
+                Some(resolved + value.offset)
+            })
             .unwrap_or(0.0)
     });
     let mut taffy_nodes = vec![None; flow.len()];

@@ -18,8 +18,8 @@ use taffy::style::{
 };
 
 use crate::core::style::{
-    Alignment, AlignmentSafety, BoxSizing, ContentAlignment, CssGap, CssInset, CssMargin,
-    CssMaxSize, CssSize, DisplayInside, FlexBasis, FlexDirection, FlexWrap, GridAreas,
+    Alignment, AlignmentSafety, BoxSizing, ContentAlignment, CssCalc, CssGap, CssInset, CssMargin,
+    CssMaxSize, CssPadding, CssSize, DisplayInside, FlexBasis, FlexDirection, FlexWrap, GridAreas,
     GridAutoFlow, GridLength, GridLines, GridPlacement, GridTemplate, GridTemplateComponent,
     GridTracks, ItemAlignment, LegacyAlign, Overflow, Position, RepeatCount, StyleTree,
     TrackBreadthMax, TrackBreadthMin, TrackSize,
@@ -36,8 +36,20 @@ pub(super) struct TaffyStyleInput<'a> {
     pub(super) root: bool,
     pub(super) viewport_width: usize,
     pub(super) parent_direction: Option<FlexDirection>,
-    pub(super) calc_values: &'a std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    pub(super) calc_values: &'a std::cell::RefCell<Vec<CalcValue>>,
     pub(super) styles: &'a StyleTree,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CalcValue {
+    pub(super) source: CalcSource,
+    pub(super) offset: f32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum CalcSource {
+    Stored(CssCalc),
+    Percent(f32),
 }
 
 pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
@@ -70,24 +82,32 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             ..Default::default()
         };
     }
-    // A replaced box has no children to size it, so its own intrinsic size is what Taffy gets when
-    // the author supplies nothing. Expressed in the box's own `box-sizing` space, since that is
-    // what `size` and `min_size` are measured in.
     let intrinsic = flow.replaced.as_ref().map(|replaced| {
-        let (cols, rows) = (replaced.intrinsic_cols, replaced.intrinsic_rows);
-        if matches!(flow.style.box_sizing, BoxSizing::BorderBox) {
-            let horizontal = flow.style.border.left.layout_width()
-                + flow.style.border.right.layout_width()
-                + flow.style.padding.left
-                + flow.style.padding.right;
-            let vertical = flow.style.border.top.layout_width()
-                + flow.style.border.bottom.layout_width()
-                + flow.style.padding.top
-                + flow.style.padding.bottom;
-            (cols + horizontal, rows + vertical)
-        } else {
-            (cols, rows)
+        let intrinsic = (replaced.intrinsic_cols, replaced.intrinsic_rows);
+        if flow.style.box_sizing != BoxSizing::BorderBox {
+            return intrinsic;
         }
+        let padding = styles.resolve_padding_edges(flow.style.padding, 0);
+        let horizontal_chrome = flow
+            .style
+            .border
+            .left
+            .layout_width()
+            .saturating_add(flow.style.border.right.layout_width())
+            .saturating_add(padding.left)
+            .saturating_add(padding.right);
+        let vertical_chrome = flow
+            .style
+            .border
+            .top
+            .layout_width()
+            .saturating_add(flow.style.border.bottom.layout_width())
+            .saturating_add(padding.top)
+            .saturating_add(padding.bottom);
+        (
+            intrinsic.0.saturating_add(horizontal_chrome),
+            intrinsic.1.saturating_add(vertical_chrome),
+        )
     });
     let inside = flow.style.display.inside();
     let is_grid = matches!(inside, Some(DisplayInside::Grid));
@@ -118,10 +138,10 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             Position::Static | Position::Relative | Position::Sticky => TaffyPosition::Relative,
         },
         inset: TaffyRect {
-            left: inset(flow.style.inset.left),
-            right: inset(flow.style.inset.right),
-            top: inset(flow.style.inset.top),
-            bottom: inset(flow.style.inset.bottom),
+            left: inset(flow.style.inset.left, styles, calc_values),
+            right: inset(flow.style.inset.right, styles, calc_values),
+            top: inset(flow.style.inset.top, styles, calc_values),
+            bottom: inset(flow.style.inset.bottom, styles, calc_values),
         },
         size: TaffySize {
             // A replaced element has an intrinsic size and does not fill its container when the
@@ -129,16 +149,16 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             // browser, and a `<textarea cols=6>` stays six cells wide.
             width: match (intrinsic.map(|size| size.0), flow.style.width) {
                 (Some(width), CssSize::Auto) => Dimension::length(width as f32),
-                _ => dimension(flow.style.width, calc_values),
+                _ => dimension(flow.style.width, styles, calc_values),
             },
             height: match (intrinsic.map(|size| size.1), flow.style.height) {
                 (Some(height), CssSize::Auto) => Dimension::length(height as f32),
                 _ if flow.rule && flow.style.height == CssSize::Auto => Dimension::length(1.0),
-                _ => dimension(flow.style.height, calc_values),
+                _ => dimension(flow.style.height, styles, calc_values),
             },
         },
         min_size: TaffySize {
-            width: minimum(flow.style.min_width, calc_values),
+            width: minimum(flow.style.min_width, styles, calc_values),
             // A replaced element keeps room for its own rows even against a smaller `max-height`.
             // Without this Wikipedia's search field renders blank: it sets `max-height: 2rem` — two
             // cells — and a 1px border costs a whole cell per edge here, leaving zero content rows.
@@ -155,30 +175,29 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
                     };
                     LengthPercentageAuto::length(rows.max(authored) as f32)
                 }
-                None => minimum(flow.style.min_height, calc_values),
+                None => minimum(flow.style.min_height, styles, calc_values),
             },
         },
         max_size: TaffySize {
-            width: maximum(flow.style.max_width, calc_values),
-            height: maximum(flow.style.max_height, calc_values),
+            width: maximum(flow.style.max_width, styles, calc_values),
+            height: maximum(flow.style.max_height, styles, calc_values),
         },
         margin: TaffyRect {
-            left: margin(flow.style.margin.left),
-            right: margin(flow.style.margin.right),
-            top: margin(flow.style.margin.top),
-            bottom: margin(flow.style.margin.bottom),
+            left: margin(flow.style.margin.left, styles, calc_values),
+            right: margin(flow.style.margin.right, styles, calc_values),
+            top: margin(flow.style.margin.top, styles, calc_values),
+            bottom: margin(flow.style.margin.bottom, styles, calc_values),
         },
         padding: TaffyRect {
-            left: LengthPercentage::length(
-                flow.style
-                    .padding
-                    .left
-                    .saturating_add(flow.marker.as_ref().map_or(0, |marker| marker.reserve))
-                    as f32,
+            left: padding(
+                flow.style.padding.left,
+                flow.marker.as_ref().map_or(0, |marker| marker.reserve),
+                styles,
+                calc_values,
             ),
-            right: LengthPercentage::length(flow.style.padding.right as f32),
-            top: LengthPercentage::length(flow.style.padding.top as f32),
-            bottom: LengthPercentage::length(flow.style.padding.bottom as f32),
+            right: padding(flow.style.padding.right, 0, styles, calc_values),
+            top: padding(flow.style.padding.top, 0, styles, calc_values),
+            bottom: padding(flow.style.padding.bottom, 0, styles, calc_values),
         },
         border: TaffyRect {
             left: LengthPercentage::length(flow.style.border.left.layout_width() as f32),
@@ -199,7 +218,7 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
         },
         flex_grow: flow.style.flex.grow.get(),
         flex_shrink: flow.style.flex.shrink.get(),
-        flex_basis: flex_basis(flow.style.flex.basis, parent_direction),
+        flex_basis: flex_basis(flow.style.flex.basis, parent_direction, styles, calc_values),
         align_items: Some(item_alignment(flow.style.alignment.align_items)),
         align_self: flow.style.alignment.align_self.map(item_alignment),
         justify_items: Some(item_alignment(flow.style.alignment.justify_items)),
@@ -217,8 +236,8 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             is_grid,
         )),
         gap: TaffySize {
-            width: gap(flow.style.alignment.column_gap),
-            height: gap(flow.style.alignment.row_gap),
+            width: gap(flow.style.alignment.column_gap, styles, calc_values),
+            height: gap(flow.style.alignment.row_gap, styles, calc_values),
         },
         grid_template_columns: template(flow.style.grid.template_columns, styles, calc_values),
         grid_template_rows: template(flow.style.grid.template_rows, styles, calc_values),
@@ -245,7 +264,7 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
 fn template(
     handle: Option<GridTemplate>,
     styles: &StyleTree,
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
 ) -> Vec<TaffyGridTemplateComponent<String>> {
     let Some(data) = handle.and_then(|handle| styles.grid().template(handle)) else {
         return Vec::new();
@@ -254,7 +273,7 @@ fn template(
         .iter()
         .map(|component| match component {
             GridTemplateComponent::Single(track) => {
-                TaffyGridTemplateComponent::Single(track_size(*track, values))
+                TaffyGridTemplateComponent::Single(track_size(*track, styles, values))
             }
             GridTemplateComponent::Repeat(repeat) => {
                 TaffyGridTemplateComponent::Repeat(TaffyGridTemplateRepetition {
@@ -266,7 +285,7 @@ fn template(
                     tracks: repeat
                         .tracks
                         .iter()
-                        .map(|track| track_size(*track, values))
+                        .map(|track| track_size(*track, styles, values))
                         .collect(),
                     line_names: names(&repeat.line_names, styles),
                 })
@@ -295,14 +314,14 @@ fn names(sets: &[Vec<crate::core::style::GridIdent>], styles: &StyleTree) -> Vec
 fn auto_tracks(
     handle: Option<GridTracks>,
     styles: &StyleTree,
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
 ) -> Vec<TaffyTrackSizingFunction> {
     handle
         .and_then(|handle| styles.grid().tracks(handle))
         .map(|tracks| {
             tracks
                 .iter()
-                .map(|track| track_size(*track, values))
+                .map(|track| track_size(*track, styles, values))
                 .collect()
         })
         .unwrap_or_default()
@@ -310,7 +329,8 @@ fn auto_tracks(
 
 fn track_size(
     value: TrackSize,
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
 ) -> TaffyTrackSizingFunction {
     TaffyTrackSizingFunction {
         min: match value.min {
@@ -323,9 +343,11 @@ fn track_size(
             TrackBreadthMin::Length(GridLength::Percent(percent)) => {
                 TaffyMinTrack::percent(percent.basis_points() as f32 / 10_000.0)
             }
-            TrackBreadthMin::Length(GridLength::Calc(value)) => {
-                TaffyMinTrack::calc(calc_handle(values, value))
-            }
+            TrackBreadthMin::Length(GridLength::Calc(value)) => definite_calc(value, styles)
+                .map_or_else(
+                    || TaffyMinTrack::calc(calc_handle(values, value)),
+                    TaffyMinTrack::length,
+                ),
         },
         max: match value.max {
             TrackBreadthMax::Auto => TaffyMaxTrack::auto(),
@@ -337,9 +359,11 @@ fn track_size(
             TrackBreadthMax::Length(GridLength::Percent(percent)) => {
                 TaffyMaxTrack::percent(percent.basis_points() as f32 / 10_000.0)
             }
-            TrackBreadthMax::Length(GridLength::Calc(value)) => {
-                TaffyMaxTrack::calc(calc_handle(values, value))
-            }
+            TrackBreadthMax::Length(GridLength::Calc(value)) => definite_calc(value, styles)
+                .map_or_else(
+                    || TaffyMaxTrack::calc(calc_handle(values, value)),
+                    TaffyMaxTrack::length,
+                ),
             TrackBreadthMax::Fr(value) => TaffyMaxTrack::fr(value.get()),
             TrackBreadthMax::FitContent(GridLength::Cells(cells)) => {
                 TaffyMaxTrack::fit_content(LengthPercentage::length(cells as f32))
@@ -350,7 +374,7 @@ fn track_size(
                 ))
             }
             TrackBreadthMax::FitContent(GridLength::Calc(value)) => {
-                TaffyMaxTrack::fit_content(LengthPercentage::calc(calc_handle(values, value)))
+                TaffyMaxTrack::fit_content(calc_length(value, 0.0, styles, values))
             }
         },
     }
@@ -411,31 +435,38 @@ fn overflow(value: Overflow) -> TaffyOverflow {
     }
 }
 
-fn inset(value: CssInset) -> LengthPercentageAuto {
+fn inset(
+    value: CssInset,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> LengthPercentageAuto {
     match value {
         CssInset::Auto => LengthPercentageAuto::auto(),
         CssInset::Cells(value) => LengthPercentageAuto::length(value as f32),
         CssInset::Percent(value) => {
             LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
         }
+        CssInset::Calc(value) => calc_length_auto(value, 0.0, styles, values),
     }
 }
 
 fn dimension(
     value: CssSize,
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
 ) -> Dimension {
     match value {
         CssSize::Auto => Dimension::auto(),
         CssSize::Cells(value) => Dimension::length(value as f32),
         CssSize::Percent(value) => Dimension::percent(value.basis_points() as f32 / 10_000.0),
-        CssSize::Calc(value) => Dimension::calc(calc_handle(values, value)),
+        CssSize::Calc(value) => calc_dimension(value, styles, values),
     }
 }
 
 fn minimum(
     value: CssSize,
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
 ) -> LengthPercentageAuto {
     match value {
         CssSize::Auto => LengthPercentageAuto::auto(),
@@ -443,13 +474,14 @@ fn minimum(
         CssSize::Percent(value) => {
             LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
         }
-        CssSize::Calc(value) => LengthPercentageAuto::calc(calc_handle(values, value)),
+        CssSize::Calc(value) => calc_length_auto(value, 0.0, styles, values),
     }
 }
 
 fn maximum(
     value: CssMaxSize,
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
 ) -> LengthPercentageAuto {
     match value {
         CssMaxSize::None => LengthPercentageAuto::auto(),
@@ -457,20 +489,110 @@ fn maximum(
         CssMaxSize::Percent(value) => {
             LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
         }
-        CssMaxSize::Calc(value) => LengthPercentageAuto::calc(calc_handle(values, value)),
+        CssMaxSize::Calc(value) => calc_length_auto(value, 0.0, styles, values),
     }
 }
 
-fn calc_handle(
-    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
-    value: crate::core::style::CssCalc,
+fn definite_calc(value: CssCalc, styles: &StyleTree) -> Option<f32> {
+    if styles.calc_depends_on_basis(value)? {
+        None
+    } else {
+        styles.resolve_calc(value, 0.0)
+    }
+}
+
+fn calc_handle(values: &std::cell::RefCell<Vec<CalcValue>>, value: CssCalc) -> *const () {
+    calc_handle_with_offset(values, value, 0.0)
+}
+
+fn calc_handle_with_offset(
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+    value: CssCalc,
+    offset: f32,
 ) -> *const () {
     let mut values = values.borrow_mut();
-    values.push(value);
+    values.push(CalcValue {
+        source: CalcSource::Stored(value),
+        offset,
+    });
     std::ptr::without_provenance(values.len() << 3)
 }
 
-fn flex_basis(value: FlexBasis, parent_direction: Option<FlexDirection>) -> Dimension {
+fn percentage_handle(
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+    factor: f32,
+    offset: f32,
+) -> *const () {
+    let mut values = values.borrow_mut();
+    values.push(CalcValue {
+        source: CalcSource::Percent(factor),
+        offset,
+    });
+    std::ptr::without_provenance(values.len() << 3)
+}
+
+fn calc_dimension(
+    value: CssCalc,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> Dimension {
+    definite_calc(value, styles).map_or_else(
+        || Dimension::calc(calc_handle(values, value)),
+        Dimension::length,
+    )
+}
+
+fn calc_length(
+    value: CssCalc,
+    offset: f32,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> LengthPercentage {
+    definite_calc(value, styles).map_or_else(
+        || LengthPercentage::calc(calc_handle_with_offset(values, value, offset)),
+        |value| LengthPercentage::length(value + offset),
+    )
+}
+
+fn calc_length_auto(
+    value: CssCalc,
+    offset: f32,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> LengthPercentageAuto {
+    definite_calc(value, styles).map_or_else(
+        || LengthPercentageAuto::calc(calc_handle_with_offset(values, value, offset)),
+        |value| LengthPercentageAuto::length(value + offset),
+    )
+}
+
+fn padding(
+    value: CssPadding,
+    offset: usize,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> LengthPercentage {
+    match value {
+        CssPadding::Zero => LengthPercentage::length(offset as f32),
+        CssPadding::Cells(value) => LengthPercentage::length((value + offset) as f32),
+        CssPadding::Percent(value) if offset == 0 => {
+            LengthPercentage::percent(value.basis_points() as f32 / 10_000.0)
+        }
+        CssPadding::Percent(value) => LengthPercentage::calc(percentage_handle(
+            values,
+            value.basis_points() as f32 / 10_000.0,
+            offset as f32,
+        )),
+        CssPadding::Calc(value) => calc_length(value, offset as f32, styles, values),
+    }
+}
+
+fn flex_basis(
+    value: FlexBasis,
+    parent_direction: Option<FlexDirection>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> Dimension {
     match value {
         FlexBasis::Auto => Dimension::auto(),
         FlexBasis::Content => Dimension::content(),
@@ -482,14 +604,28 @@ fn flex_basis(value: FlexBasis, parent_direction: Option<FlexDirection>) -> Dime
             }
         }
         FlexBasis::Percent(value) => Dimension::percent(value.basis_points() as f32 / 10_000.0),
+        FlexBasis::Calc(value) => calc_dimension(
+            if parent_direction.is_some_and(FlexDirection::is_column) {
+                value.vertical
+            } else {
+                value.horizontal
+            },
+            styles,
+            values,
+        ),
     }
 }
 
-fn gap(value: CssGap) -> LengthPercentage {
+fn gap(
+    value: CssGap,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> LengthPercentage {
     match value {
         CssGap::Normal => LengthPercentage::length(0.0),
         CssGap::Cells(value) => LengthPercentage::length(value as f32),
         CssGap::Percent(value) => LengthPercentage::percent(value.basis_points() as f32 / 10_000.0),
+        CssGap::Calc(value) => calc_length(value, 0.0, styles, values),
     }
 }
 
@@ -547,10 +683,18 @@ fn content_alignment(
     }
 }
 
-fn margin(value: CssMargin) -> LengthPercentageAuto {
+fn margin(
+    value: CssMargin,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<CalcValue>>,
+) -> LengthPercentageAuto {
     match value {
         CssMargin::Auto => LengthPercentageAuto::auto(),
         CssMargin::Cells(value) => LengthPercentageAuto::length(value as f32),
+        CssMargin::Percent(value) => {
+            LengthPercentageAuto::percent(value.basis_points() as f32 / 10_000.0)
+        }
+        CssMargin::Calc(value) => calc_length_auto(value, 0.0, styles, values),
     }
 }
 

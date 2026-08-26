@@ -1,6 +1,8 @@
 use super::super::{BasicCascade, Cascade};
 use crate::core::dom::{Document, ElementNs};
-use crate::core::style::{ComputedStyle, CssInset, CssPercentage, Display, InsetEdges, Position};
+use crate::core::style::{
+    ComputedStyle, CssInset, CssSignedPercentage, Display, InsetEdges, Position,
+};
 use crate::css::{CssParser, CssparserParser, MediaContext};
 
 fn computed(declarations: &str) -> ComputedStyle {
@@ -35,7 +37,7 @@ fn inset_shorthand_accepts_signed_lengths_percentages_and_auto() {
         computed("position:absolute;inset:-16px 25% auto 16px").inset,
         InsetEdges {
             top: CssInset::Cells(-1),
-            right: CssInset::Percent(CssPercentage::new(2_500)),
+            right: CssInset::Percent(CssSignedPercentage::new(2_500)),
             bottom: CssInset::Auto,
             left: CssInset::Cells(2),
         }
@@ -47,9 +49,9 @@ fn inset_longhands_and_invalid_shorthands_are_atomic() {
     assert_eq!(
         computed("inset:8px;inset:-10% 1px;left:-24px").inset,
         InsetEdges {
-            top: CssInset::Cells(1),
-            right: CssInset::Cells(1),
-            bottom: CssInset::Cells(1),
+            top: CssInset::Percent(CssSignedPercentage::new(-1_000)),
+            right: CssInset::Cells(0),
+            bottom: CssInset::Percent(CssSignedPercentage::new(-1_000)),
             left: CssInset::Cells(-3),
         }
     );

@@ -23,14 +23,14 @@ pub use alignment::{
 };
 pub use box_model::{
     BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssInset, CssMargin,
-    CssMaxSize, CssPercentage, CssSize, CssWidth, EdgeSizes, InsetEdges, MarginEdges, Overflow,
-    OverflowAxes, Position,
+    CssMaxSize, CssPadding, CssPercentage, CssSignedPercentage, CssSize, CssWidth, EdgeSizes,
+    InsetEdges, MarginEdges, Overflow, OverflowAxes, PaddingEdges, Position,
 };
 pub use color::{CellStyle, Palette, Rgb, Rgba};
 pub use display::{
     Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside, Visibility,
 };
-pub use flex::{AxisCellLength, FlexBasis, FlexDirection, FlexStyle, FlexWrap};
+pub use flex::{AxisCalc, AxisCellLength, FlexBasis, FlexDirection, FlexStyle, FlexWrap};
 pub(crate) use grid::GridStore;
 pub use grid::{
     GridArea, GridAreas, GridAreasData, GridAutoFlow, GridIdent, GridLength, GridLines,
@@ -40,7 +40,7 @@ pub use grid::{
 pub use length::{CellMetric, CssLength, CssLengthUnit, CssNumber, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
 pub use math::CssCalc;
-pub(crate) use math::{CssCalcExpr, CssCalcStore};
+pub(crate) use math::{CalcRange, CssCalcExpr, CssCalcStore};
 pub use render::{RenderContext, RenderMetrics};
 pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
 pub use typography::{FontSize, TextPresentation, TextRendering};
@@ -153,7 +153,7 @@ pub struct ComputedStyle {
     pub position: Position,
     pub inset: InsetEdges,
     pub margin: MarginEdges,
-    pub padding: EdgeSizes,
+    pub padding: PaddingEdges,
     pub border: BorderEdges,
     pub table_layout: TableLayoutMode,
     pub border_collapse: BorderCollapse,
@@ -293,6 +293,46 @@ impl StyleTree {
 
     pub fn resolve_calc(&self, value: CssCalc, basis: f32) -> Option<f32> {
         self.store.calculations.resolve(value, basis)
+    }
+
+    pub fn resolve_padding(&self, value: CssPadding, basis: usize) -> usize {
+        match value {
+            CssPadding::Zero => 0,
+            CssPadding::Cells(value) => value,
+            CssPadding::Percent(value) => value.resolve(basis),
+            CssPadding::Calc(value) => self
+                .resolve_calc(value, basis as f32)
+                .unwrap_or(0.0)
+                .max(0.0)
+                .round() as usize,
+        }
+    }
+
+    pub fn resolve_padding_edges(&self, value: PaddingEdges, basis: usize) -> EdgeSizes {
+        EdgeSizes {
+            top: self.resolve_padding(value.top, basis),
+            right: self.resolve_padding(value.right, basis),
+            bottom: self.resolve_padding(value.bottom, basis),
+            left: self.resolve_padding(value.left, basis),
+        }
+    }
+
+    pub fn resolve_margin(&self, value: CssMargin, basis: usize) -> isize {
+        match value {
+            CssMargin::Auto => 0,
+            CssMargin::Cells(value) => value,
+            CssMargin::Percent(value) => {
+                ((basis as f64 * value.basis_points() as f64) / 10_000.0).round() as isize
+            }
+            CssMargin::Calc(value) => self
+                .resolve_calc(value, basis as f32)
+                .unwrap_or(0.0)
+                .round() as isize,
+        }
+    }
+
+    pub(crate) fn calc_depends_on_basis(&self, value: CssCalc) -> Option<bool> {
+        self.store.calculations.depends_on_basis(value)
     }
 
     pub(crate) fn grid(&self) -> &GridStore {

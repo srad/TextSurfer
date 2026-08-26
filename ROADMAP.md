@@ -75,13 +75,15 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-26): **724 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 39 golden** with the default VGA frontend, and **631 lib · 12 binary** with
-`--no-default-features`; no tests are ignored.
-Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
-contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
-floor (open: optional local, 80% overall / 90% css·layout·paint) ·
-external conformance corpus (M1-A tree output at 95.16% raw / 100% with xfail; test262 at M5).
+Test counts at the last green run (2026-08-26): **819 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 42 golden** with the default VGA frontend, and **726 lib · 12 binary** with
+`--no-default-features`; the WPT integration target adds 4 passing tests and one deliberately
+ignored child-worker entry.
+Cross-cutting: test infrastructure (in progress: incremental static WPT backfill, corpus error-count
+and astral attribute-order gaps; contract suites, snapshots, proptest and fakes landed) · gates
+(done: local only, no CI) · coverage floor (open: optional local, 80% overall / 90%
+css·layout·paint) · external conformance corpus (M1-A tree output at 95.16% raw / 100% with xfail;
+static WPT crash/reftest pilot complete; test262 at M5).
 
 ### Whole-crate audit risk register (2026-08-23)
 
@@ -838,7 +840,7 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
 - **Acceptance:** fixture page (inline script + onclick + document.title + console echo) green; no
   crashes on example.com with JS on; gates green with `--features js`.
 
-### M6 — Stretch (open)
+### M6 — Stretch (in progress)
 
 - [x] **Taffy 0.14 baseline upgrade** *(done)* — pin 0.14.0 with the existing
       block-only features, adapt the 0.14 leaf-measure callback without changing render output,
@@ -866,7 +868,7 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       are capped at 2 MiB with bounded component nesting. `ComputedStyle` and `StyleTree` remain
       unchanged; selector bucketing's median may not regress by more than 15%. CSSOM, `@property`,
       animations, `env()`, dynamic Level 2 names/units and `revert-layer` remain out of scope.
-- [ ] **CSS math, render metrics and signed margins** *(in progress)* — parse and type-check bounded Values 4
+- [x] **CSS math, render metrics and signed margins** *(done)* — parse and type-check bounded Values 4
       `calc()`, `min()`, `max()` and `clamp()` trees after custom-property substitution, preserve
       unresolved percentages until the owning layout axis is known, and resolve physical units
       through a frontend-injected render context. VGA injects its 8×16 bitmap metric with scaled
@@ -875,10 +877,10 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       built-in tree. Signed margins must reach block, flex, inline and the supported table subset;
       overlapping paint and hit testing share one source/depth order. Unsupported dimensions,
       division by zero, non-finite results, incompatible types and exhausted limits invalidate the
-      declaration atomically. Landed: render-context plumbing, mixed length/percentage math for
-      size/min/max properties, used-value `min()`/`max()`/`clamp()` with `none` bounds, and simple
-      signed margins. Remaining: typed math for margins, padding, insets, gaps, `flex-basis` and
-      `font-size`.
+      declaration atomically. Landed: render-context plumbing; typed mixed length/percentage math
+      for size/min/max, margins, padding, insets, gaps, `flex-basis` and `font-size`; used-value
+      `min()`/`max()`/`clamp()` with `none` bounds; destination-axis shorthand lowering; signed
+      margins; nonnegative used-value ranges; and shared Taffy/manual-path calculation resolution.
 - [x] **Grid** *(done)* — enable Taffy's grid engine after the flex formatting and
       paint-order seams settle.
       *Promoted to the top of the remaining M6 rendering work 2026-08-26 on live evidence:* Wikipedia's
@@ -924,25 +926,65 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
   spans never overlap, and a wider table viewport never increases height. Grid adds bounded
   declaration/layout completion and auto-fill height monotonicity under wider viewports
   (`layout/engine/tests/grid/tracks.rs`). Property tests for `url_fix`/`EditBuffer` continue from M0.
-- FakeFetch + fake clock + fake Host; no test touches the network or the real clock.
+- FakeFetch + fake clock + fake Host; no test touches the network. Product code and corpus workers
+  never read the real clock; the sole exception is the static-WPT parent supervisor's fixed
+  wall-clock watchdog, which may terminate and reap an isolated child.
 - `tests/support/` shared corpus helpers; inline `#[cfg(test)]` fakes where module-local.
 - `--dump` (M1-B) is the scriptable end-to-end harness: fixture in, golden text out.
+- [x] **Static WPT terminal-cell pilot** *(done)*. Use a
+      pinned, vendored WPT-derived slice rather than WPT's browser runner. One isolated child owns a
+      complete test/reference graph, every page gets a fresh `PageLoad`, and a fixed ten-second
+      parent watchdog contains aborts and hangs. The hermetic worker resolves only manifest-listed
+      files below `https://wpt.test/` and runs parse → cascade → layout → paint with injected zero
+      time, scripting disabled and production limits.
+      - **Pinned pilot:** WPT `797589c8452b14ba448ba77819427ff3d743e37f`; raw-pass
+        `css/css-ui/box-sizing-003.html` and `box-sizing-005.html` against their shared
+        `reference/box-sizing-001-ref.html`; must-complete `textarea-large-padding-crash.html`,
+        `large-border-crash.html` and `negative-flex-margins-crash.html`.
+      - **Terminal oracle:** profile `terminal-cell-v1` is a 100×38 content viewport with terminal
+        8×16 metrics, Paper White light media appearance and inert dynamic state. Reftests compare
+        the actual ratatui content cells, not internal boxes: at least one `match` agrees and every
+        `mismatch` differs. VGA builds also render each graph with VGA metrics for crash-only
+        coverage. Geometry is never an additional WPT verdict.
+      - **Classification:** a typed manifest records `run`/`skip`/`xfail`, capabilities, exact
+        reference relations and the transitive resource allowlist. Only an assertion mismatch may
+        xfail; unexpected pass, crash, timeout and harness errors fail. The 24 audited
+        `box-sizing-*` tests admit `003`/`005`, skip `001`/`026` for `z-index`, `007`–`025` for
+        SVG/image intrinsic sizing and `027` for `testharness.js`. The three named crashtests are
+        curated safety additions, not directory-wide coverage.
+      - **Integrity and acceptance:** a dedicated failure-preserving fetch tool vendors exact
+        upstream bytes, license and SHA-256 membership under `testdata/wpt/`; Rust tests never use
+        the network. Completion requires audited=27, eligible=5, run=5, pass=5, xfail=0, skip=22,
+        no unexpected/crash/timeout/harness result, all local gates, and the manual smoke list.
+- [ ] **Incremental WPT terminal-cell backfill** *(open; non-blocking after the pilot)*. Import one
+      bounded, fully inventoried tranche at a time from supported box, sizing, values, alignment,
+      flex, grid and table suites. Exact existing case statuses may not regress, but the reported raw
+      supported-slice rate may fall when new known failures expand the denominator. Script, server,
+      cross-origin, fuzzy, font/image, print/manual, variant, native-widget and viewport-sensitive
+      cases remain excluded until a capability-specific roadmap decision admits them. WPT results
+      are labelled a TextSurfer terminal-cell slice, never browser pixel conformance; specifications
+      remain authoritative and Ladybird is a manual comparison implementation for disputed cases.
 - [ ] Corpus-harness audit follow-up: `DatCase.error_count` is parsed but never compared with
       `ParseOutcome.parse_errors`, so the published 95.16% is tree-output conformance only; compare
       error counts or explicitly justify the exclusion. The attribute-order test named for UTF-16
       covers BMP names only while `tree_dump` uses Rust scalar-value sorting; add an astral-vs-BMP
       case against the pinned reference serializer.
 
-### External conformance corpus (M1-A / M5)
+### External conformance corpus (M1-A / cross-cutting / M5)
 
 - WPT `html/syntax/parsing/resources/*.dat` (pinned commit `ed37f83e`; the html5lib-tests repo is
   archived and points here) is the M1-A landing gate; the tokenizer suite is informational.
+- Static WPT rendering uses the same pinned, vendored, hashed and offline model. Its adapter consumes
+  upstream HTML/reference metadata directly; it does not translate cases into bespoke Rust tests or
+  claim pixel-browser equivalence for cell-quantized output. WPT `testharness.js` is not admitted
+  unless a later M5+ capability audit proves that the required script and DOM APIs exist; this plan
+  makes no promise to support that harness.
 - test262 (pinned commit): executed through `boa_engine` 0.21.1 with harness files and YAML
   frontmatter honored; per-milestone curated slices with an explicit xfail manifest.
 - css-syntax + WPT-selectors corpora: inherited by adopting `cssparser` / `selectors`.
-- Rules: corpora live in `testdata/`, fetched once by `tools/fetch-corpus.ps1` (human-run, pinned via
-  commit hashes); tests never touch the network; xfail entries name the exact test file + reason;
-  pass-rate progression is recorded in the updates log at each milestone.
+- Rules: corpora live in `testdata/`; HTML parsing uses `tools/fetch-corpus.ps1`, while rendering
+  uses its dedicated human-run fetch tool. Both pin exact commits and keep Rust tests offline. Xfail
+  entries name an exact case and reason; each corpus reports its own clearly labelled progression.
 
 ## Non-goals (locked unless a milestone re-opens them)
 
@@ -954,6 +996,89 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-26 — **Real-site smoke passed; CSS math and the static WPT pilot are done.** The user
+  reports the manual smoke looks correct after the table-intersection and Wikipedia search-control
+  repairs. This closes the reopened CSS-math acceptance gate and the pilot's final human gate;
+  conformant floats are again the next open M6 rendering item. Incremental WPT backfill remains a
+  separate non-blocking test-infrastructure task.
+- 2026-08-26 — **Static WPT pilot automated implementation green; human smoke pending.** The
+  typed/offline corpus at WPT `797589c8452b14ba448ba77819427ff3d743e37f` reports audited=27,
+  eligible=5, run=5, pass=5, xfail=0, skip=22 and zero unexpected, crash, timeout or harness
+  outcomes. Its isolated child supervisor, terminal-cell oracle, authored-background sentinel,
+  hash/license/membership checks and failure-preserving fetch-tool tests are green. The complete
+  local matrix is green with 819 default/JS/VGA and 726 no-default library tests, plus all binary,
+  integration, corpus, golden and doc-test targets. The item stays in progress and continues to
+  block new M6 rendering features until the manual example.com, DuckDuckGo Lite and Wikipedia smoke
+  is recorded.
+- 2026-08-26 — **Static WPT plan narrowed after feasibility and failure-mode audit.** This
+  supersedes the earlier same-day broad rendering-corpus entry: only an isolated five-case pilot
+  blocks M6, while bounded backfill continues incrementally. WPT is pinned at
+  `797589c8452b14ba448ba77819427ff3d743e37f`; the pilot has two raw-pass reftests, three
+  must-complete crashtests and 22 explicit box-sizing skips. Cell output is the sole reftest oracle;
+  geometry verdicts and the aggregate nondecreasing pass-rate floor were rejected. A ten-second
+  wall-clock watchdog is allowed only in the parent test supervisor. Typed manifest parsing pins
+  dev-only `serde` 1.0.229 and `serde_json` 1.0.151; upstream bytes and BSD-3-Clause licensing stay
+  pinned, hashed and offline.
+
+- 2026-08-26 — **Static WPT rendering conformance promoted ahead of further M6 features.** The
+  existing html5lib WPT corpus proves the pinned/offline/hash-manifest model, but unit contracts and
+  project-authored goldens did not protect the combined CSS-math, border-box, replaced-control and
+  table paths during the Wikipedia smoke. The next cross-cutting task therefore adds a direct static
+  WPT crashtest runner followed by a cell-rendering reftest adapter. It starts with box sizing and
+  expands through the supported box, sizing, values, flex, grid, table and widget suites. The plan
+  explicitly excludes unsupported dynamic/server/font/image cases from the denominator, forbids
+  blanket xfails, preserves transitive upstream resources, uses style-aware visible-cell equality
+  for the adapted WPT verdict, retains geometry fingerprints for diagnostics and reviewed exact
+  cases, isolates every rendered corpus page behind deterministic deadlines, and retains human
+  real-site smoke.
+  WPT's browser-oriented Python runner is not added to the Rust gates; no dependency pin changes
+  until implementation audits the exact upstream commit and fixture set.
+- 2026-08-26 — **Wikipedia search-control sizing regression fixed; human re-smoke pending.** The
+  post-crash smoke reached the page, but the Vector header search field geometry was wrong and its
+  Search button lost the label. A Wikipedia-shaped border-box/padding/overflow test failed before
+  the fix: the CSS-math sizing change had stopped adding definite border and padding to a replaced
+  element's intrinsic size under `box-sizing: border-box`, allowing the chrome to consume the entire
+  content box. Intrinsic sizing now retains that definite chrome contribution with saturating
+  arithmetic; percentage padding remains basis-dependent. Format, all three strict Clippy
+  configurations and the default/JS/VGA/no-default test matrix are green at 819 library tests (726
+  without defaults), 13/12 binary, 6 fetch-pipeline, 14 corpus and 42 golden tests. CSS math remains
+  in progress until another human Wikipedia smoke passes.
+- 2026-08-26 — **Wikipedia table-intersection panic fixed; human re-smoke pending.** A focused test
+  reproduces the exact horizontal underflow and also covers the vertical-disjoint case.
+  `intersect_rect` now constructs its result lazily, so rejected intersections perform no unsigned
+  subtraction. An audit of the remaining eager `then_some` calls found no matching arithmetic
+  hazard. Format and all three strict Clippy configurations are green. The default, JS and VGA
+  matrices pass 818 library, 13 binary, 6 fetch-pipeline, 14 corpus and 42 golden tests; no-default
+  passes 725 library, 12 binary, 6 fetch-pipeline, 14 corpus and 42 golden tests. The CSS-math item
+  stays in progress until the reported Wikipedia route passes another human smoke.
+- 2026-08-26 — **CSS-math milestone close reopened by Wikipedia human smoke.** Surfing
+  `https://en.wikipedia.org/wiki/Terminal_emulator` reached a disjoint table-rectangle intersection
+  and panicked at `layout/table/geometry.rs` through eager unsigned subtraction inside
+  `bool::then_some`. Milestone completion now requires a regression contract for disjoint rectangles,
+  lazy intersection construction, the full local gates, and another human Wikipedia smoke.
+- 2026-08-26 — **M6 CSS math, render metrics and signed margins complete.** The shared bounded
+  expression store now preserves percentage provenance and property range policy across every
+  supported length/percentage consumer. Margin and padding shorthands lower each component for its
+  destination cell axis while retaining the containing-width basis; inset, gap and flex-basis use
+  their owning axes; font-size math resolves against the inherited computed size before descendant
+  font-relative lengths. Taffy receives pure-length expressions as lengths and defers basis-bound
+  expressions through the same resolver used by leaf and container layout; manual inline/table
+  cyclic percentages use a zero basis. No dependency pin changed. Format and strict
+  default/all-feature/no-default Clippy are green. The default, JS and VGA matrices pass 817
+  library, 13 binary, 6 fetch-pipeline, 14 corpus and 42 render-golden tests; no-default passes 724
+  library, 12 binary, 6 fetch-pipeline, 14 corpus and 42 render-golden tests. The new CSS-math
+  golden was inspected, no existing snapshot changed, and no `.snap.new` was produced. The standing
+  human smoke list remains the milestone-close handoff.
+- 2026-08-26 — **M6 typed CSS math completion started with corrected resolution contracts.**
+  cssparser 0.37.0 and Taffy 0.14.0 remain the latest published versions, so no dependency changes
+  are planned. The remaining margin, padding, inset, gap, flex-basis and font-size forms must retain
+  percentage provenance, lower shorthand components for their destination axes, and distinguish the
+  output cell axis from the percentage-basis axis. In particular, top and bottom margin/padding
+  percentages use containing-block width and therefore scale columns into rows under the injected
+  cell metric. Pure-length math must reach Taffy as a length when no percentage token occurred;
+  declaration parsing and bounded interning remain atomic. Taffy-owned intrinsic passes retain
+  Taffy 0.14's missing-basis behavior for mixed length/percentage calculations; the manual inline
+  and table paths resolve their cyclic percentage component against zero.
 - 2026-08-26 — **M6 Grid rendering complete.** Taffy-backed Grid now covers the documented Level 1
   parser, cascade, layout, content and paint slice with transactional bounded stores and shared
   math/order properties. Format and strict default/all-feature/no-default Clippy are green. The

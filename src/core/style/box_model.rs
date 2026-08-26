@@ -37,6 +37,19 @@ impl CssPercentage {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CssSignedPercentage(i32);
+
+impl CssSignedPercentage {
+    pub const fn new(basis_points: i32) -> Self {
+        Self(basis_points)
+    }
+
+    pub const fn basis_points(self) -> i32 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BoxSizing {
     #[default]
@@ -146,7 +159,8 @@ pub enum CssInset {
     #[default]
     Auto,
     Cells(isize),
-    Percent(CssPercentage),
+    Percent(CssSignedPercentage),
+    Calc(CssCalc),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -165,10 +179,39 @@ pub struct EdgeSizes {
     pub left: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CssPadding {
+    #[default]
+    Zero,
+    Cells(usize),
+    Percent(CssPercentage),
+    Calc(CssCalc),
+}
+
+impl CssPadding {
+    pub const fn cells(self) -> Option<usize> {
+        match self {
+            Self::Zero => Some(0),
+            Self::Cells(value) => Some(value),
+            Self::Percent(_) | Self::Calc(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PaddingEdges {
+    pub top: CssPadding,
+    pub right: CssPadding,
+    pub bottom: CssPadding,
+    pub left: CssPadding,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CssMargin {
     Auto,
     Cells(isize),
+    Percent(CssSignedPercentage),
+    Calc(CssCalc),
 }
 
 impl Default for CssMargin {
@@ -184,6 +227,7 @@ impl CssMargin {
         match self {
             Self::Auto => 0,
             Self::Cells(value) => value,
+            Self::Percent(_) | Self::Calc(_) => 0,
         }
     }
 }

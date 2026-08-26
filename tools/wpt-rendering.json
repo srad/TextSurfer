@@ -1,0 +1,266 @@
+{
+  "schema": 1,
+  "upstream": {
+    "repository": "https://github.com/web-platform-tests/wpt",
+    "commit": "797589c8452b14ba448ba77819427ff3d743e37f"
+  },
+  "profile": {
+    "id": "terminal-cell-v1",
+    "columns": 100,
+    "rows": 38,
+    "metrics": "terminal",
+    "appearance": "light",
+    "theme": "paper-white",
+    "cell": { "column_px": 8, "row_px": 16, "root_font_px": 16 },
+    "palette": {
+      "text": [16, 16, 16],
+      "background": [232, 228, 216],
+      "link": [0, 71, 171],
+      "link_hover": [139, 26, 26]
+    }
+  },
+  "cases": [
+    {
+      "path": "css/css-ui/box-sizing-001.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported z-index",
+      "capabilities": ["z-index"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-003.html",
+      "kind": "reftest",
+      "status": "run",
+      "capabilities": ["static-html", "absolute-positioning", "box-sizing", "authored-background-sentinel"],
+      "references": [
+        { "relation": "match", "path": "css/css-ui/reference/box-sizing-001-ref.html" }
+      ],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-005.html",
+      "kind": "reftest",
+      "status": "run",
+      "capabilities": ["static-html", "absolute-positioning", "box-sizing", "authored-background-sentinel"],
+      "references": [
+        { "relation": "match", "path": "css/css-ui/reference/box-sizing-001-ref.html" }
+      ],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-007.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-008.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-009.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-010.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-011.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-012.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-013.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-014.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-015.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-016.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-017.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-018.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-019.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-020.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-021.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-022.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-023.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-024.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-025.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported SVG image intrinsic sizing",
+      "capabilities": ["svg-images", "replaced-intrinsic-sizing"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-026.html",
+      "kind": "reftest",
+      "status": "skip",
+      "reason": "requires unsupported z-index",
+      "capabilities": ["z-index"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-ui/box-sizing-027.html",
+      "kind": "testharness",
+      "status": "skip",
+      "reason": "requires testharness.js and getComputedStyle",
+      "capabilities": ["javascript", "testharness", "get-computed-style"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-sizing/textarea-large-padding-crash.html",
+      "kind": "crashtest",
+      "status": "run",
+      "capabilities": ["static-html", "textarea", "large-length-safety"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-tables/crashtests/large-border-crash.html",
+      "kind": "crashtest",
+      "status": "run",
+      "capabilities": ["static-html", "tables", "large-length-safety"],
+      "references": [],
+      "resources": []
+    },
+    {
+      "path": "css/css-flexbox/negative-flex-margins-crash.html",
+      "kind": "crashtest",
+      "status": "run",
+      "capabilities": ["static-html", "flexbox", "negative-margins"],
+      "references": [],
+      "resources": []
+    }
+  ]
+}

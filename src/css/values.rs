@@ -9,7 +9,7 @@ use crate::core::geom::Size;
 use crate::core::style::{
     BorderColor, BorderEdges, BorderLineStyle, BorderSide, CellMetric, CssLength, CssLengthUnit,
     CssPercentage, CssSize, Cursor, Display, DisplayBox, DisplayInternal, DisplayOutside,
-    EdgeSizes, LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
+    LengthAxis, ListStylePosition, ListStyleType, Rgb, Rgba,
 };
 
 pub(super) fn parse_cursor(source: &str) -> Option<Cursor> {
@@ -531,70 +531,6 @@ pub(super) fn assign_border_color(target: &mut BorderSide, value: &str) {
         && let [color] = values.as_slice()
     {
         target.color = *color;
-    }
-}
-
-pub(super) fn assign_one(
-    target: &mut usize,
-    value: &str,
-    axis: LengthAxis,
-    metric: CellMetric,
-    viewport: Size,
-    font_px: f64,
-    root_font_px: f64,
-) {
-    if let Some(value) = parse_length(value) {
-        *target = metric.resolve_cells_with_fonts(value, axis, viewport, font_px, root_font_px);
-    }
-}
-
-pub(super) fn assign_edges(
-    edges: &mut EdgeSizes,
-    values: &[CssLength],
-    metric: CellMetric,
-    viewport: Size,
-    font_px: f64,
-    root_font_px: f64,
-) {
-    let values = expanded_edges(values).map(|values| {
-        [
-            metric.resolve_cells_with_fonts(
-                values[0],
-                LengthAxis::Vertical,
-                viewport,
-                font_px,
-                root_font_px,
-            ),
-            metric.resolve_cells_with_fonts(
-                values[1],
-                LengthAxis::Horizontal,
-                viewport,
-                font_px,
-                root_font_px,
-            ),
-            metric.resolve_cells_with_fonts(
-                values[2],
-                LengthAxis::Vertical,
-                viewport,
-                font_px,
-                root_font_px,
-            ),
-            metric.resolve_cells_with_fonts(
-                values[3],
-                LengthAxis::Horizontal,
-                viewport,
-                font_px,
-                root_font_px,
-            ),
-        ]
-    });
-    if let Some([top, right, bottom, left]) = values.as_ref() {
-        *edges = EdgeSizes {
-            top: *top,
-            right: *right,
-            bottom: *bottom,
-            left: *left,
-        };
     }
 }
 

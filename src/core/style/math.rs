@@ -7,19 +7,27 @@ const MAX_STORED_NODES: usize = 65_536;
 pub struct CssCalc(u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CalcRange {
+    Unbounded,
+    NonNegative,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Linear {
     length: u32,
     percent: u32,
+    basis_dependent: bool,
 }
 
 impl Linear {
-    fn new(length: f32, percent: f32) -> Option<Self> {
+    fn new(length: f32, percent: f32, basis_dependent: bool) -> Option<Self> {
         if !length.is_finite() || !percent.is_finite() {
             return None;
         }
         Some(Self {
             length: length.to_bits(),
             percent: percent.to_bits(),
+            basis_dependent,
         })
     }
 
@@ -55,7 +63,15 @@ pub(crate) enum CssCalcExpr {
 
 impl CssCalcExpr {
     pub(crate) fn linear(length: f32, percent: f32) -> Option<Self> {
-        Linear::new(length, percent).map(Self::Linear)
+        Self::linear_with_basis(length, percent, percent != 0.0)
+    }
+
+    pub(crate) fn linear_with_basis(
+        length: f32,
+        percent: f32,
+        basis_dependent: bool,
+    ) -> Option<Self> {
+        Linear::new(length, percent, basis_dependent).map(Self::Linear)
     }
 
     pub(crate) fn add(self, right: Self, positive: bool) -> Option<Self> {
@@ -64,7 +80,17 @@ impl CssCalcExpr {
             return Self::linear(
                 left.length() + sign * right.length(),
                 left.percent() + sign * right.percent(),
-            );
+            )
+            .and_then(|value| {
+                if left.basis_dependent || right.basis_dependent {
+                    let Self::Linear(value) = value else {
+                        unreachable!()
+                    };
+                    Self::linear_with_basis(value.length(), value.percent(), true)
+                } else {
+                    Some(value)
+                }
+            });
         }
         let mut values = match self {
             Self::Sum(values) => values,
@@ -79,7 +105,11 @@ impl CssCalcExpr {
             return None;
         }
         match self {
-            Self::Linear(value) => Self::linear(value.length() * factor, value.percent() * factor),
+            Self::Linear(value) => Self::linear_with_basis(
+                value.length() * factor,
+                value.percent() * factor,
+                value.basis_dependent,
+            ),
             Self::Scale { value, factor: old } => {
                 let combined = f32::from_bits(old) * factor;
                 combined.is_finite().then_some(Self::Scale {
@@ -88,7 +118,7 @@ impl CssCalcExpr {
                 })
             }
             value if factor == 1.0 => Some(value),
-            _ if factor == 0.0 => Self::linear(0.0, 0.0),
+            value if factor == 0.0 => Self::linear_with_basis(0.0, 0.0, value.depends_on_basis()),
             value => Some(Self::Scale {
                 value: Box::new(value),
                 factor: factor.to_bits(),
@@ -124,7 +154,7 @@ impl CssCalcExpr {
         }
     }
 
-    fn resolve(&self, basis: f32) -> Option<f32> {
+    pub(crate) fn resolve(&self, basis: f32) -> Option<f32> {
         match self {
             Self::Linear(value) => value.resolve(basis),
             Self::Sum(values) => values.iter().try_fold(0.0, |total, (positive, value)| {
@@ -161,6 +191,24 @@ impl CssCalcExpr {
         }
     }
 
+    pub(crate) fn depends_on_basis(&self) -> bool {
+        match self {
+            Self::Linear(value) => value.basis_dependent,
+            Self::Sum(values) => values.iter().any(|(_, value)| value.depends_on_basis()),
+            Self::Scale { value, .. } => value.depends_on_basis(),
+            Self::Min(values) | Self::Max(values) => values.iter().any(Self::depends_on_basis),
+            Self::Clamp {
+                minimum,
+                value,
+                maximum,
+            } => {
+                minimum.as_deref().is_some_and(Self::depends_on_basis)
+                    || value.depends_on_basis()
+                    || maximum.as_deref().is_some_and(Self::depends_on_basis)
+            }
+        }
+    }
+
     fn node_count(&self) -> usize {
         match self {
             Self::Linear(_) => 1,
@@ -189,9 +237,15 @@ impl CssCalcExpr {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CssCalcStore {
-    expressions: Vec<Arc<CssCalcExpr>>,
-    ids: HashMap<Arc<CssCalcExpr>, CssCalc>,
+    expressions: Vec<Arc<StoredCalc>>,
+    ids: HashMap<Arc<StoredCalc>, CssCalc>,
     nodes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct StoredCalc {
+    expression: CssCalcExpr,
+    range: CalcRange,
 }
 
 #[derive(Clone, Copy)]
@@ -217,24 +271,39 @@ impl CssCalcStore {
         self.nodes = checkpoint.nodes;
     }
 
-    pub(crate) fn insert(&mut self, expression: CssCalcExpr) -> Option<CssCalc> {
-        if let Some(value) = self.ids.get(&expression) {
+    pub(crate) fn insert(&mut self, expression: CssCalcExpr, range: CalcRange) -> Option<CssCalc> {
+        let stored = StoredCalc { expression, range };
+        if let Some(value) = self.ids.get(&stored) {
             return Some(*value);
         }
-        let nodes = expression.node_count();
+        let nodes = stored.expression.node_count();
         if self.nodes.saturating_add(nodes) > MAX_STORED_NODES {
             return None;
         }
         let value = CssCalc(u32::try_from(self.expressions.len()).ok()?);
-        let expression = Arc::new(expression);
-        self.expressions.push(expression.clone());
-        self.ids.insert(expression, value);
+        let stored = Arc::new(stored);
+        self.expressions.push(stored.clone());
+        self.ids.insert(stored, value);
         self.nodes += nodes;
         Some(value)
     }
 
     pub(crate) fn resolve(&self, value: CssCalc, basis: f32) -> Option<f32> {
-        self.expressions.get(value.0 as usize)?.resolve(basis)
+        let stored = self.expressions.get(value.0 as usize)?;
+        let value = stored.expression.resolve(basis)?;
+        Some(match stored.range {
+            CalcRange::Unbounded => value,
+            CalcRange::NonNegative => value.max(0.0),
+        })
+    }
+
+    pub(crate) fn depends_on_basis(&self, value: CssCalc) -> Option<bool> {
+        Some(
+            self.expressions
+                .get(value.0 as usize)?
+                .expression
+                .depends_on_basis(),
+        )
     }
 
     #[cfg(test)]

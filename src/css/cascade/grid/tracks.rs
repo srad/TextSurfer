@@ -366,7 +366,10 @@ fn parse_grid_length(
     }
     parser.reset(&state);
     if let Some(expression) = parse_length_percentage_parser(parser, media, axis) {
-        return store.calculations.insert(expression).map(GridLength::Calc);
+        return store
+            .calculations
+            .insert(expression, crate::core::style::CalcRange::NonNegative)
+            .map(GridLength::Calc);
     }
     parser.reset(&state);
     let length = parse_length_token(parser)?;

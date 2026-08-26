@@ -113,6 +113,14 @@ pub(super) struct TableFormatter<'a> {
 }
 
 impl<'a> TableFormatter<'a> {
+    fn padding(
+        &self,
+        style: crate::core::style::ComputedStyle,
+        _basis: usize,
+    ) -> crate::core::style::EdgeSizes {
+        self.styles.resolve_padding_edges(style.padding, 0)
+    }
+
     pub fn new(input: LayoutInput<'a>) -> Self {
         Self {
             document: input.document,
@@ -173,8 +181,8 @@ impl<'a> TableFormatter<'a> {
             limits,
             nesting,
         );
-        let bottom = style
-            .padding
+        let bottom = self
+            .padding(style, available_width)
             .bottom
             .saturating_add(style.border.bottom.layout_width());
         output.baseline = Some(output.height.saturating_sub(bottom + 1));

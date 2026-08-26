@@ -25,6 +25,21 @@ fn column_flex_grow_and_explicit_height_share_the_main_axis() {
 }
 
 #[test]
+fn math_flex_basis_resolves_on_the_parent_main_axis() {
+    let fixture = flex_fixture(
+        "width:10ch",
+        "height:16px;flex:0 0 calc(10% + 1ch)",
+        2,
+        Size { cols: 20, rows: 5 },
+    );
+    assert_eq!(
+        box_for(&fixture.tree, fixture.items[0]).border_rect.width,
+        2
+    );
+    assert_eq!(box_for(&fixture.tree, fixture.items[1]).border_rect.col, 2);
+}
+
+#[test]
 fn flex_grow_distributes_free_space_by_factor() {
     let equal = flex_fixture(
         "width:12ch",

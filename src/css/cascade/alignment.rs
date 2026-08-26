@@ -2,8 +2,8 @@ use cssparser::{Parser, ParserInput, Token};
 
 use super::MediaContext;
 use crate::core::style::{
-    Alignment, AlignmentSafety, AlignmentStyle, ComputedStyle, ContentAlignment, CssGap,
-    ItemAlignment, LengthAxis,
+    Alignment, AlignmentSafety, AlignmentStyle, CalcRange, ComputedStyle, ContentAlignment, CssGap,
+    CssLength, CssPercentage, ItemAlignment, LengthAxis, StyleStore,
 };
 use crate::css::values::{parse_ident, parse_length_token, percentage_value};
 
@@ -14,6 +14,7 @@ pub(super) fn apply_alignment_declaration(
     property: &str,
     source: &str,
     media: MediaContext,
+    store: &mut StyleStore,
 ) -> bool {
     match property {
         "justify-content" => assign(
@@ -42,13 +43,13 @@ pub(super) fn apply_alignment_declaration(
         ),
         "row-gap" | "grid-row-gap" => assign(
             &mut style.alignment.row_gap,
-            parse_gap(source, media, LengthAxis::Vertical),
+            parse_gap(source, media, LengthAxis::Vertical, store),
         ),
         "column-gap" | "grid-column-gap" => assign(
             &mut style.alignment.column_gap,
-            parse_gap(source, media, LengthAxis::Horizontal),
+            parse_gap(source, media, LengthAxis::Horizontal, store),
         ),
-        "gap" | "grid-gap" => assign_gap(&mut style.alignment, source, media),
+        "gap" | "grid-gap" => assign_gap(&mut style.alignment, source, media, store),
         "place-content" => assign_place_content(&mut style.alignment, source),
         "place-items" => assign_place_items(&mut style.alignment, source),
         "place-self" => assign_place_self(&mut style.alignment, source),
@@ -63,54 +64,85 @@ fn assign<T>(target: &mut T, value: Option<T>) {
     }
 }
 
-pub(super) fn parse_gap(source: &str, media: MediaContext, axis: LengthAxis) -> Option<CssGap> {
-    let mut input = ParserInput::new(source);
-    let mut parser = Parser::new(&mut input);
-    let value = parse_gap_parser(&mut parser, media, axis)?;
-    parser.expect_exhausted().ok()?;
-    Some(value)
+#[derive(Clone)]
+enum ParsedGap {
+    Normal,
+    Percent(CssPercentage),
+    Length(CssLength),
+    Math(crate::css::math::ParsedMath),
 }
 
-fn parse_gap_parser(
-    parser: &mut Parser<'_, '_>,
+pub(super) fn parse_gap(
+    source: &str,
     media: MediaContext,
     axis: LengthAxis,
+    store: &mut StyleStore,
 ) -> Option<CssGap> {
+    let checkpoint = store.checkpoint();
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let result = (|| {
+        let value = parse_gap_parser(&mut parser)?;
+        parser.expect_exhausted().ok()?;
+        resolve_gap(value, media, axis, store)
+    })();
+    if result.is_none() {
+        store.rollback(checkpoint);
+    }
+    result
+}
+
+fn parse_gap_parser(parser: &mut Parser<'_, '_>) -> Option<ParsedGap> {
     if parser
         .try_parse(|input| input.expect_ident_matching("normal"))
         .is_ok()
     {
-        return Some(CssGap::Normal);
+        return Some(ParsedGap::Normal);
     }
     let state = parser.state();
     if let Ok(Token::Percentage { unit_value, .. }) = parser.next().cloned() {
-        return percentage_value(unit_value).map(CssGap::Percent);
+        return percentage_value(unit_value).map(ParsedGap::Percent);
     }
     parser.reset(&state);
-    parse_length_token(parser).map(|length| CssGap::Cells(media.resolve_cells(length, axis)))
+    if let Some(value) = crate::css::math::parse_math_parser(parser) {
+        return Some(ParsedGap::Math(value));
+    }
+    parse_length_token(parser).map(ParsedGap::Length)
 }
 
-fn assign_gap(style: &mut AlignmentStyle, source: &str, media: MediaContext) {
+fn resolve_gap(
+    value: ParsedGap,
+    media: MediaContext,
+    axis: LengthAxis,
+    store: &mut StyleStore,
+) -> Option<CssGap> {
+    Some(match value {
+        ParsedGap::Normal => CssGap::Normal,
+        ParsedGap::Percent(value) => CssGap::Percent(value),
+        ParsedGap::Length(value) => CssGap::Cells(media.resolve_cells(value, axis)),
+        ParsedGap::Math(value) => CssGap::Calc(store.calculations.insert(
+            value.lower_cells(media, axis, axis)?,
+            CalcRange::NonNegative,
+        )?),
+    })
+}
+
+fn assign_gap(
+    style: &mut AlignmentStyle,
+    source: &str,
+    media: MediaContext,
+    store: &mut StyleStore,
+) {
+    let checkpoint = store.checkpoint();
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
-    let Some(row) = parse_gap_parser(&mut parser, media, LengthAxis::Vertical) else {
+    let Some(row) = parse_gap_parser(&mut parser) else {
         return;
     };
     let column = if parser.is_exhausted() {
-        match row {
-            CssGap::Cells(_) => {
-                let mut input = ParserInput::new(source);
-                let mut parser = Parser::new(&mut input);
-                let Some(value) = parse_gap_parser(&mut parser, media, LengthAxis::Horizontal)
-                else {
-                    return;
-                };
-                value
-            }
-            value => value,
-        }
+        row.clone()
     } else {
-        let Some(value) = parse_gap_parser(&mut parser, media, LengthAxis::Horizontal) else {
+        let Some(value) = parse_gap_parser(&mut parser) else {
             return;
         };
         value
@@ -118,6 +150,14 @@ fn assign_gap(style: &mut AlignmentStyle, source: &str, media: MediaContext) {
     if parser.expect_exhausted().is_err() {
         return;
     }
+    let Some(row) = resolve_gap(row, media, LengthAxis::Vertical, store) else {
+        store.rollback(checkpoint);
+        return;
+    };
+    let Some(column) = resolve_gap(column, media, LengthAxis::Horizontal, store) else {
+        store.rollback(checkpoint);
+        return;
+    };
     style.row_gap = row;
     style.column_gap = column;
 }
