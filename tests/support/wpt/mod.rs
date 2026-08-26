@@ -1,8 +1,10 @@
+mod dom_construction;
 mod manifest;
 mod render;
 mod supervisor;
 mod tests;
 
+pub use dom_construction::assert_deep_dom_construction_completes;
 pub use supervisor::run_worker;
 pub use tests::{
     assert_corpus_conformance, assert_corpus_integrity, assert_manifest_contracts,

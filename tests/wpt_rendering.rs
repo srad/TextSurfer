@@ -20,6 +20,11 @@ fn supervisor_contracts() {
 }
 
 #[test]
+fn deep_dom_construction_completes_within_watchdog() {
+    wpt::assert_deep_dom_construction_completes();
+}
+
+#[test]
 fn terminal_cell_conformance() {
     wpt::assert_corpus_conformance();
 }

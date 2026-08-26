@@ -79,11 +79,6 @@ fn nesting_past_the_cap_is_truncated_instead_of_overflowing_the_stack() {
     // than failing an assertion, so a regression takes the whole run down — that is the
     // intended signal.
     //
-    // The depth is 5,000 rather than 100,000 because `Document::insert_element` is
-    // quadratic in depth (indextree's `checked_append` walks every ancestor to reject a
-    // cycle), which costs 49 s to build a 100,000-deep chain against 27 ms to lay it
-    // out. That is a real hang on a hostile page, but it is a DOM defect, not a layout
-    // one; this case is about the layout cap.
     let handle = std::thread::Builder::new()
         .stack_size(MAIN_THREAD_STACK)
         .spawn(|| {

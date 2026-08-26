@@ -96,7 +96,7 @@ candidates were not promoted to confirmed bugs without an executable product rep
 | M1-B | `text-decoration` accepts known tokens from an otherwise-invalid value; inline edge cells take the parent run style; overwriting one cell of a wide glyph clears ownership/text but can retain the old style | Add focused cascade/paint cases before changing behavior; close as disproved if no reachable layout producer can expose it |
 | ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
 | M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. M1-E closed the former link/hit clipping gap by clipping layout boxes and fragments before link rectangles are derived |
-| M2 | **Confirmed, not a candidate: `Document::insert_element` is quadratic in depth.** indextree 4.8.1's `checked_append` walks every ancestor to reject a cycle (`id.rs:714`), so building a 100,000-deep chain measured **49 s**, against 100 ms to cascade it and 27 ms to lay it out. A hostile page hangs in the parser long before M2's block-depth cap matters, and the 10 MiB body limit still allows millions of levels | Not fixable at the call site: indextree exposes no unchecked append (`append` just unwraps `checked_append`), and `insert_with_neighbors` is private. Needs either a parse-time depth limit — which would change html5lib corpus trees and must be weighed against conformance — or a different arena. The cycle check is provably unnecessary where `Document::append` calls it, since it always passes a node it just created detached |
+| ~~M2~~ | ~~`Document::insert_element` is quadratic in depth~~ | **Closed 2026-08-26 as confirmed and fixed.** indextree 4.8.1's `checked_append` walked every ancestor to reject a cycle, so a 100,000-deep chain measured 49 s. `Document::append` now uses indextree 4.9.0's constant-time `append_value` only for values it creates; existing-node attach, insert and move operations retain validation and checked mutations. The isolated 100,000-node worker completes under the ten-second supervisor (0.26 s for the focused parent test), direct tree and cycle cases pass, and the complete feature gate matrix is green |
 | ~~M1-B~~ | ~~A block-level replaced element paints nothing~~ | **Closed 2026-08-26 as confirmed and fixed.** `<img style="display:block">` rendered nothing at all: the display branches were tested before the `img` arm, so a block-level replaced element became a block box that then recursed into children it does not have. Found while giving form controls a box, because `input { display: block }` is ordinary CSS and hit the identical path. Box-level replaced elements now generate their content instead of recursing. Pinned by `a_block_level_image_still_renders_its_alt_text` |
 | ~~M2~~ | ~~Generated content on a bordered box paints at the wrong origin~~ | **Closed 2026-08-26 as confirmed and fixed.** `FlowBox::inline` is emitted at the *border-box* origin, which is sound only because the boxes that carry one are anonymous and have no border or padding — real text reaches `flush_inline`, which wraps it in exactly such a child. Putting a control's stand-in directly in a real box's `inline` broke that invariant and painted Wikipedia's search field over its own `┌───`; where the box also had `overflow: hidden`, the text fell outside its own padding box and was clipped away entirely. Replaced boxes now paint from `content_rect`, and the invariant is stated on the field. Pinned by `a_bordered_control_paints_inside_its_border_not_on_it` and `a_control_with_overflow_hidden_still_shows_its_label` |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
@@ -126,7 +126,8 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 ## Session handoff
 
 1. Read this status board + Roadmap updates log (bottom).
-2. Resume the next `(open)`/`(in progress)` milestone.
+2. Resume the explicit next task: M6 Images across both frontends; return to the remaining M2
+   robustness work afterward.
 3. Run the gates before and after; never mark `(done)` with red gates.
 4. Manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) — run by the human per
    milestone close; never part of automated tests.
@@ -615,9 +616,19 @@ and tables are what separate w3m from lynx. Flex/grid stay in M6.
 Started 2026-08-25 from the robustness end rather than the keyboard end, because the failure paths
 are what the browser did worst: a server's 404 was discarded, a binary body was painted as garbage,
 and a deep page could abort the process. Render robustness and the non-2xx body are done; content-type
-sniffing and the rendered error pages are next, and the keyboard items after them.
+sniffing and rendered error pages remain open. The indextree new-node append prerequisite is done;
+the promoted M6 image delivery is the next feature, and the remaining M2 robustness and keyboard
+items resume when images close.
 
 
+- [x] **Linear-time construction of new DOM children** *(done 2026-08-26)* — pinned indextree
+      4.9.0 and replaced `Document::append`'s create-detached + `checked_append` sequence with
+      `append_value`, whose construction contract exactly matches a value that has never existed in
+      the arena. All APIs that attach, prepend, insert or move an existing `NodeId` retain
+      `Document`'s validation and indextree's checked mutation paths. *Proof:* an isolated ignored
+      child constructs a 100,000-node chain while the existing permitted ten-second parent watchdog
+      contains the old quadratic implementation; direct cases preserve root order, parent/child
+      relationships and move-cycle rejection. The complete feature gate matrix is green.
 - [ ] Keymap unification (extends the M0 keymap tests, same file): `Ctrl+L` (+ existing `a`) focuses
       the address bar so `/` is freed; `/` becomes in-page search; `Tab` in the address bar moves
       focus to content; new `FocusTabs` action (`F6`).
@@ -1953,3 +1964,10 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   library, 13 binary, 4 fetch-pipeline, 14 corpus and 32 render-golden tests; no-default passes 501
   library, 12 binary and the same integration/golden sets. No snapshot changed and no `.snap.new`
   file was produced.
+- 2026-08-26 — **Linear-time DOM construction landed.** Pinned indextree 4.9.0 and changed only
+  `Document::append`'s fresh-child path to `append_value`; operations over existing `NodeId`s retain
+  `Document` validation and indextree's checked mutations. The new isolated watchdog regression
+  first timed out and killed the old 100,000-node construction after ten seconds, then passed in
+  0.26 s after the migration. Direct root/sibling/parent and move-cycle cases remain green. The
+  complete local matrix passed: fmt; strict default, all-feature and no-default Clippy; default,
+  JS, explicit-VGA and no-default tests. M6 Images is now the explicit next task.

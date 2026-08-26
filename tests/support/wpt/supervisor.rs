@@ -119,6 +119,7 @@ pub fn run_worker(mode: &str, result_path: &Path) {
         "hang" => loop {
             hint::spin_loop();
         },
+        "dom-construction" => super::dom_construction::run_worker(result_path),
         other => write_result(
             result_path,
             &CaseOutcome::HarnessError(format!("unknown worker mode {other}")),
@@ -126,7 +127,7 @@ pub fn run_worker(mode: &str, result_path: &Path) {
     }
 }
 
-fn write_result(path: &Path, outcome: &CaseOutcome) {
+pub(super) fn write_result(path: &Path, outcome: &CaseOutcome) {
     let bytes = serde_json::to_vec(outcome).expect("serialize worker result");
     let temporary = path.with_extension("tmp");
     fs::write(&temporary, bytes).expect("write worker result");

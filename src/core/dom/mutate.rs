@@ -71,15 +71,14 @@ impl Document {
     }
 
     pub fn append(&mut self, parent: Option<NodeId>, node: Node) -> NodeId {
-        let id = self.create_detached(node);
         match parent {
-            None => self.roots.push(id),
-            Some(parent) => parent
-                .0
-                .checked_append(id.0, &mut self.arena)
-                .expect("parent node must exist and a new node cannot create a cycle"),
+            None => {
+                let id = self.create_detached(node);
+                self.roots.push(id);
+                id
+            }
+            Some(parent) => NodeId(parent.0.append_value(node, &mut self.arena)),
         }
-        id
     }
 
     pub fn insert_before(&mut self, sibling: NodeId, node: Node) -> NodeId {
