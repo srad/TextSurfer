@@ -203,10 +203,20 @@ fn quirks_mode_suppresses_hover_and_active_on_non_links() {
     assert!(!matches(":active", &document, div, state));
 }
 
+/// Re-baselined deliberately when `:checked` stopped being an attribute lookup: this used to build
+/// the checked element as a typeless `<input checked>`, which is in the *text* state and can never
+/// be checked. The old matcher matched it anyway, which is the same defect that let `<div checked>`
+/// match.
 #[test]
-fn form_state_pseudo_classes_read_the_attributes() {
+fn form_state_pseudo_classes_follow_the_host_language() {
     let mut document = Document::new();
     let checked = document.insert_element(
+        None,
+        "input",
+        ElementNs::Html,
+        vec![Attr::plain("type", "checkbox"), Attr::plain("checked", "")],
+    );
+    let checked_text_input = document.insert_element(
         None,
         "input",
         ElementNs::Html,
@@ -223,6 +233,10 @@ fn form_state_pseudo_classes_read_the_attributes() {
     let state = DynamicState::default();
     assert!(matches("input:checked", &document, checked, state));
     assert!(!matches("input:checked", &document, plain, state));
+    assert!(
+        !matches("input:checked", &document, checked_text_input, state),
+        "a text input is not checkable, whatever attribute it carries"
+    );
     assert!(matches("input:disabled", &document, disabled, state));
     assert!(matches("input:enabled", &document, plain, state));
     assert!(!matches("input:enabled", &document, disabled, state));

@@ -8,6 +8,15 @@ use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext
 use crate::paint::{BasicPainter, Painter};
 use proptest::prelude::*;
 
+/// Layout inputs for a page nobody has typed into: the authored state.
+fn authored_input<'a>(document: &'a Document, styles: &'a StyleTree) -> LayoutInput<'a> {
+    LayoutInput {
+        document,
+        styles,
+        forms: crate::core::form::FormState::empty(),
+    }
+}
+
 fn paragraph(text: &str) -> (Document, StyleTree) {
     let mut document = Document::new();
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
@@ -133,6 +142,7 @@ fn disjoint(a: LayoutRect, b: LayoutRect) -> bool {
 mod flex;
 mod overflow;
 mod positioning;
+mod replaced;
 
 proptest! {
     #[test]
@@ -313,7 +323,7 @@ fn long_words_break_to_terminal_width_even_when_author_css_requests_normal_wrapp
 #[test]
 fn block_min_content_width_is_the_widest_unbreakable_word() {
     let (document, styles) = paragraph("small elephant ox");
-    let flow = build_flow_tree(&document, &styles, 40);
+    let flow = build_flow_tree(authored_input(&document, &styles), 40);
     let inline = flow
         .boxes
         .iter()
@@ -336,7 +346,7 @@ fn mixed_preformatted_whitespace_stays_in_its_unbreakable_segment() {
     document.insert_text(Some(pre), " \t ");
     document.insert_text(Some(p), "bb");
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
-    let flow = build_flow_tree(&document, &styles, 40);
+    let flow = build_flow_tree(authored_input(&document, &styles), 40);
     let inline = flow
         .boxes
         .iter()
@@ -359,7 +369,7 @@ fn a_wrapping_tab_breaks_after_its_first_expanded_space() {
     );
     document.insert_text(Some(p), "aa\tbb");
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
-    let flow = build_flow_tree(&document, &styles, 40);
+    let flow = build_flow_tree(authored_input(&document, &styles), 40);
     let inline = flow
         .boxes
         .iter()

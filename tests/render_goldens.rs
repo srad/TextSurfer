@@ -301,6 +301,11 @@ fn presentational_html_golden() {
 }
 
 #[test]
+fn form_controls_golden() {
+    insta::assert_snapshot!(golden("forms.html"));
+}
+
+#[test]
 fn text_alignment_moves_fragments_and_link_geometry_together() {
     let page = render_source(
         "<style>p { margin:0 }</style><p style='text-align:right'><a href=x>R</a></p>

@@ -47,6 +47,25 @@ pub(super) fn taffy_style(
             ..Default::default()
         };
     }
+    // A replaced box has no children to size it, so its own intrinsic size is what Taffy gets when
+    // the author supplies nothing. Expressed in the box's own `box-sizing` space, since that is
+    // what `size` and `min_size` are measured in.
+    let intrinsic = flow.replaced.as_ref().map(|replaced| {
+        let (cols, rows) = (replaced.intrinsic_cols, replaced.intrinsic_rows);
+        if matches!(flow.style.box_sizing, BoxSizing::BorderBox) {
+            let horizontal = flow.style.border.left.layout_width()
+                + flow.style.border.right.layout_width()
+                + flow.style.padding.left
+                + flow.style.padding.right;
+            let vertical = flow.style.border.top.layout_width()
+                + flow.style.border.bottom.layout_width()
+                + flow.style.padding.top
+                + flow.style.padding.bottom;
+            (cols + horizontal, rows + vertical)
+        } else {
+            (cols, rows)
+        }
+    });
     TaffyStyle {
         display: if matches!(
             flow.style.display.inside(),
@@ -83,16 +102,39 @@ pub(super) fn taffy_style(
             bottom: inset(flow.style.inset.bottom),
         },
         size: TaffySize {
-            width: dimension(flow.style.width, calc_values),
-            height: if flow.rule && flow.style.height == CssSize::Auto {
-                Dimension::length(1.0)
-            } else {
-                dimension(flow.style.height, calc_values)
+            // A replaced element has an intrinsic size and does not fill its container when the
+            // author says nothing: `input { display: block }` keeps its `size=` width in a real
+            // browser, and a `<textarea cols=6>` stays six cells wide.
+            width: match (intrinsic.map(|size| size.0), flow.style.width) {
+                (Some(width), CssSize::Auto) => Dimension::length(width as f32),
+                _ => dimension(flow.style.width, calc_values),
+            },
+            height: match (intrinsic.map(|size| size.1), flow.style.height) {
+                (Some(height), CssSize::Auto) => Dimension::length(height as f32),
+                _ if flow.rule && flow.style.height == CssSize::Auto => Dimension::length(1.0),
+                _ => dimension(flow.style.height, calc_values),
             },
         },
         min_size: TaffySize {
             width: minimum(flow.style.min_width, calc_values),
-            height: minimum(flow.style.min_height, calc_values),
+            // A replaced element keeps room for its own rows even against a smaller `max-height`.
+            // Without this Wikipedia's search field renders blank: it sets `max-height: 2rem` — two
+            // cells — and a 1px border costs a whole cell per edge here, leaving zero content rows.
+            // Our metric quantises the border, not CSS; honouring the number would be faithful to
+            // it and not to the intent. Taffy resolves min over max (`maybe_clamp` is
+            // `base.min(max).max(min)`), which is what CSS requires, so a min is all it takes.
+            height: match intrinsic.map(|size| size.1) {
+                Some(rows) => {
+                    // A percentage or `calc()` author minimum cannot be compared here, so the
+                    // intrinsic wins outright in that case; only a definite one competes.
+                    let authored = match flow.style.min_height {
+                        CssSize::Cells(value) => value,
+                        _ => 0,
+                    };
+                    LengthPercentageAuto::length(rows.max(authored) as f32)
+                }
+                None => minimum(flow.style.min_height, calc_values),
+            },
         },
         max_size: TaffySize {
             width: maximum(flow.style.max_width, calc_values),

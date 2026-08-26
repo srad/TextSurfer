@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Forms</title>
+    <style>
+      body { margin: 0 }
+      p { margin: 0 }
+      .blocky { display: block }
+    </style>
+  </head>
+  <body>
+    <form action="/search" method="get">
+      <p>Text <input type="text" name="q" value="hi" size="6"></p>
+      <p>Bare <input name="bare" size="6"></p>
+      <p>Pass <input type="password" name="pw" value="secret" size="8"></p>
+      <p>Long <input name="long" value="abcdefghij" size="4"></p>
+      <p>Hide <input type="hidden" name="token" value="xyz">nothing</p>
+      <p>Check <input type="checkbox" name="a" checked> <input type="checkbox" name="b"></p>
+      <p>Radio <input type="radio" name="r" checked> <input type="radio" name="r"></p>
+      <p><input type="submit" value="Go"> <input type="reset"> <button>Press</button></p>
+      <p>Bare submit <input type="submit"></p>
+      <p>Pick <select name="s">
+        <option>first</option>
+        <optgroup label="grouped"><option selected>second</option></optgroup>
+      </select></p>
+      <p>Nope <input type="color" name="c"></p>
+      <p>Note</p>
+      <textarea name="t" cols="12" rows="3">a note</textarea>
+      <p>Block input, which used to vanish:</p>
+      <input class="blocky" name="blocky" value="block" size="8">
+      <table border="1">
+        <tr>
+          <td>Cell <input name="cell" value="td" size="4"></td>
+          <td><button>Btn</button></td>
+        </tr>
+      </table>
+    </form>
+  </body>
+</html>

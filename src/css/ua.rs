@@ -2,6 +2,7 @@
 //! policy table keyed on element name, not cascade logic.
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId, attr_value};
+use crate::core::form::{ControlKind, control_kind};
 use crate::core::style::{
     BorderSpacing, ComputedStyle, CssMargin, Cursor, Display, FontSize, ListStyleType, Palette,
     Rgba, TextAlign, VerticalAlign, WhiteSpace,
@@ -218,7 +219,62 @@ pub(super) fn ua_style(
     if name == "blockquote" {
         style.margin.left = CssMargin::Cells(2);
     }
+    apply_form_control(document, id, &mut style);
     style
+}
+
+/// Form controls are replaced elements: they render as a bracketed stand-in built by
+/// `layout::replaced`, not from children. The UA sheet's job here is only the box they occupy and
+/// enough emphasis to tell a control from body text.
+///
+/// That emphasis is `reverse` rather than a colour, deliberately. A style bit works in all five
+/// themes without a palette entry that an author's `background` would then have to fight — and,
+/// more importantly, it is what carries a text field's *extent*: painting the field means the
+/// stand-in can pad with blanks instead of a filler glyph, so a value can never be mistaken for
+/// padding. Filling with `_` was the first attempt and made `[hi____]` ambiguous.
+fn apply_form_control(document: &Document, id: NodeId, style: &mut ComputedStyle) {
+    let Some(kind) = control_kind(document, id) else {
+        // `<option>`/`<optgroup>` are not controls themselves; their text belongs to the select's
+        // stand-in, so they must not also render in the flow.
+        if matches!(
+            element_name(document, id),
+            Some("option" | "optgroup" | "datalist")
+        ) {
+            style.display = Display::NONE;
+        }
+        return;
+    };
+    if kind == ControlKind::Hidden {
+        style.display = Display::NONE;
+        return;
+    }
+    style.reverse = true;
+    // A control's stand-in is laid out to an exact cell count, so its blanks must survive.
+    style.white_space = WhiteSpace::Pre;
+    style.cursor = if kind.is_text_entry() {
+        Cursor::Text
+    } else {
+        Cursor::Pointer
+    };
+    // A field's value starts at its left edge; a button's or a select's label sits in the middle of
+    // whatever box it ends up with. Expressed as `text-align` so the emission needs no rule of its
+    // own and an author can move it.
+    if !kind.is_text_entry() {
+        style.text_align = TextAlign::Center;
+    }
+    // A textarea is the one multi-line control, so it needs a block of its own. This is only safe
+    // because block-level replaced elements render their stand-in rather than recursing into
+    // absent children.
+    if kind == ControlKind::TextArea {
+        style.display = Display::BLOCK;
+    }
+}
+
+fn element_name(document: &Document, id: NodeId) -> Option<&str> {
+    match document.node(id) {
+        Some(Node::Element { name, ns, .. }) if *ns == ElementNs::Html => Some(name),
+        _ => None,
+    }
 }
 
 fn on_chain(document: &Document, id: NodeId, mut target: Option<NodeId>) -> bool {

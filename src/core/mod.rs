@@ -1,6 +1,7 @@
 pub mod dom;
 pub mod event;
 pub mod focus;
+pub mod form;
 pub mod frame;
 pub mod geom;
 pub mod style;

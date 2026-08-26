@@ -2,6 +2,7 @@ use super::document::elements_in_document_order;
 use super::*;
 
 mod flex;
+mod forms;
 mod overflow;
 mod positioning;
 mod variables;

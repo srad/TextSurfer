@@ -1,6 +1,8 @@
+use super::dom::{Attr, Document, ElementNs};
 use super::event::{
     InputBatch, InputEvent, Key, KeyEvent, KeyModifiers, MouseEvent, MouseKind, ResizePhase,
 };
+use super::form::{FormState, display_text, text_value};
 use super::frame::{ChromeDamage, FrameDamage, RowDamage};
 use super::frame::{EVENTS_PER_FRAME, FRAME_INTERVAL, FrameScheduler};
 use super::geom::{Point, Size};
@@ -151,4 +153,48 @@ fn scheduler_waits_indefinitely_when_input_and_app_are_idle() {
         scheduler.next_deadline(Some(std::time::Duration::from_millis(50))),
         Some(std::time::Duration::from_millis(50))
     );
+}
+
+#[test]
+fn a_placeholder_is_never_the_submitted_value() {
+    // A placeholder is a prompt, not a value. The two live in separate functions precisely so that
+    // rendering can fall back to it while submission cannot reach it at all.
+    let mut document = Document::new();
+    let field = document.insert_element(
+        None,
+        "input",
+        ElementNs::Html,
+        vec![Attr::plain("placeholder", "Search Wikipedia")],
+    );
+    let forms = FormState::default();
+    assert_eq!(
+        display_text(&document, field, &forms),
+        ("Search Wikipedia".to_string(), true),
+        "an empty field shows its placeholder, flagged as one so it can be dimmed"
+    );
+    assert_eq!(
+        text_value(&document, field, &forms),
+        "",
+        "but the value it would submit is still empty"
+    );
+}
+
+#[test]
+fn a_value_hides_the_placeholder_and_is_the_one_submitted() {
+    let mut document = Document::new();
+    let field = document.insert_element(
+        None,
+        "input",
+        ElementNs::Html,
+        vec![
+            Attr::plain("placeholder", "Search Wikipedia"),
+            Attr::plain("value", "terminal"),
+        ],
+    );
+    let forms = FormState::default();
+    assert_eq!(
+        display_text(&document, field, &forms),
+        ("terminal".to_string(), false)
+    );
+    assert_eq!(text_value(&document, field, &forms), "terminal");
 }

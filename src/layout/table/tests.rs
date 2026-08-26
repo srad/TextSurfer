@@ -6,6 +6,15 @@ use crate::layout::LayoutRect;
 use proptest::prelude::*;
 use unicode_width::UnicodeWidthStr;
 
+/// Layout inputs for a page nobody has typed into: the authored state.
+fn test_input<'a>(document: &'a Document, styles: &'a StyleTree) -> LayoutInput<'a> {
+    LayoutInput {
+        document,
+        styles,
+        forms: FormState::empty(),
+    }
+}
+
 fn formatted(source: &str, width: usize) -> TableOutput {
     let outcome = Html5everParser::new(false).parse_document(source);
     let document = outcome.document.borrow();
@@ -30,7 +39,12 @@ fn formatted(source: &str, width: usize) -> TableOutput {
         }),
     );
     let table = document.element_by_id("table").unwrap();
-    TableFormatter::new(&document, &styles).format(table, width, TableLimits::default(), 0)
+    TableFormatter::new(test_input(&document, &styles)).format(
+        table,
+        width,
+        TableLimits::default(),
+        0,
+    )
 }
 
 #[test]
@@ -147,7 +161,7 @@ fn resource_limit_falls_back_without_losing_text() {
     let document = outcome.document.borrow();
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     let table = document.element_by_id("table").unwrap();
-    let limited = TableFormatter::new(&document, &styles).format(
+    let limited = TableFormatter::new(test_input(&document, &styles)).format(
         table,
         30,
         TableLimits {
@@ -166,7 +180,7 @@ fn resource_limit_falls_back_without_losing_text() {
     let document = outcome.document.borrow();
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     let parent = document.element_by_id("parent").unwrap();
-    let anonymous = TableFormatter::new(&document, &styles).format_anonymous(
+    let anonymous = TableFormatter::new(test_input(&document, &styles)).format_anonymous(
         vec![
             document.element_by_id("a").unwrap(),
             document.element_by_id("b").unwrap(),
@@ -189,7 +203,7 @@ fn resource_limit_falls_back_without_losing_text() {
     let document = outcome.document.borrow();
     let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
     let table = document.element_by_id("table").unwrap();
-    let nested = TableFormatter::new(&document, &styles).format(
+    let nested = TableFormatter::new(test_input(&document, &styles)).format(
         table,
         30,
         TableLimits {

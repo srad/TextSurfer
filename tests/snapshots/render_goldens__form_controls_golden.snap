@@ -1,0 +1,26 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"forms.html\")"
+---
+Text [hi    ]
+Bare [      ]
+Pass [******  ]
+Long [ghij]
+Hide nothing
+Check [X] [ ]
+Radio (*) ( )
+[Go] [Reset] [Press]
+Bare submit [Submit]
+Pick [second ▾]
+Nope [color?]
+Note
+a note      
+            
+            
+Block input, which used to vanish:
+[block   ]
+┌───────────────────────┐
+│ ┌───────────┐ ┌─────┐ │
+│ │Cell [td  ]│ │[Btn]│ │
+│ └───────────┘ └─────┘ │
+└───────────────────────┘

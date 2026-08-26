@@ -17,8 +17,10 @@ use unicode_width::UnicodeWidthStr;
 use crate::layout::clip::ClipRegion;
 
 use crate::core::dom::{Document, NodeId};
+use crate::core::form::FormState;
 use crate::core::geom::Size;
 use crate::core::style::{BorderEdges, CellStyle, DisplayInside, FlexDirection, Rgb, StyleTree};
+use crate::layout::LayoutInput;
 use crate::layout::table::{TableFormatter, TableLimits};
 use crate::layout::text_flow::{
     Atom, format_inline, formatted_height, intrinsic_width, line_metrics, min_content_width,
@@ -127,23 +129,46 @@ pub struct LinkBox {
 }
 
 pub trait LayoutEngine: Send + Sync {
-    fn layout(&self, document: &Document, styles: &StyleTree, viewport: Size) -> BoxTree;
+    /// Lay the document out as authored, with no user input applied.
+    fn layout(&self, document: &Document, styles: &StyleTree, viewport: Size) -> BoxTree {
+        self.layout_with_form_state(document, styles, viewport, FormState::empty())
+    }
+
+    /// Lay the document out with the user's form edits applied. An empty [`FormState`] is exactly
+    /// the authored state, which is why `layout` can defer to this and why `--dump` never needs one.
+    fn layout_with_form_state(
+        &self,
+        document: &Document,
+        styles: &StyleTree,
+        viewport: Size,
+        forms: &FormState,
+    ) -> BoxTree;
 }
 
 #[derive(Default)]
 pub struct TaffyLayoutEngine;
 
 impl LayoutEngine for TaffyLayoutEngine {
-    fn layout(&self, document: &Document, styles: &StyleTree, viewport: Size) -> BoxTree {
+    fn layout_with_form_state(
+        &self,
+        document: &Document,
+        styles: &StyleTree,
+        viewport: Size,
+        forms: &FormState,
+    ) -> BoxTree {
+        let input = LayoutInput {
+            document,
+            styles,
+            forms,
+        };
         let width = usize::from(viewport.cols);
-        let flow = build_flow_tree(document, styles, width);
+        let flow = build_flow_tree(input, width);
         let mut links = Vec::new();
         for root in document.roots() {
             collect_links(document, styles, *root, &mut links);
         }
         let mut tree = layout_flow(
-            document,
-            styles,
+            input,
             width,
             flow,
             0,
@@ -172,8 +197,7 @@ enum MeasureWidth {
 /// turn a broken invariant into a dead process, so the failure becomes an empty tree
 /// carrying [`LayoutLimits::engine_failed`] and the status bar says so.
 fn layout_flow(
-    document: &Document,
-    styles: &StyleTree,
+    input: LayoutInput<'_>,
     viewport_width: usize,
     flow: FlowTree,
     root_index: usize,
@@ -182,8 +206,7 @@ fn layout_flow(
 ) -> BoxTree {
     let truncated_depth = flow.truncated;
     let mut tree = try_layout_flow(
-        document,
-        styles,
+        input,
         viewport_width,
         flow.boxes,
         root_index,
@@ -203,14 +226,18 @@ fn layout_flow(
 }
 
 fn try_layout_flow(
-    document: &Document,
-    styles: &StyleTree,
+    input: LayoutInput<'_>,
     viewport_width: usize,
     mut flow: Vec<FlowBox>,
     root_index: usize,
     available_width: AvailableSpace,
     nesting: usize,
 ) -> Option<BoxTree> {
+    let LayoutInput {
+        document,
+        styles,
+        forms: _,
+    } = input;
     let parent_direction = prepare_flow(&mut flow);
     let mut table_cache = HashMap::new();
     let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
@@ -226,7 +253,7 @@ fn try_layout_flow(
                         .definite(viewport_width)
                         .max(1);
                     let output = table_cache.entry((table, width)).or_insert_with(|| {
-                        TableFormatter::new(document, styles).format(
+                        TableFormatter::new(input).format(
                             table,
                             width,
                             TableLimits::default(),
@@ -242,14 +269,7 @@ fn try_layout_flow(
                 let measure = measured_width(known.width, available.width, viewport_width);
                 let key = (index, measure);
                 inline_cache.entry(key).or_insert_with(|| {
-                    resolve_inline(
-                        document,
-                        styles,
-                        viewport_width,
-                        &flow[index].inline,
-                        measure,
-                        nesting,
-                    )
+                    resolve_inline(input, viewport_width, &flow[index].inline, measure, nesting)
                 });
                 let pieces = inline_cache.get(&key).expect("resolved inline");
                 let natural = intrinsic_width(pieces);
@@ -369,12 +389,7 @@ fn try_layout_flow(
             let output = table_cache
                 .entry((table, width))
                 .or_insert_with(|| {
-                    TableFormatter::new(document, styles).format(
-                        table,
-                        width,
-                        TableLimits::default(),
-                        0,
-                    )
+                    TableFormatter::new(input).format(table, width, TableLimits::default(), 0)
                 })
                 .clone();
             let starts = OutputStarts::new(&tree);
@@ -448,6 +463,35 @@ fn try_layout_flow(
             {
                 tree.fragments.push(fragment);
             }
+            // A replaced box paints from its *content* rect, so a border or padding of its own is
+            // respected. It cannot ride `inline`, which is emitted at the border-box origin — that
+            // is what painted a search field on top of its own border and put a button's label
+            // outside its own `overflow: hidden` padding box, where it was clipped away.
+            if visible
+                && let Some(replaced) = &flow[index].replaced
+                && content_rect.width > 0
+                && content_rect.height > 0
+            {
+                let mut style = flow[index].style.cell_style();
+                style.dim |= replaced.placeholder;
+                let rows = replaced.rows(
+                    content_rect.width,
+                    content_rect.height,
+                    flow[index].style.text_align,
+                );
+                for (offset, text) in rows.into_iter().enumerate() {
+                    if let Some(fragment) = child_clip.fragment(&TextFragment {
+                        node: owner,
+                        col: content_rect.col,
+                        row: content_rect.row.saturating_add(offset),
+                        text,
+                        depth: flow[index].depth,
+                        style,
+                    }) {
+                        tree.fragments.push(fragment);
+                    }
+                }
+            }
             if let Some(marker) = &flow[index].marker
                 && !marker.style.visibility.is_hidden()
             {
@@ -470,14 +514,7 @@ fn try_layout_flow(
             let measure = MeasureWidth::Definite(layout_width);
             let key = (index, measure);
             inline_cache.entry(key).or_insert_with(|| {
-                resolve_inline(
-                    document,
-                    styles,
-                    viewport_width,
-                    &flow[index].inline,
-                    measure,
-                    nesting,
-                )
+                resolve_inline(input, viewport_width, &flow[index].inline, measure, nesting)
             });
             let starts = OutputStarts::new(&tree);
             append_inline(
@@ -645,13 +682,13 @@ impl MeasureWidth {
 }
 
 fn resolve_inline(
-    document: &Document,
-    styles: &StyleTree,
+    input: LayoutInput<'_>,
     viewport_width: usize,
     pieces: &[flow::InlinePiece],
     measure: MeasureWidth,
     nesting: usize,
 ) -> Vec<ResolvedInlinePiece> {
+    let styles = input.styles;
     let available = measure.definite(viewport_width).max(1);
     pieces
         .iter()
@@ -665,7 +702,7 @@ fn resolve_inline(
                         Some(DisplayInside::Flex)
                     ) && nesting < TableLimits::default().max_nesting =>
                 {
-                    let flow = build_flow_subtree(document, styles, viewport_width, *node);
+                    let flow = build_flow_subtree(input, viewport_width, *node);
                     let root = flow.boxes[0].children.first().copied().unwrap_or(0);
                     let width = match measure {
                         MeasureWidth::MinContent => AvailableSpace::MinContent,
@@ -673,8 +710,7 @@ fn resolve_inline(
                         MeasureWidth::Definite(width) => AvailableSpace::Definite(width as f32),
                     };
                     let tree = layout_flow(
-                        document,
-                        styles,
+                        input,
                         viewport_width,
                         flow,
                         root,
@@ -693,14 +729,14 @@ fn resolve_inline(
                         .unwrap_or_else(|| tree.height.saturating_sub(1));
                     InlineAtom::Layout(Box::new(AtomicLayout { tree, baseline }))
                 }
-                InlineAtomSource::Node(node) => InlineAtom::Table(Box::new(
-                    TableFormatter::new(document, styles).format_inline_atom(
+                InlineAtomSource::Node(node) => {
+                    InlineAtom::Table(Box::new(TableFormatter::new(input).format_inline_atom(
                         *node,
                         available,
                         TableLimits::default(),
                         nesting,
-                    ),
-                )),
+                    )))
+                }
             });
             ResolvedInlinePiece {
                 node: piece.node,

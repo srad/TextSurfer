@@ -75,8 +75,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-26): **695 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 38 golden** with the default VGA frontend, and **602 lib · 12 binary** with
+Test counts at the last green run (2026-08-26): **724 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 39 golden** with the default VGA frontend, and **631 lib · 12 binary** with
 `--no-default-features`; no tests are ignored.
 Cross-cutting: test infrastructure (in progress: corpus error-count and astral attribute-order gaps;
 contract suites, snapshots, proptest and fakes landed) · gates (done: local only, no CI) · coverage
@@ -94,6 +94,8 @@ candidates were not promoted to confirmed bugs without an executable product rep
 | ~~M1-D~~ | ~~Non-inherited background ownership on pseudo boxes lacks adversarial coverage~~ | **Closed 2026-08-23 as disproved.** A pseudo box does start from the originating element's computed style, `background` included, but it can never paint a cell that element did not already paint: generated content is inline-level and the outside marker's field is reserved inside the item's own box. Even a pseudo declaring `background: initial` — transparent in CSS — renders the item's background, which is what CSS requires. Pinned by `pseudo_boxes_never_own_a_background_their_element_did_not_paint` in the public render harness |
 | M2 | The address edit buffer is global across tab switches; cursor placement and toolbar writes lack sub-24-column coverage | Resolve with the per-tab-state, tiny-chrome and link-navigation tests already owned by M2. M1-E closed the former link/hit clipping gap by clipping layout boxes and fragments before link rectangles are derived |
 | M2 | **Confirmed, not a candidate: `Document::insert_element` is quadratic in depth.** indextree 4.8.1's `checked_append` walks every ancestor to reject a cycle (`id.rs:714`), so building a 100,000-deep chain measured **49 s**, against 100 ms to cascade it and 27 ms to lay it out. A hostile page hangs in the parser long before M2's block-depth cap matters, and the 10 MiB body limit still allows millions of levels | Not fixable at the call site: indextree exposes no unchecked append (`append` just unwraps `checked_append`), and `insert_with_neighbors` is private. Needs either a parse-time depth limit — which would change html5lib corpus trees and must be weighed against conformance — or a different arena. The cycle check is provably unnecessary where `Document::append` calls it, since it always passes a node it just created detached |
+| ~~M1-B~~ | ~~A block-level replaced element paints nothing~~ | **Closed 2026-08-26 as confirmed and fixed.** `<img style="display:block">` rendered nothing at all: the display branches were tested before the `img` arm, so a block-level replaced element became a block box that then recursed into children it does not have. Found while giving form controls a box, because `input { display: block }` is ordinary CSS and hit the identical path. Box-level replaced elements now generate their content instead of recursing. Pinned by `a_block_level_image_still_renders_its_alt_text` |
+| ~~M2~~ | ~~Generated content on a bordered box paints at the wrong origin~~ | **Closed 2026-08-26 as confirmed and fixed.** `FlowBox::inline` is emitted at the *border-box* origin, which is sound only because the boxes that carry one are anonymous and have no border or padding — real text reaches `flush_inline`, which wraps it in exactly such a child. Putting a control's stand-in directly in a real box's `inline` broke that invariant and painted Wikipedia's search field over its own `┌───`; where the box also had `overflow: hidden`, the text fell outside its own padding box and was clipped away entirely. Replaced boxes now paint from `content_rect`, and the invariant is stated on the field. Pinned by `a_bordered_control_paints_inside_its_border_not_on_it` and `a_control_with_overflow_hidden_still_shows_its_label` |
 | M4 | Template-content replacement is not exercised by html5ever | Exercise it at the first mutation-capable DOM caller and reject orphaning/overwriting behavior |
 | M6 | Extreme injected `Size` values can make the start page allocate `cols × rows × 2`; painter output remains dense by document row; inline-precise hover adds roughly one linear-scanned hit region per text fragment | Put explicit resource ceilings, sparse-vs-dense evidence and indexed paint-order hit/activation resolution behind the perf gate |
 | Test infrastructure | `tree_dump` is recursive on untrusted depth; UI clipping walks scalar values rather than grapheme clusters | Add bounded-depth and emoji/ZWJ cases; these do not currently establish a product crash |
@@ -284,6 +286,26 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   parse but do not convert to sRGB, so such declarations are ignored rather than guessed.
 - Out of scope for now, revisit when a page needs them: relative colours, `background-image`,
   `line-height`, fonts, border-radius, inline-element borders.
+- **`opacity` is honoured only at `0`, where it computes to `visibility: hidden`.** The two have
+  identical layout behaviour — geometry retained, nothing painted — so this rides machinery that
+  already exists rather than adding an alpha layer. It earns its place because `opacity: 0` over a
+  styled box is how the web builds a custom control; without it Wikipedia's three hidden dropdown
+  checkboxes paint over the article chrome. Two divergences follow and are accepted: a descendant
+  declaring `visibility: visible` reappears, which CSS forbids, and the element stops being
+  hit-testable, where a browser keeps an `opacity: 0` overlay clickable. Any other value renders
+  fully opaque.
+- **A replaced element keeps room for its own rows against a smaller `max-height`/`height`.**
+  A 1px border costs a whole cell here, so an author who budgets `max-height: 2rem` for a bordered
+  32px field leaves us zero content rows and the field renders blank. The quantisation is ours, not
+  the author's; honouring the number would be faithful to it and not to the intent. Implemented as
+  a `min_size` on the height axis only, which works because CSS resolves min over max. Width is
+  left freely settable, since that is where the quantisation does not bite.
+- **A form control is a replaced element, not a box of text.** Its rendering is generated to fit
+  the box it ends up with — from `content_rect`, never from `FlowBox::inline`, which is emitted at
+  the border-box origin and is reserved for anonymous boxes. Brackets delimit a control only when
+  nothing else does; a border of its own replaces them. The field's extent is carried by reverse
+  video rather than a filler glyph, so a value can never be mistaken for padding. An `<img>` is the
+  exception: its `alt` is the author's prose, so it wraps inside the box like ordinary text.
 - **Generated content is inline-level**: `display` on a pseudo-element is not honoured, and
   `list-style-type` accepts keyword counter styles only — no `@counter-style`, no string types.
 - **List markers are outside markers** by default: the item reserves a field on its left, shared
@@ -651,12 +673,25 @@ sniffing and the rendered error pages are next, and the keyboard items after the
       `start_page_renders_inside_the_default_content_frame`,
       `start_page_scales_to_fill_a_larger_content_viewport` and
       `resize_refits_the_start_page_to_the_content_viewport`. (done)
-- [ ] Basic forms: text/search/hidden/submit, textarea, select, checkbox, radio; GET and
+- [ ] **Basic forms** *(in progress — controls render and match selectors; nothing is operable
+      yet)*. Target: text/search/hidden/submit, textarea, select, checkbox, radio; GET and
       `application/x-www-form-urlencoded` POST via `url::form_urlencoded`; unsupported
-      methods/encodings render a controlled error. `:checked`/`:enabled`/`:disabled` become live and
-      host-language-correct: the current attribute-only matcher lets `<div checked>` match
-      `:checked` and hide from a dump fixture. Static initial state and user-toggled state share one
-      form model.
+      methods/encodings render a controlled error. Static initial state and user-toggled state
+      share one form model.
+      **Landed:** `core::form` is that one model — a `FormState` of *user overrides only*, with
+      every unset control resolved from its content attributes, so an empty state is exactly the
+      authored page and `--dump` needs no seeding. Controls generate their rendering from
+      `layout::replaced`: brackets when nothing else delimits them, the field's extent carried by
+      reverse video rather than a filler glyph, `placeholder` shown dimmed and never submitted.
+      Box-level replaced elements paint from their *content* rect and take their intrinsic size
+      when CSS gives none, so a `width:100%` field fills its box and a block `<input>` keeps its
+      `size=`. `:checked` matches only checkbox/radio/option and `:disabled` reaches through a
+      disabled `<fieldset>`/`<optgroup>` — the attribute-only matcher used to let `<div checked>`
+      match `:checked` and hide from a dump fixture. `opacity: 0` computes to `visibility: hidden`.
+      **Remaining:** `FormState` mutation and the keyboard/pointer editing model; `:checked`
+      reading live state rather than attributes; `FetchRequest` method/body and the entry-list
+      serialisation. *Proven by* the `forms` cascade module, the `replaced` layout module and the
+      `form_controls` render golden.
 - **Acceptance:** scripted-drive checklist of every keybinding incl. the rebinds; per-tab state
   isolation tests; chrome items (titles, error pages, start page, search, help overlay)
   snapshot-tested; the robustness and cache items proven by the tests named above; manual DuckDuckGo
@@ -845,6 +880,12 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       signed margins. Remaining: typed math for margins, padding, insets, gaps, `flex-basis` and
       `font-size`.
 - [ ] **Grid** — enable Taffy's grid engine after the flex formatting and paint-order seams settle.
+      *Promoted to the top of the remaining M6 rendering work 2026-08-26 on live evidence:* Wikipedia's
+      Vector 2022 skin lays its whole page skeleton out with grid — `grid-area` for
+      header/titlebar/toolbar/content/column/footer, and `grid-template-areas: 'headerStart headerEnd'`
+      for the header itself. `taffy_style` emits only `Flex` or `Block`, so every one of those falls
+      back to normal flow and the skeleton stacks vertically instead of being placed. It is the
+      single largest remaining gap between our header area and Firefox's.
 - [ ] **Floats** — conformant line-flow-around-float formatting.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
       M1-B stays the fallback when no protocol is available.
@@ -900,6 +941,39 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-26 — **M2 form controls render; the item stays open for interaction and submission.**
+  Started from live evidence rather than the board: `lite.duckduckgo.com` — M2's own acceptance page —
+  rendered the single word "DuckDuckGo", because every control fell through to `Display::INLINE`
+  with no children and so produced no box, no glyph and no hit region. Hacker News' and Wikipedia's
+  search fields were missing for the same reason.
+  - **`core::form` stores user overrides only.** Every unset control resolves from its content
+    attributes, so an empty `FormState` *is* the authored page. That is what "static initial state
+    and user-toggled state share one form model" asks for — one lookup rather than two stores that
+    can drift — and it makes `--dump` need no seeding, a reset a `clear()`, and the per-load pivot
+    automatic.
+  - **Neither engine trait grew a required parameter.** `Cascade::apply` and `LayoutEngine::layout`
+    have one production caller each but ~93 and ~34 test call sites; a defaulted
+    `layout_with_form_state` keeps every existing site compiling and meaning what it meant — *no user
+    input yet*. The three read-only inputs that now travel together became one `LayoutInput`, which
+    also settled a Clippy argument-count limit the fourth parameter tripped.
+  - **Two confirmed regressions closed** — see the risk register. A block-level replaced element
+    painted nothing at all, and generated content on a bordered box painted at the border-box
+    origin. The second was mine, introduced earlier in this same slice and caught by viewing
+    Wikipedia at the VGA frontend's real 160 columns rather than the 100 the earlier passes used.
+  - **Controls were redrawn once after review.** The first attempt filled fields with underscores,
+    which made `[hi____]` indistinguishable from a value containing underscores and doubled the
+    emphasis against an underline the UA sheet was also setting. Blanks plus reverse video replaced
+    both. That rework exposed a real bug: the normal-flow walker was giving the stand-in the
+    *parent's* `white-space`, collapsing the field's padding — invisible while the filler was a
+    glyph.
+  - **`opacity: 0` computes to `visibility: hidden`**, with the two resulting divergences accepted
+    and recorded in the locked decisions. Without it, three `opacity: 0` dropdown checkboxes paint
+    over Wikipedia's article chrome — that pattern is how the web builds a custom control.
+  - No dependency changed. Format, strict default/all-feature/no-default Clippy and the
+    default/JS/VGA/no-default test matrix are green at **724 library tests** (**631** without default
+    features), 13 binary (12 without), 6 fetch-pipeline, 14 corpus and 39 render-golden tests. Only
+    the new `form_controls` golden was added; no pre-existing snapshot moved, and the `example.com`
+    and DDG Lite dumps are unchanged. Human VGA and terminal smoke remain pending.
 - 2026-08-26 — **M6 basis-dependent comparison math delivered; item remains in progress.**
   `min()`, `max()` and `clamp()` now remain as typed expressions until Taffy supplies the containing-
   block basis, including nested arithmetic, all three `none`-bound forms and the specified rule that

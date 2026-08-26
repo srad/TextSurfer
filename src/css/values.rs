@@ -300,6 +300,19 @@ pub(super) fn parse_ident(source: &str) -> Option<String> {
     Some(value.to_ascii_lowercase())
 }
 
+/// `opacity`, as a number or a percentage, clamped to 0..=1 the way CSS requires.
+pub(super) fn parse_opacity(source: &str) -> Option<f32> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let value = match parser.next().ok()?.clone() {
+        Token::Number { value, .. } => value,
+        Token::Percentage { unit_value, .. } => unit_value,
+        _ => return None,
+    };
+    parser.expect_exhausted().ok()?;
+    value.is_finite().then(|| value.clamp(0.0, 1.0))
+}
+
 pub(super) fn is_css_wide_keyword(value: &str) -> bool {
     matches!(
         value.to_ascii_lowercase().as_str(),

@@ -14,7 +14,7 @@ use crate::css::values::{
     assign_border_styles, assign_border_width, assign_border_widths, assign_edges, assign_one,
     consume_block, parse_background_color, parse_border, parse_color, parse_cursor, parse_display,
     parse_font_weight, parse_ident, parse_lengths, parse_list_style_position,
-    parse_list_style_type, parse_size, parse_text_decoration,
+    parse_list_style_type, parse_opacity, parse_size, parse_text_decoration,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +103,21 @@ fn apply_declaration_raw(
                 parse_ident(&declaration.value).and_then(|value| Visibility::parse(&value))
             {
                 style.visibility = value;
+            }
+        }
+        // Only fully transparent is honoured, and it becomes `visibility: hidden` — the two have
+        // identical layout behaviour, geometry retained and nothing painted, so this rides
+        // machinery that already exists end to end. Partial alpha over arbitrary content stays
+        // unimplemented and renders opaque.
+        //
+        // It earns its place because `opacity: 0` is *the* way the web builds a custom control:
+        // a real `<input>` laid invisibly over a styled box. Wikipedia's header has three, and
+        // without this they paint as stray checkboxes over the article chrome.
+        "opacity" => {
+            if let Some(value) = parse_opacity(&declaration.value)
+                && value == 0.0
+            {
+                style.visibility = Visibility::Hidden;
             }
         }
         "position" => {
@@ -481,6 +496,7 @@ fn is_supported_property(property: &str) -> bool {
             | "overflow-x"
             | "overflow-y"
             | "visibility"
+            | "opacity"
             | "position"
             | "inset"
             | "top"

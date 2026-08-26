@@ -115,9 +115,13 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - `<img>` renders nonempty alternative text as `[alt]`, deliberately empty or whitespace-only
   alternatives as nothing, and `[img]` when `alt` is absent; `<hr>` spans the content width
 - Dynamic selectors: `:link`, `:any-link`, `:hover`, `:focus`, `:active`, `:checked`, `:enabled`
-  and `:disabled` parse against injected state; `:visited` never matches, so page styling cannot
-  observe history. Host-language-correct form states and distinct `:focus-visible`/`:focus-within`
-  behavior remain M2/M3 work
+  and `:disabled` match against injected state; `:visited` never matches, so page styling cannot
+  observe history. Form states are host-language-correct — `:checked` applies only to a checkbox,
+  radio or option, and `:disabled` reaches through a disabled `<fieldset>` or `<optgroup>`
+- Form controls render: text, password, checkbox, radio, submit/reset/button, select and textarea
+  each draw a stand-in sized to the box CSS gives them, with `placeholder` shown dimmed and never
+  submitted, and `opacity: 0` hiding a control the way its author intended. They are not yet
+  operable — editing and submission are the rest of M2
 - Mouse navigation in both frontends: click a link to follow it — on release over the node the press
   landed on, as the DOM defines activation, so dragging off cancels — with `<base href>`-aware
   resolution, middle-click and `target="_blank"` opening a new tab. The wheel scrolls the content,
@@ -144,9 +148,11 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 **Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math slice is in
 progress. Mixed length/percentage sizing, used-value `min()`/`max()`/`clamp()` (including `none`
 bounds), frontend render metrics and signed block/flex/inline margins have landed. Typed math in
-margins, padding, insets, gaps, flex basis and font size is next, followed by Grid. Product work
-continues with keyboard links, forms and in-page search (M2), then the JavaScript seam/Boa
-integration (M4–M5).
+margins, padding, insets, gaps, flex basis and font size is next. Grid follows, and has moved up on
+live evidence: Wikipedia lays its whole page skeleton out with `grid-area`, and without a grid
+engine that skeleton stacks instead of being placed. Product work continues with keyboard links,
+form editing and submission, and in-page search (M2), then the JavaScript seam/Boa integration
+(M4–M5).
 
 ## Architecture
 

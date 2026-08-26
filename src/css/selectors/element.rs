@@ -4,6 +4,7 @@ use selectors::context::MatchingContext;
 use selectors::{Element, OpaqueElement};
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
+use crate::core::form::{FormState, checkedness, is_disabled};
 
 use super::TextSurferSelectorImpl;
 use super::atom::Atom;
@@ -34,13 +35,6 @@ impl DomElement<'_> {
         }
     }
 
-    fn has_attribute(&self, name: &str) -> bool {
-        let (_, _, attrs) = self.element();
-        attrs
-            .iter()
-            .any(|attr| attr.ns == AttrNs::None && attr.name == name)
-    }
-
     fn is_form_control(&self) -> bool {
         let (name, ns, _) = self.element();
         ns == ElementNs::Html
@@ -50,9 +44,25 @@ impl DomElement<'_> {
             )
     }
 
-    fn is_selected(&self) -> bool {
-        let (name, ns, _) = self.element();
-        ns == ElementNs::Html && name == "option" && self.has_attribute("selected")
+    /// The elements `:checked` can ever apply to: the two toggle input states, and `<option>`.
+    fn is_checkable(&self) -> bool {
+        let (name, ns, attrs) = self.element();
+        if ns != ElementNs::Html {
+            return false;
+        }
+        if name == "option" {
+            return true;
+        }
+        name == "input"
+            && attrs
+                .iter()
+                .find(|attr| attr.ns == AttrNs::None && attr.name.eq_ignore_ascii_case("type"))
+                .is_some_and(|attr| {
+                    matches!(
+                        attr.value.trim().to_ascii_lowercase().as_str(),
+                        "checkbox" | "radio"
+                    )
+                })
     }
 
     fn is_text_entry_control(&self) -> bool {
@@ -229,12 +239,18 @@ impl Element for DomElement<'_> {
                 self.is_on_chain(self.state.focus.map(|focus| focus.node))
             }
             DynamicPseudoClass::Active => self.is_on_chain(self.state.active),
-            DynamicPseudoClass::Checked => self.has_attribute("checked") || self.is_selected(),
+            // `:checked` is a host-language question, not an attribute question. Testing the
+            // attribute on any element let `<div checked>` match and hide from a dump fixture.
+            DynamicPseudoClass::Checked => {
+                self.is_checkable() && checkedness(self.document, self.id, FormState::empty())
+            }
+            // "Actually disabled" reaches through a disabled `<fieldset>` or `<optgroup>`, so the
+            // attribute alone is not the answer either.
             DynamicPseudoClass::Disabled => {
-                self.is_form_control() && self.has_attribute("disabled")
+                self.is_form_control() && is_disabled(self.document, self.id)
             }
             DynamicPseudoClass::Enabled => {
-                self.is_form_control() && !self.has_attribute("disabled")
+                self.is_form_control() && !is_disabled(self.document, self.id)
             }
         }
     }

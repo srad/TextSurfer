@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{Document, ElementNs, Node, NodeId};
@@ -6,6 +7,8 @@ use crate::core::style::{
     CellStyle, ComputedStyle, Display, ListStylePosition, Marker, PseudoElement, StyleTree,
     TextAlign, WhiteSpace,
 };
+use crate::layout::LayoutInput;
+use crate::layout::replaced::{ReplacedBox, replaced_box, replaced_content};
 use crate::layout::table::{TableFormatter, TableLimits, TableOutput};
 use crate::layout::text_flow::{
     Atom, Piece, format_inline, line_metrics, normalize_segment_breaks,
@@ -37,7 +40,6 @@ pub(super) struct FlowTree {
     pub(super) truncated: bool,
 }
 
-#[derive(Clone)]
 pub(super) struct FlowBox {
     pub(super) owner: Option<NodeId>,
     pub(super) style: ComputedStyle,
@@ -47,6 +49,46 @@ pub(super) struct FlowBox {
     pub(super) rule: bool,
     pub(super) table: Option<NodeId>,
     pub(super) marker: Option<Marker>,
+    /// A box-level replaced element — an `<input>`, `<button>` or block `<img>` — whose content is
+    /// generated to fit the box rather than laid out from children it does not have.
+    ///
+    /// It cannot ride `inline` instead: that list is emitted at the *border-box* origin, which is
+    /// only correct because the boxes that carry one are anonymous and have no border or padding.
+    pub(super) replaced: Option<Rc<ReplacedBox>>,
+}
+
+impl Clone for FlowBox {
+    fn clone(&self) -> Self {
+        Self {
+            owner: self.owner,
+            style: self.style,
+            depth: self.depth,
+            inline: self.inline.clone(),
+            children: self.children.clone(),
+            rule: self.rule,
+            table: self.table,
+            marker: self.marker.clone(),
+            replaced: self.replaced.clone(),
+        }
+    }
+}
+
+impl FlowBox {
+    /// An empty box of `style` at `depth`, for the callers that fill in one field and default the
+    /// rest. Added when `replaced` made eight literals repeat six `None`s each.
+    pub(super) fn new(owner: Option<NodeId>, style: ComputedStyle, depth: usize) -> Self {
+        Self {
+            owner,
+            style,
+            depth,
+            inline: Vec::new(),
+            children: Vec::new(),
+            rule: false,
+            table: None,
+            marker: None,
+            replaced: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -136,49 +178,38 @@ enum FlowEvent {
     AnonymousTable(Vec<NodeId>, InlineContext),
 }
 
-pub(super) fn build_flow_tree(
-    document: &Document,
-    styles: &StyleTree,
-    viewport_width: usize,
-) -> FlowTree {
-    build_flow_tree_from(
-        document,
-        styles,
-        viewport_width,
-        document.roots().to_vec(),
-        None,
-    )
+pub(super) fn build_flow_tree(input: LayoutInput<'_>, viewport_width: usize) -> FlowTree {
+    let roots = input.document.roots().to_vec();
+    build_flow_tree_from(input, viewport_width, roots, None)
 }
 
 pub(super) fn build_flow_subtree(
-    document: &Document,
-    styles: &StyleTree,
+    input: LayoutInput<'_>,
     viewport_width: usize,
     root: NodeId,
 ) -> FlowTree {
-    build_flow_tree_from(document, styles, viewport_width, vec![root], Some(root))
+    build_flow_tree_from(input, viewport_width, vec![root], Some(root))
 }
 
 fn build_flow_tree_from(
-    document: &Document,
-    styles: &StyleTree,
+    input: LayoutInput<'_>,
     viewport_width: usize,
     roots: Vec<NodeId>,
     atomic_root: Option<NodeId>,
 ) -> FlowTree {
-    let mut flow = vec![FlowBox {
-        owner: None,
-        style: ComputedStyle {
+    let LayoutInput {
+        document,
+        styles,
+        forms,
+    } = input;
+    let mut flow = vec![FlowBox::new(
+        None,
+        ComputedStyle {
             display: Display::BLOCK,
             ..Default::default()
         },
-        depth: 0,
-        inline: Vec::new(),
-        children: Vec::new(),
-        rule: false,
-        table: None,
-        marker: None,
-    }];
+        0,
+    )];
     let mut tasks = vec![(0usize, None)];
     let mut truncated = false;
     while let Some((flow_index, container)) = tasks.pop() {
@@ -259,7 +290,7 @@ fn build_flow_tree_from(
                 }
                 FlowEvent::AnonymousTable(roots, context) => {
                     let node = roots[0];
-                    let atom = TableFormatter::new(document, styles).format_anonymous(
+                    let atom = TableFormatter::new(input).format_anonymous(
                         roots,
                         context.computed,
                         context.inline_parent,
@@ -288,17 +319,15 @@ fn build_flow_tree_from(
                         );
                         let child = flow.len();
                         flow.push(FlowBox {
-                            owner: None,
-                            style: ComputedStyle::anonymous_inheriting(
-                                context.computed,
-                                Display::BLOCK,
-                            ),
-                            depth: context.depth,
                             inline: vec![piece],
-                            children: Vec::new(),
-                            rule: false,
-                            table: None,
-                            marker: None,
+                            ..FlowBox::new(
+                                None,
+                                ComputedStyle::anonymous_inheriting(
+                                    context.computed,
+                                    Display::BLOCK,
+                                ),
+                                context.depth,
+                            )
                         });
                         children.push(child);
                     }
@@ -313,7 +342,7 @@ fn build_flow_tree_from(
                         hidden: context.computed.visibility.is_hidden(),
                         atom: None,
                     }),
-                    Some(Node::Element { name, ns, attrs }) => {
+                    Some(Node::Element { name, ns, .. }) => {
                         let mut style = styles.get(node);
                         if atomic_root == Some(node) {
                             style.display = style.display.blockify();
@@ -362,14 +391,8 @@ fn build_flow_tree_from(
                             );
                             let child = flow.len();
                             flow.push(FlowBox {
-                                owner: Some(node),
-                                style,
-                                depth: context.depth,
-                                inline: Vec::new(),
-                                children: Vec::new(),
-                                rule: false,
                                 table: Some(node),
-                                marker: None,
+                                ..FlowBox::new(Some(node), style, context.depth)
                             });
                             children.push(child);
                         } else if style.display.is_atomic_inline() {
@@ -404,13 +427,7 @@ fn build_flow_tree_from(
                             );
                             let child = flow.len();
                             flow.push(FlowBox {
-                                owner: Some(node),
-                                style,
-                                depth: context.depth,
-                                inline: Vec::new(),
-                                children: Vec::new(),
                                 rule: *ns == ElementNs::Html && name == "hr",
-                                table: None,
                                 marker: styles
                                     .marker(node)
                                     .filter(|marker| {
@@ -418,8 +435,49 @@ fn build_flow_tree_from(
                                             && marker.reserve > 0
                                     })
                                     .cloned(),
+                                // A box-level control generates its content to fit the box it ends
+                                // up with, so it must not also recurse into children — it has
+                                // none, and recursing is what made a block `<img>` paint nothing
+                                // at all.
+                                replaced: replaced_box(
+                                    document,
+                                    node,
+                                    forms,
+                                    style.border.is_visible(),
+                                )
+                                .filter(|replaced| !replaced.wraps)
+                                .map(Rc::new),
+                                ..FlowBox::new(Some(node), style, context.depth)
                             });
                             children.push(child);
+                            if flow[child].replaced.is_some() {
+                                continue;
+                            }
+                            // An `<img>`'s stand-in is the author's `alt` — ordinary text, which
+                            // wraps inside the box like any other. So it goes in an anonymous
+                            // child, which is the one shape allowed to carry `inline`, rather
+                            // than being generated to the box's width and clipped.
+                            if let Some(replaced) = replaced_content(document, node, forms) {
+                                let anonymous = flow.len();
+                                flow.push(FlowBox {
+                                    inline: vec![InlinePiece {
+                                        node,
+                                        text: replaced.text,
+                                        white_space: style.white_space,
+                                        depth: context.depth.saturating_add(1),
+                                        style: style.cell_style(),
+                                        hidden: style.visibility.is_hidden(),
+                                        atom: None,
+                                    }],
+                                    ..FlowBox::new(
+                                        None,
+                                        ComputedStyle::anonymous_inheriting(style, Display::BLOCK),
+                                        context.depth.saturating_add(1),
+                                    )
+                                });
+                                flow[child].children.push(anonymous);
+                                continue;
+                            }
                             if context.depth >= MAX_BLOCK_DEPTH {
                                 // Stop here rather than hand Taffy a box tree deeper
                                 // than its recursion can survive. The box itself stays,
@@ -447,18 +505,26 @@ fn build_flow_tree_from(
                                 hidden: context.computed.visibility.is_hidden(),
                                 atom: None,
                             });
-                        } else if *ns == ElementNs::Html && name == "img" {
-                            if let Some(text) = crate::layout::replaced::image_fallback(attrs) {
-                                buffer.push(InlinePiece {
-                                    node,
-                                    text,
-                                    white_space: context.white_space,
-                                    depth: context.depth,
-                                    style: style.cell_style(),
-                                    hidden: style.visibility.is_hidden(),
-                                    atom: None,
-                                });
-                            }
+                        } else if let Some(replaced) = replaced_content(document, node, forms) {
+                            // Inline-level replaced content: an `<img>`, or a control the author
+                            // left at its UA `display: inline`. It renders at its intrinsic size,
+                            // because an inline box has no border or padding to fill. This arm has
+                            // to cover controls as well as images — an unstyled `<input>` would
+                            // otherwise reach the generic arm below and recurse into children it
+                            // does not have, which is exactly nothing painted.
+                            buffer.push(InlinePiece {
+                                node,
+                                text: replaced.text,
+                                white_space: if replaced.preformatted {
+                                    WhiteSpace::Pre
+                                } else {
+                                    style.white_space
+                                },
+                                depth: context.depth,
+                                style: style.cell_style(),
+                                hidden: style.visibility.is_hidden(),
+                                atom: None,
+                            });
                         } else {
                             if style.display.is_list_item()
                                 && let Some(marker) = styles.marker(node)
@@ -602,14 +668,12 @@ fn reparent_positioned(document: &Document, styles: &StyleTree, flow: &mut Vec<F
         let child = flow.len();
         let inline = std::mem::take(&mut flow[target].inline);
         flow.push(FlowBox {
-            owner: None,
-            style: ComputedStyle::anonymous_inheriting(flow[target].style, Display::BLOCK),
-            depth: flow[target].depth.saturating_add(1),
             inline,
-            children: Vec::new(),
-            rule: false,
-            table: None,
-            marker: None,
+            ..FlowBox::new(
+                None,
+                ComputedStyle::anonymous_inheriting(flow[target].style, Display::BLOCK),
+                flow[target].depth.saturating_add(1),
+            )
         });
         anonymous.push((target, child));
     }
@@ -727,14 +791,12 @@ fn flush_inline(
     }
     let child = flow.len();
     flow.push(FlowBox {
-        owner: None,
-        style: ComputedStyle::anonymous_inheriting(parent_style, Display::BLOCK),
-        depth,
         inline: std::mem::take(buffer),
-        children: Vec::new(),
-        rule: false,
-        table: None,
-        marker: None,
+        ..FlowBox::new(
+            None,
+            ComputedStyle::anonymous_inheriting(parent_style, Display::BLOCK),
+            depth,
+        )
     });
     children.push(child);
 }
@@ -773,9 +835,6 @@ fn append_flex_pseudo(
     };
     let child = flow.len();
     flow.push(FlowBox {
-        owner: Some(node),
-        style: pseudo.style,
-        depth,
         inline: vec![InlinePiece {
             node,
             text: pseudo.text.clone(),
@@ -785,10 +844,7 @@ fn append_flex_pseudo(
             hidden: pseudo.style.visibility.is_hidden(),
             atom: None,
         }],
-        children: Vec::new(),
-        rule: false,
-        table: None,
-        marker: None,
+        ..FlowBox::new(Some(node), pseudo.style, depth)
     });
     children.push(child);
 }

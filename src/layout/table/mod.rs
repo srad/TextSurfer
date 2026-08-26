@@ -13,7 +13,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::core::dom::{Document, NodeId};
+use crate::core::form::FormState;
 use crate::core::style::{CellStyle, StyleTree};
+use crate::layout::LayoutInput;
 use crate::layout::text_flow::Atom;
 use crate::layout::{BackgroundFill, BorderStroke, LayoutBox};
 
@@ -106,14 +108,16 @@ impl Atom for TableOutput {
 pub(super) struct TableFormatter<'a> {
     document: &'a Document,
     styles: &'a StyleTree,
+    forms: &'a FormState,
     metric_cache: RefCell<HashMap<(NodeId, usize, usize, usize), MetricAtom>>,
 }
 
 impl<'a> TableFormatter<'a> {
-    pub fn new(document: &'a Document, styles: &'a StyleTree) -> Self {
+    pub fn new(input: LayoutInput<'a>) -> Self {
         Self {
-            document,
-            styles,
+            document: input.document,
+            styles: input.styles,
+            forms: input.forms,
             metric_cache: RefCell::new(HashMap::new()),
         }
     }

@@ -316,7 +316,7 @@ impl TableFormatter<'_> {
                         hidden: style.visibility.is_hidden(),
                     }));
                 }
-                Some(Node::Element { name, ns, attrs }) => {
+                Some(Node::Element { name, ns, .. }) => {
                     let style = self.styles.get(node);
                     if style.display.is_none() {
                         continue;
@@ -351,17 +351,25 @@ impl TableFormatter<'_> {
                         items.push(CellItem::Break(node, style.cell_style()));
                         continue;
                     }
-                    if *ns == ElementNs::Html
-                        && name == "img"
-                        && let Some(text) = crate::layout::replaced::image_fallback(attrs)
+                    // A replaced element stands in for content it does not have, so its children
+                    // are never walked: `<img>` and `<input>` have none, and a `<button>` label is
+                    // already folded into the stand-in. Falling through here would paint the label
+                    // a second time.
+                    if let Some(replaced) =
+                        crate::layout::replaced::replaced_content(self.document, node, self.forms)
                     {
                         items.push(CellItem::Text(TextRun {
                             node,
-                            text,
-                            white_space: style.white_space,
+                            text: replaced.text,
+                            white_space: if replaced.preformatted {
+                                WhiteSpace::Pre
+                            } else {
+                                style.white_space
+                            },
                             style: style.cell_style(),
                             hidden: style.visibility.is_hidden(),
                         }));
+                        continue;
                     }
                     stack.push(ContentEvent::Exit(node, root));
                     let children = self.document.children(node);
