@@ -49,14 +49,15 @@ fn flex_defaults_distinguish_initial_items_from_flex_none() {
     assert_eq!(initial.grow, CssNumber::ZERO);
     assert_eq!(initial.shrink, CssNumber::ONE);
     assert_eq!(initial.basis, FlexBasis::Auto);
-    assert_eq!(initial.row_gap.cells(), None);
-    assert_eq!(initial.column_gap.cells(), None);
+    let alignment = AlignmentStyle::default();
+    assert_eq!(alignment.row_gap.cells(), None);
+    assert_eq!(alignment.column_gap.cells(), None);
     let none = FlexStyle::none();
     assert_eq!(none.grow, CssNumber::ZERO);
     assert_eq!(none.shrink, CssNumber::ZERO);
     assert_eq!(none.basis, FlexBasis::Auto);
     assert_eq!(none.direction, initial.direction);
-    assert_eq!(none.align_items, initial.align_items);
+    assert_eq!(ComputedStyle::default().order, 0);
 }
 
 #[test]

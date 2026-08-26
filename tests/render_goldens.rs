@@ -206,6 +206,11 @@ fn flex_layout_golden() {
 }
 
 #[test]
+fn grid_layout_golden() {
+    insta::assert_snapshot!(golden("grid.html"));
+}
+
+#[test]
 fn custom_properties_golden() {
     insta::assert_snapshot!(golden("variables.html"));
 }
@@ -292,6 +297,24 @@ fn flex_visual_order_and_dom_link_order_survive_the_public_render_path() {
     assert_eq!(
         page.painted.link_at(7, 0).map(|link| link.href.as_str()),
         Some("first")
+    );
+}
+
+#[test]
+fn overlapping_grid_links_keep_dom_order_and_use_topmost_paint_order() {
+    let page = render_source(
+        "<style>body{margin:0}main{display:grid;grid-template-columns:6ch;width:6ch}a{grid-area:1 / 1}</style><main><a href=first>FIRST</a><a href=second>SECOND</a></main>",
+        20,
+    );
+    assert_eq!(page.painted.links[0].href, "first");
+    assert_eq!(page.painted.links[1].href, "second");
+    assert_eq!(page.painted.links[0].rects[0].col, 0);
+    assert_eq!(page.painted.links[1].rects[0].col, 0);
+    assert_eq!(page.painted.links[0].rects[0].row, 0);
+    assert_eq!(page.painted.links[1].rects[0].row, 0);
+    assert_eq!(
+        page.painted.link_at(1, 0).map(|link| link.href.as_str()),
+        Some("second")
     );
 }
 

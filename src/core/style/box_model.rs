@@ -20,7 +20,7 @@ pub enum CssMaxSize {
     Calc(CssCalc),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CssPercentage(u32);
 
 impl CssPercentage {

@@ -1,0 +1,24 @@
+<!doctype html>
+<style>
+body { margin: 0 }
+.shell {
+  display: grid;
+  grid-template-areas: "head head" "nav main" "foot foot";
+  grid-template-columns: 8ch 15ch;
+  grid-template-rows: 16px 32px 16px;
+  gap: 16px 1ch;
+  width: 24ch;
+}
+.shell > * { margin: 0 }
+header { grid-area: head }
+nav { grid-area: nav }
+article { grid-area: main; display: grid; grid-template-columns: 1fr 1fr }
+footer { grid-area: foot }
+.badge { display: inline-grid; grid-template-columns: 2ch 2ch }
+</style>
+<div class="shell">
+  <header>HEADER</header>
+  <nav>NAV</nav>
+  <article><span>ONE</span><span>TWO</span></article>
+  <footer>FOOT <span class="badge"><b>A</b><b>B</b></span></footer>
+</div>

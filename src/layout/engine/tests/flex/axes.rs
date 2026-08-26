@@ -295,11 +295,14 @@ fn taffy_alignment_mapping_preserves_safety_and_physical_fallbacks() {
             .find(|flow| flow.owner == Some(root))
             .unwrap();
         crate::layout::engine::taffy_style::taffy_style(
-            container,
-            false,
-            20,
-            None,
-            &std::cell::RefCell::new(Vec::new()),
+            crate::layout::engine::taffy_style::TaffyStyleInput {
+                flow: container,
+                root: false,
+                viewport_width: 20,
+                parent_direction: None,
+                calc_values: &std::cell::RefCell::new(Vec::new()),
+                styles: &styles,
+            },
         )
     }
 

@@ -140,6 +140,7 @@ fn disjoint(a: LayoutRect, b: LayoutRect) -> bool {
 }
 
 mod flex;
+mod grid;
 mod overflow;
 mod positioning;
 mod replaced;

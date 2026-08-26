@@ -33,6 +33,31 @@ pub(super) fn parse_length_percentage(
     Some(value)
 }
 
+pub(super) fn parse_length_percentage_parser(
+    parser: &mut Parser<'_, '_>,
+    media: MediaContext,
+    axis: LengthAxis,
+) -> Option<CssCalcExpr> {
+    let state = parser.state();
+    let Token::Function(name) = parser.next().ok()?.clone() else {
+        parser.reset(&state);
+        return None;
+    };
+    if !matches!(
+        name.to_ascii_lowercase().as_ref(),
+        "calc" | "min" | "max" | "clamp"
+    ) {
+        parser.reset(&state);
+        return None;
+    }
+    parser.reset(&state);
+    let mut limits = Limits { depth: 0, nodes: 0 };
+    let Value::Length(value) = parse_primary(parser, media, axis, &mut limits).ok()? else {
+        return None;
+    };
+    Some(value)
+}
+
 fn parse_sum<'i, 't>(
     parser: &mut Parser<'i, 't>,
     media: MediaContext,

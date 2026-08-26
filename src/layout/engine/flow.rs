@@ -252,10 +252,13 @@ fn build_flow_tree_from(
             }
             if matches!(
                 flow[flow_index].style.display.inside(),
-                Some(crate::core::style::DisplayInside::Flex)
+                Some(
+                    crate::core::style::DisplayInside::Flex
+                        | crate::core::style::DisplayInside::Grid
+                )
             ) {
                 let pseudo_depth = flow[flow_index].depth.saturating_add(1);
-                append_flex_pseudo(
+                append_item_pseudo(
                     &mut flow,
                     &mut children,
                     styles,
@@ -573,10 +576,13 @@ fn build_flow_tree_from(
         if let Some(node) = container {
             if matches!(
                 flow[flow_index].style.display.inside(),
-                Some(crate::core::style::DisplayInside::Flex)
+                Some(
+                    crate::core::style::DisplayInside::Flex
+                        | crate::core::style::DisplayInside::Grid
+                )
             ) {
                 let pseudo_depth = flow[flow_index].depth.saturating_add(1);
-                append_flex_pseudo(
+                append_item_pseudo(
                     &mut flow,
                     &mut children,
                     styles,
@@ -822,7 +828,8 @@ fn append_pseudo(
     });
 }
 
-fn append_flex_pseudo(
+/// A flex or grid container's `::before` / `::after` is an item of its own, not inline content.
+fn append_item_pseudo(
     flow: &mut Vec<FlowBox>,
     children: &mut Vec<usize>,
     styles: &StyleTree,

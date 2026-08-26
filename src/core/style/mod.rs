@@ -1,7 +1,9 @@
+mod alignment;
 mod box_model;
 mod color;
 mod display;
 mod flex;
+mod grid;
 mod length;
 mod list;
 mod math;
@@ -16,6 +18,9 @@ use std::collections::HashMap;
 
 use crate::core::dom::NodeId;
 
+pub use alignment::{
+    Alignment, AlignmentSafety, AlignmentStyle, ContentAlignment, CssGap, ItemAlignment,
+};
 pub use box_model::{
     BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssInset, CssMargin,
     CssMaxSize, CssPercentage, CssSize, CssWidth, EdgeSizes, InsetEdges, MarginEdges, Overflow,
@@ -25,11 +30,14 @@ pub use color::{CellStyle, Palette, Rgb, Rgba};
 pub use display::{
     Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside, Visibility,
 };
-pub use flex::{
-    Alignment, AlignmentSafety, AxisCellLength, ContentAlignment, CssGap, CssNumber, FlexBasis,
-    FlexDirection, FlexStyle, FlexWrap, ItemAlignment,
+pub use flex::{AxisCellLength, FlexBasis, FlexDirection, FlexStyle, FlexWrap};
+pub(crate) use grid::GridStore;
+pub use grid::{
+    GridArea, GridAreas, GridAreasData, GridAutoFlow, GridIdent, GridLength, GridLines,
+    GridPlacement, GridRepeat, GridStyle, GridTemplate, GridTemplateComponent, GridTemplateData,
+    GridTracks, RepeatCount, TrackBreadthMax, TrackBreadthMin, TrackSize,
 };
-pub use length::{CellMetric, CssLength, CssLengthUnit, LengthAxis};
+pub use length::{CellMetric, CssLength, CssLengthUnit, CssNumber, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
 pub use math::CssCalc;
 pub(crate) use math::{CssCalcExpr, CssCalcStore};
@@ -136,6 +144,9 @@ pub struct ComputedStyle {
     pub max_width: CssMaxSize,
     pub max_height: CssMaxSize,
     pub flex: FlexStyle,
+    pub alignment: AlignmentStyle,
+    pub grid: GridStyle,
+    pub order: i32,
     pub box_sizing: BoxSizing,
     pub overflow: OverflowAxes,
     pub visibility: Visibility,
@@ -216,12 +227,39 @@ pub struct Marker {
     pub style: ComputedStyle,
 }
 
+/// The variable-length payloads that [`ComputedStyle`] refers to by handle, so it can stay `Copy`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct StyleStore {
+    pub(crate) calculations: CssCalcStore,
+    pub(crate) grid: GridStore,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct StyleStoreCheckpoint {
+    calculations: math::CssCalcCheckpoint,
+    grid: grid::GridStoreCheckpoint,
+}
+
+impl StyleStore {
+    pub(crate) fn checkpoint(&self) -> StyleStoreCheckpoint {
+        StyleStoreCheckpoint {
+            calculations: self.calculations.checkpoint(),
+            grid: self.grid.checkpoint(),
+        }
+    }
+
+    pub(crate) fn rollback(&mut self, checkpoint: StyleStoreCheckpoint) {
+        self.calculations.rollback(checkpoint.calculations);
+        self.grid.rollback(checkpoint.grid);
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleTree {
     styles: HashMap<NodeId, ComputedStyle>,
     pseudo: HashMap<(NodeId, PseudoElement), PseudoBox>,
     markers: HashMap<NodeId, Marker>,
-    calculations: CssCalcStore,
+    store: StyleStore,
 }
 
 impl StyleTree {
@@ -249,11 +287,15 @@ impl StyleTree {
         self.markers.get(&node)
     }
 
-    pub(crate) fn set_calculations(&mut self, calculations: CssCalcStore) {
-        self.calculations = calculations;
+    pub(crate) fn set_store(&mut self, store: StyleStore) {
+        self.store = store;
     }
 
     pub fn resolve_calc(&self, value: CssCalc, basis: f32) -> Option<f32> {
-        self.calculations.resolve(value, basis)
+        self.store.calculations.resolve(value, basis)
+    }
+
+    pub(crate) fn grid(&self) -> &GridStore {
+        &self.store.grid
     }
 }

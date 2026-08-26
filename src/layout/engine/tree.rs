@@ -2,8 +2,8 @@ use taffy::prelude::{AvailableSpace, Display, Layout, NodeId, Size, Style};
 use taffy::tree::{LayoutInput, LayoutOutput};
 use taffy::{
     BlockContext, Cache, CacheTree, LayoutBlockContainer, LayoutFlexboxContainer,
-    LayoutPartialTree, TraversePartialTree, compute_block_layout, compute_cached_layout,
-    compute_flexbox_layout, compute_root_layout,
+    LayoutGridContainer, LayoutPartialTree, TraversePartialTree, compute_block_layout,
+    compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_root_layout,
 };
 
 struct Node {
@@ -76,6 +76,7 @@ where
             }
             match tree.nodes[index].style.display {
                 Display::Flex => compute_flexbox_layout(tree, node, inputs),
+                Display::Grid => compute_grid_layout(tree, node, inputs),
                 _ => compute_block_layout(tree, node, inputs, block),
             }
         })
@@ -172,6 +173,29 @@ where
     }
 
     fn get_flexbox_child_style(&self, node: NodeId) -> Self::FlexboxItemStyle<'_> {
+        &self.nodes[usize::from(node)].style
+    }
+}
+
+impl<M, R> LayoutGridContainer for LayoutTree<'_, M, R>
+where
+    M: FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+    R: Fn(*const (), f32) -> f32,
+{
+    type GridContainerStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+    type GridItemStyle<'a>
+        = &'a Style
+    where
+        Self: 'a;
+
+    fn get_grid_container_style(&self, node: NodeId) -> Self::GridContainerStyle<'_> {
+        &self.nodes[usize::from(node)].style
+    }
+
+    fn get_grid_child_style(&self, node: NodeId) -> Self::GridItemStyle<'_> {
         &self.nodes[usize::from(node)].style
     }
 }

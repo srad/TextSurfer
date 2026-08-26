@@ -1,11 +1,13 @@
 use cssparser::{Parser, ParserInput, Token};
 
 use super::MediaContext;
+use super::alignment::apply_alignment_declaration;
 use super::flex::apply_flex_declaration;
+use super::grid::apply_grid_declaration;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssCalcStore, CssInset,
-    CssMargin, CssMaxSize, CssPercentage, CssSize, InsetEdges, LegacyAlign, LengthAxis,
-    ListStyleType, MarginEdges, Overflow, Position, TableLayoutMode, TextAlign, VerticalAlign,
+    BorderCollapse, BorderSpacing, BoxSizing, CaptionSide, ComputedStyle, CssInset, CssMargin,
+    CssMaxSize, CssPercentage, CssSize, InsetEdges, LegacyAlign, LengthAxis, ListStyleType,
+    MarginEdges, Overflow, Position, StyleStore, TableLayoutMode, TextAlign, VerticalAlign,
     Visibility, WhiteSpace,
 };
 use crate::css::Declaration;
@@ -30,20 +32,13 @@ pub(super) fn apply_declaration(
     ua_style: ComputedStyle,
     declaration: &Declaration,
     media: MediaContext,
-    calculations: &mut CssCalcStore,
+    store: &mut StyleStore,
 ) -> ApplyOutcome {
     if declaration.name == "font-size" || !is_supported_property(&declaration.name) {
         return ApplyOutcome::Unsupported;
     }
     let before = *style;
-    apply_declaration_raw(
-        style,
-        parent_style,
-        ua_style,
-        declaration,
-        media,
-        calculations,
-    );
+    apply_declaration_raw(style, parent_style, ua_style, declaration, media, store);
     if *style != before || declaration_value_is_valid(parent_style, ua_style, declaration, media) {
         ApplyOutcome::Applied
     } else {
@@ -57,7 +52,7 @@ fn apply_declaration_raw(
     ua_style: ComputedStyle,
     declaration: &Declaration,
     media: MediaContext,
-    calculations: &mut CssCalcStore,
+    store: &mut StyleStore,
 ) {
     if declaration.name == "font-size" {
         return;
@@ -69,7 +64,10 @@ fn apply_declaration_raw(
         apply_css_wide(style, parent_style, ua_style, &declaration.name, &keyword);
         return;
     }
-    if apply_flex_declaration(style, &declaration.name, &declaration.value, media) {
+    if apply_flex_declaration(style, &declaration.name, &declaration.value, media)
+        || apply_alignment_declaration(style, &declaration.name, &declaration.value, media)
+        || apply_grid_declaration(style, &declaration.name, &declaration.value, media, store)
+    {
         return;
     }
     match declaration.name.as_str() {
@@ -221,42 +219,42 @@ fn apply_declaration_raw(
             &declaration.value,
             LengthAxis::Horizontal,
             media,
-            calculations,
+            store,
         ),
         "height" => assign_size(
             &mut style.height,
             &declaration.value,
             LengthAxis::Vertical,
             media,
-            calculations,
+            store,
         ),
         "min-width" => assign_size(
             &mut style.min_width,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
-            calculations,
+            store,
         ),
         "min-height" => assign_size(
             &mut style.min_height,
             &declaration.value,
             LengthAxis::Vertical,
             media,
-            calculations,
+            store,
         ),
         "max-width" => assign_max_size(
             &mut style.max_width,
             &declaration.value,
             LengthAxis::Horizontal,
             media,
-            calculations,
+            store,
         ),
         "max-height" => assign_max_size(
             &mut style.max_height,
             &declaration.value,
             LengthAxis::Vertical,
             media,
-            calculations,
+            store,
         ),
         "box-sizing" => {
             if let Some(box_sizing) =
@@ -475,14 +473,14 @@ pub(super) fn declaration_value_is_valid(
     ];
     probes.iter_mut().any(|probe| {
         let before = *probe;
-        let mut calculations = CssCalcStore::default();
+        let mut store = StyleStore::default();
         apply_declaration_raw(
             probe,
             parent_style,
             ua_style,
             declaration,
             media,
-            &mut calculations,
+            &mut store,
         );
         *probe != before
     })
@@ -567,13 +565,35 @@ fn is_supported_property(property: &str) -> bool {
             | "flex"
             | "order"
             | "justify-content"
-            | "align-items"
-            | "align-self"
             | "align-content"
+            | "justify-items"
+            | "align-items"
+            | "justify-self"
+            | "align-self"
             | "row-gap"
             | "column-gap"
             | "gap"
+            | "grid-row-gap"
+            | "grid-column-gap"
+            | "grid-gap"
             | "place-content"
+            | "place-items"
+            | "place-self"
+            | "grid-template-columns"
+            | "grid-template-rows"
+            | "grid-template-areas"
+            | "grid-template"
+            | "grid-auto-columns"
+            | "grid-auto-rows"
+            | "grid-auto-flow"
+            | "grid"
+            | "grid-row-start"
+            | "grid-row-end"
+            | "grid-column-start"
+            | "grid-column-end"
+            | "grid-row"
+            | "grid-column"
+            | "grid-area"
     )
 }
 
@@ -640,20 +660,61 @@ fn apply_css_wide(
             style.flex.shrink = source.flex.shrink;
             style.flex.basis = source.flex.basis;
         }
-        "order" => style.flex.order = source.flex.order,
-        "justify-content" => style.flex.justify_content = source.flex.justify_content,
-        "align-items" => style.flex.align_items = source.flex.align_items,
-        "align-self" => style.flex.align_self = source.flex.align_self,
-        "align-content" => style.flex.align_content = source.flex.align_content,
-        "row-gap" => style.flex.row_gap = source.flex.row_gap,
-        "column-gap" => style.flex.column_gap = source.flex.column_gap,
-        "gap" => {
-            style.flex.row_gap = source.flex.row_gap;
-            style.flex.column_gap = source.flex.column_gap;
+        "order" => style.order = source.order,
+        "justify-content" => style.alignment.justify_content = source.alignment.justify_content,
+        "align-content" => style.alignment.align_content = source.alignment.align_content,
+        "justify-items" => style.alignment.justify_items = source.alignment.justify_items,
+        "align-items" => style.alignment.align_items = source.alignment.align_items,
+        "justify-self" => style.alignment.justify_self = source.alignment.justify_self,
+        "align-self" => style.alignment.align_self = source.alignment.align_self,
+        "row-gap" | "grid-row-gap" => style.alignment.row_gap = source.alignment.row_gap,
+        "column-gap" | "grid-column-gap" => {
+            style.alignment.column_gap = source.alignment.column_gap
+        }
+        "gap" | "grid-gap" => {
+            style.alignment.row_gap = source.alignment.row_gap;
+            style.alignment.column_gap = source.alignment.column_gap;
         }
         "place-content" => {
-            style.flex.align_content = source.flex.align_content;
-            style.flex.justify_content = source.flex.justify_content;
+            style.alignment.align_content = source.alignment.align_content;
+            style.alignment.justify_content = source.alignment.justify_content;
+        }
+        "place-items" => {
+            style.alignment.align_items = source.alignment.align_items;
+            style.alignment.justify_items = source.alignment.justify_items;
+        }
+        "place-self" => {
+            style.alignment.align_self = source.alignment.align_self;
+            style.alignment.justify_self = source.alignment.justify_self;
+        }
+        "grid-template-columns" => style.grid.template_columns = source.grid.template_columns,
+        "grid-template-rows" => style.grid.template_rows = source.grid.template_rows,
+        "grid-template-areas" => style.grid.template_areas = source.grid.template_areas,
+        "grid-template" => {
+            style.grid.template_columns = source.grid.template_columns;
+            style.grid.template_rows = source.grid.template_rows;
+            style.grid.template_areas = source.grid.template_areas;
+        }
+        "grid-auto-columns" => style.grid.auto_columns = source.grid.auto_columns,
+        "grid-auto-rows" => style.grid.auto_rows = source.grid.auto_rows,
+        "grid-auto-flow" => style.grid.auto_flow = source.grid.auto_flow,
+        "grid" => {
+            style.grid.template_columns = source.grid.template_columns;
+            style.grid.template_rows = source.grid.template_rows;
+            style.grid.template_areas = source.grid.template_areas;
+            style.grid.auto_columns = source.grid.auto_columns;
+            style.grid.auto_rows = source.grid.auto_rows;
+            style.grid.auto_flow = source.grid.auto_flow;
+        }
+        "grid-row-start" => style.grid.row.start = source.grid.row.start,
+        "grid-row-end" => style.grid.row.end = source.grid.row.end,
+        "grid-column-start" => style.grid.column.start = source.grid.column.start,
+        "grid-column-end" => style.grid.column.end = source.grid.column.end,
+        "grid-row" => style.grid.row = source.grid.row,
+        "grid-column" => style.grid.column = source.grid.column,
+        "grid-area" => {
+            style.grid.row = source.grid.row;
+            style.grid.column = source.grid.column;
         }
         "box-sizing" => style.box_sizing = source.box_sizing,
         "margin" => style.margin = source.margin,
@@ -859,7 +920,7 @@ fn assign_size(
     source: &str,
     axis: LengthAxis,
     media: MediaContext,
-    calculations: &mut CssCalcStore,
+    store: &mut StyleStore,
 ) {
     let source_start = source.trim_start().to_ascii_lowercase();
     let is_math = ["calc(", "min(", "max(", "clamp("]
@@ -867,7 +928,7 @@ fn assign_size(
         .any(|function| source_start.starts_with(function));
     if is_math
         && let Some(value) = crate::css::math::parse_length_percentage(source, media, axis)
-        && let Some(value) = calculations.insert(value)
+        && let Some(value) = store.calculations.insert(value)
     {
         *target = CssSize::Calc(value);
         return;
@@ -890,14 +951,14 @@ fn assign_max_size(
     source: &str,
     axis: LengthAxis,
     media: MediaContext,
-    calculations: &mut CssCalcStore,
+    store: &mut StyleStore,
 ) {
     if parse_ident(source).as_deref() == Some("none") {
         *target = CssMaxSize::None;
         return;
     }
     let mut value = CssSize::Auto;
-    assign_size(&mut value, source, axis, media, calculations);
+    assign_size(&mut value, source, axis, media, store);
     *target = match value {
         CssSize::Cells(value) => CssMaxSize::Cells(value),
         CssSize::Percent(value) => CssMaxSize::Percent(value),

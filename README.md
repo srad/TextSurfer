@@ -77,15 +77,16 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   scripting, color scheme and CSS-pixel viewport dimensions, including MQ4 ranges. CSS absolute,
   font-relative and viewport-relative lengths resolve through a frontend-injected cell metric (the
   VGA bitmap and nominal terminal/dump profiles are currently 8×16); Taffy
-  sizes nested and anonymous block and flex flow, including wrapping, gaps, alignment, ordering,
-  growth/shrinkage, explicit/min/max sizing and atomic inline-flex,
+  sizes nested and anonymous block, flex and grid flow, including wrapping, gaps, alignment,
+  ordering, growth/shrinkage, explicit/min/max sizing, named grid lines and areas, auto-placement,
+  atomic inline-flex and inline-grid,
   while an isolated table formatter provides initial anonymous-box, auto/fixed-track, span, caption
   and nested-table support; textwrap and Unicode-aware fragments reflow six whitespace modes, and
   sparse paint emits clipped terminal-cell lines and merged borders. Table cells share the normal
   Unicode/white-space formatter; nested tables retain source order, and captions keep box styling.
   CSS Display outside/inside modes survive cascade: `contents` elides its principal box without
-  losing inheritance or links, inline flow-root/table/grid boxes remain atomic, inline-flex uses
-  nested Taffy layout, and
+  losing inheritance or links, inline flow-root/table boxes remain atomic, inline-flex and
+  inline-grid use nested Taffy layout, and
   misparented table roles receive ownerless anonymous wrappers after contents elision. Overflow
   clips paint and hit geometry at nested padding boxes, `visibility` preserves layout while
   suppressing hidden descendants, and relative/absolute/fixed positioning uses signed insets
@@ -145,13 +146,13 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
 - WPT html5lib tree-output conformance corpus vendored as test fixtures — 1,922 cases, zero network
   in tests; error-count comparison is an open harness follow-up
 
-**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math slice is in
+**Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math slice remains in
 progress. Mixed length/percentage sizing, used-value `min()`/`max()`/`clamp()` (including `none`
-bounds), frontend render metrics and signed block/flex/inline margins have landed. Typed math in
-margins, padding, insets, gaps, flex basis and font size is next. Grid follows, and has moved up on
-live evidence: Wikipedia lays its whole page skeleton out with `grid-area`, and without a grid
-engine that skeleton stacks instead of being placed. Product work continues with keyboard links,
-form editing and submission, and in-page search (M2), then the JavaScript seam/Boa integration
+bounds), frontend render metrics, signed block/flex/inline margins and layout-time Grid track math
+have landed. Grid now provides block, inline and nested layout with named lines/areas,
+auto-placement, alignment and gaps. Typed math in margins, padding, insets, gaps, flex basis and font
+size remains, and floats are the next open M6 rendering item. Product work continues with keyboard
+links, form editing and submission, and in-page search (M2), then the JavaScript seam/Boa integration
 (M4–M5).
 
 ## Architecture

@@ -320,9 +320,9 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 ### Deferred — decision gates with explicit triggers
 - M5 gate: if Boa's async (fetch promises / timers / top-level await) can't keep the UI responsive
   after contract suite + fixture, switch to Deno Core (V8) — same `JsEngine` trait.
-- Taffy owns block and flex box calculation; terminal inline formatting uses textwrap fragments +
+- Taffy owns block, flex and grid box calculation; terminal inline formatting uses textwrap fragments +
   Unicode cell/grapheme libraries because Taffy has no inline layout. M1-D adds table layout
-  in-house; M6 enables Taffy grid after flex; floats wait for line-flow-around-float conformance.
+  in-house; floats wait for line-flow-around-float conformance.
 - **Incremental and multi-process rendering** (chawan's model: paint while the body streams, one
   process per buffer) is deferred, not rejected: our DOM is single-thread-owned by design and the
   fetch pool delivers whole bodies. Revisit if large-page latency becomes a complaint.
@@ -879,13 +879,25 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       size/min/max properties, used-value `min()`/`max()`/`clamp()` with `none` bounds, and simple
       signed margins. Remaining: typed math for margins, padding, insets, gaps, `flex-basis` and
       `font-size`.
-- [ ] **Grid** — enable Taffy's grid engine after the flex formatting and paint-order seams settle.
+- [x] **Grid** *(done)* — enable Taffy's grid engine after the flex formatting and
+      paint-order seams settle.
       *Promoted to the top of the remaining M6 rendering work 2026-08-26 on live evidence:* Wikipedia's
       Vector 2022 skin lays its whole page skeleton out with grid — `grid-area` for
       header/titlebar/toolbar/content/column/footer, and `grid-template-areas: 'headerStart headerEnd'`
       for the header itself. `taffy_style` emits only `Flex` or `Block`, so every one of those falls
       back to normal flow and the skeleton stacks vertically instead of being placed. It is the
       single largest remaining gap between our header area and Firefox's.
+      The delivery target is the CSS Grid Level 1 longhands and shorthands accepted by Taffy,
+      including legacy `grid-gap` aliases, block/inline/nested Grid containers, transactional
+      parsing, and bounded storage. `subgrid`, masonry, RTL/writing modes, Grid absolute positioning,
+      aspect ratio, and z-index remain explicit limits. Math-valued tracks use the shared CSS math
+      store, except inside auto-repeat where Taffy's fixed-component contract cannot represent them.
+      Landed: Taffy-backed block, inline and nested Grid containers; Level 1 template, placement,
+      implicit-track, flow, gap and alignment properties and shorthands; named lines and areas;
+      shared layout-time CSS math; order-modified auto-placement; anonymous text, generated content,
+      tables, flex items and `display: contents`; rollback-safe bounded interning; and topmost
+      paint/hit/link behavior. *Proof:* cascade grammar and atomicity matrices, 96 focused Grid tests,
+      two property laws, the Vector 2022 skeleton case, and a public rendering golden.
 - [ ] **Floats** — conformant line-flow-around-float formatting.
 - [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
       M1-B stays the fallback when no protocol is available.
@@ -905,12 +917,13 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
 - insta snapshots of ratatui `TestBackend` buffers (widget goldens), corpus goldens (M1-B; twelve
   fixture pages under `tests/fixtures/` as of M1-D generated content), DOM tree dumps (M1-A).
   `buffer_string` compares symbols only; style assertions use the style-aware helper added in M1-B.
-- proptest laws — all eight green. Six from M1-B: viewport-width monotonicity, painted-row bounds,
+- proptest laws — all ten green. Six from M1-B: viewport-width monotonicity, painted-row bounds,
   disjoint leaf glyph cells, laminar per-row box families and engine-backed deepest-hit round trip
   (`layout/engine/tests.rs`), plus scroll clamping as a fixed point under arbitrary key sequences
   (`app/controller/tests/`). Two more came with M1-D tables (`layout/table/tests.rs`): generated
-  spans never overlap, and a wider table viewport never increases height. Property tests for
-  `url_fix`/`EditBuffer` continue from M0.
+  spans never overlap, and a wider table viewport never increases height. Grid adds bounded
+  declaration/layout completion and auto-fill height monotonicity under wider viewports
+  (`layout/engine/tests/grid/tracks.rs`). Property tests for `url_fix`/`EditBuffer` continue from M0.
 - FakeFetch + fake clock + fake Host; no test touches the network or the real clock.
 - `tests/support/` shared corpus helpers; inline `#[cfg(test)]` fakes where module-local.
 - `--dump` (M1-B) is the scriptable end-to-end harness: fixture in, golden text out.
@@ -941,6 +954,19 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
 
+- 2026-08-26 — **M6 Grid rendering complete.** Taffy-backed Grid now covers the documented Level 1
+  parser, cascade, layout, content and paint slice with transactional bounded stores and shared
+  math/order properties. Format and strict default/all-feature/no-default Clippy are green. The
+  default, JS and VGA matrices pass 811 library, 13 binary, 6 fetch-pipeline, 14 corpus and 41
+  render-golden tests; no-default passes 718 library, 12 binary, 6 fetch-pipeline, 14 corpus and 41
+  render-golden tests. One inspected Grid snapshot was added, no existing snapshot changed, and no
+  `.snap.new` was produced. README capability and next-work summaries now reflect Grid completion.
+  The standing human smoke list remains the milestone-close handoff.
+- 2026-08-26 — **M6 Grid implementation resumed with a corrected parser contract.** Kept the
+  existing Taffy 0.14.0 and cssparser 0.37.0 pins after confirming they are current; Grid adds
+  `smallvec` transitively. The slice requires atomic shorthand and variable handling, bounded and
+  rollback-safe interning, complete Level 1 placement and template grammar within the documented
+  engine limits, layout/content coverage, and a public rendering golden before completion.
 - 2026-08-26 — **M2 form controls render; the item stays open for interaction and submission.**
   Started from live evidence rather than the board: `lite.duckduckgo.com` — M2's own acceptance page —
   rendered the single word "DuckDuckGo", because every control fell through to `Display::INLINE`

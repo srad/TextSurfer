@@ -292,6 +292,12 @@ pub(super) fn parse_text_decoration(source: &str) -> Option<(bool, bool)> {
     seen.then_some((underline, strike))
 }
 
+/// Turn a `<percentage>` token's unit value into the basis-point form the style types store.
+pub(super) fn percentage_value(value: f32) -> Option<CssPercentage> {
+    (value.is_finite() && value >= 0.0)
+        .then(|| CssPercentage::new((value * 10_000.0).round().min(u32::MAX as f32) as u32))
+}
+
 pub(super) fn parse_ident(source: &str) -> Option<String> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);

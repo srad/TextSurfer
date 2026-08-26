@@ -1,32 +1,4 @@
-use super::CssPercentage;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CssNumber(u32);
-
-impl CssNumber {
-    pub const ZERO: Self = Self(0.0f32.to_bits());
-    pub const ONE: Self = Self(1.0f32.to_bits());
-
-    pub fn new(value: f32) -> Option<Self> {
-        (value.is_finite() && value >= 0.0).then(|| {
-            if value == 0.0 {
-                Self::ZERO
-            } else {
-                Self(value.to_bits())
-            }
-        })
-    }
-
-    pub const fn get(self) -> f32 {
-        f32::from_bits(self.0)
-    }
-}
-
-impl Default for CssNumber {
-    fn default() -> Self {
-        Self::ZERO
-    }
-}
+use super::{CssNumber, CssPercentage};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FlexDirection {
@@ -75,68 +47,6 @@ impl FlexBasis {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CssGap {
-    #[default]
-    Normal,
-    Cells(usize),
-    Percent(CssPercentage),
-}
-
-impl CssGap {
-    pub const fn cells(self) -> Option<usize> {
-        match self {
-            Self::Cells(value) => Some(value),
-            Self::Normal | Self::Percent(_) => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AlignmentSafety {
-    #[default]
-    Unsafe,
-    Safe,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ItemAlignment {
-    #[default]
-    Normal,
-    Stretch,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    SelfStart,
-    SelfEnd,
-    Center,
-    Baseline,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ContentAlignment {
-    #[default]
-    Normal,
-    Stretch,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    SpaceBetween,
-    SpaceAround,
-    SpaceEvenly,
-    Left,
-    Right,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Alignment<T> {
-    pub keyword: T,
-    pub safety: AlignmentSafety,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlexStyle {
     pub direction: FlexDirection,
@@ -144,13 +54,6 @@ pub struct FlexStyle {
     pub grow: CssNumber,
     pub shrink: CssNumber,
     pub basis: FlexBasis,
-    pub order: i32,
-    pub justify_content: Alignment<ContentAlignment>,
-    pub align_items: Alignment<ItemAlignment>,
-    pub align_self: Option<Alignment<ItemAlignment>>,
-    pub align_content: Alignment<ContentAlignment>,
-    pub row_gap: CssGap,
-    pub column_gap: CssGap,
 }
 
 impl FlexStyle {
@@ -169,22 +72,6 @@ impl FlexStyle {
         grow: CssNumber::ZERO,
         shrink: CssNumber::ONE,
         basis: FlexBasis::Auto,
-        order: 0,
-        justify_content: Alignment {
-            keyword: ContentAlignment::Normal,
-            safety: AlignmentSafety::Unsafe,
-        },
-        align_items: Alignment {
-            keyword: ItemAlignment::Normal,
-            safety: AlignmentSafety::Unsafe,
-        },
-        align_self: None,
-        align_content: Alignment {
-            keyword: ContentAlignment::Normal,
-            safety: AlignmentSafety::Unsafe,
-        },
-        row_gap: CssGap::Normal,
-        column_gap: CssGap::Normal,
     };
 }
 

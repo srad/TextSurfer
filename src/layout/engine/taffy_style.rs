@@ -1,31 +1,54 @@
-use taffy::geometry::Point as TaffyPoint;
+use taffy::geometry::{Line as TaffyLine, Point as TaffyPoint};
 use taffy::prelude::{
     BoxSizing as TaffyBoxSizing, Dimension, Display as TaffyDisplay, LengthPercentage,
     LengthPercentageAuto, Rect as TaffyRect, Size as TaffySize, Style as TaffyStyle,
+    TaffyFitContent as _,
 };
 use taffy::style::{
     AlignContent as TaffyAlignContent, AlignContentKeyword as TaffyContentKeyword,
     AlignItems as TaffyAlignItems, AlignItemsKeyword as TaffyItemKeyword,
     AlignmentSafety as TaffySafety, FlexDirection as TaffyFlexDirection, FlexWrap as TaffyFlexWrap,
-    Overflow as TaffyOverflow, Position as TaffyPosition, TextAlign as TaffyTextAlign,
+    GridAutoFlow as TaffyGridAutoFlow, GridPlacement as TaffyGridPlacement,
+    GridTemplateArea as TaffyGridTemplateArea, GridTemplateAreas as TaffyGridTemplateAreas,
+    GridTemplateComponent as TaffyGridTemplateComponent,
+    GridTemplateRepetition as TaffyGridTemplateRepetition, MaxTrackSizingFunction as TaffyMaxTrack,
+    MinTrackSizingFunction as TaffyMinTrack, Overflow as TaffyOverflow, Position as TaffyPosition,
+    RepetitionCount as TaffyRepetitionCount, TextAlign as TaffyTextAlign,
+    TrackSizingFunction as TaffyTrackSizingFunction,
 };
 
 use crate::core::style::{
     Alignment, AlignmentSafety, BoxSizing, ContentAlignment, CssGap, CssInset, CssMargin,
-    CssMaxSize, CssSize, FlexBasis, FlexDirection, FlexWrap, ItemAlignment, LegacyAlign, Overflow,
-    Position,
+    CssMaxSize, CssSize, DisplayInside, FlexBasis, FlexDirection, FlexWrap, GridAreas,
+    GridAutoFlow, GridLength, GridLines, GridPlacement, GridTemplate, GridTemplateComponent,
+    GridTracks, ItemAlignment, LegacyAlign, Overflow, Position, RepeatCount, StyleTree,
+    TrackBreadthMax, TrackBreadthMin, TrackSize,
 };
 
 use super::LayoutRect;
 use super::flow::FlowBox;
 
-pub(super) fn taffy_style(
-    flow: &FlowBox,
-    root: bool,
-    viewport_width: usize,
-    parent_direction: Option<FlexDirection>,
-    calc_values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
-) -> TaffyStyle {
+/// Everything one box needs to become a Taffy style. A struct rather than six positional
+/// arguments: `root` and `viewport_width` sit next to each other and would otherwise be a `bool`
+/// and a `usize` that nothing but their order distinguishes.
+pub(super) struct TaffyStyleInput<'a> {
+    pub(super) flow: &'a FlowBox,
+    pub(super) root: bool,
+    pub(super) viewport_width: usize,
+    pub(super) parent_direction: Option<FlexDirection>,
+    pub(super) calc_values: &'a std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+    pub(super) styles: &'a StyleTree,
+}
+
+pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
+    let TaffyStyleInput {
+        flow,
+        root,
+        viewport_width,
+        parent_direction,
+        calc_values,
+        styles,
+    } = input;
     if root {
         return TaffyStyle {
             display: TaffyDisplay::Block,
@@ -66,14 +89,13 @@ pub(super) fn taffy_style(
             (cols, rows)
         }
     });
+    let inside = flow.style.display.inside();
+    let is_grid = matches!(inside, Some(DisplayInside::Grid));
     TaffyStyle {
-        display: if matches!(
-            flow.style.display.inside(),
-            Some(crate::core::style::DisplayInside::Flex)
-        ) {
-            TaffyDisplay::Flex
-        } else {
-            TaffyDisplay::Block
+        display: match inside {
+            Some(DisplayInside::Flex) => TaffyDisplay::Flex,
+            Some(DisplayInside::Grid) => TaffyDisplay::Grid,
+            _ => TaffyDisplay::Block,
         },
         text_align: match flow.style.legacy_align {
             LegacyAlign::None => TaffyTextAlign::Auto,
@@ -178,23 +200,205 @@ pub(super) fn taffy_style(
         flex_grow: flow.style.flex.grow.get(),
         flex_shrink: flow.style.flex.shrink.get(),
         flex_basis: flex_basis(flow.style.flex.basis, parent_direction),
-        align_items: Some(item_alignment(flow.style.flex.align_items)),
-        align_self: flow.style.flex.align_self.map(item_alignment),
+        align_items: Some(item_alignment(flow.style.alignment.align_items)),
+        align_self: flow.style.alignment.align_self.map(item_alignment),
+        justify_items: Some(item_alignment(flow.style.alignment.justify_items)),
+        justify_self: flow.style.alignment.justify_self.map(item_alignment),
         align_content: Some(content_alignment(
-            flow.style.flex.align_content,
+            flow.style.alignment.align_content,
             false,
             flow.style.flex.direction,
+            is_grid,
         )),
         justify_content: Some(content_alignment(
-            flow.style.flex.justify_content,
+            flow.style.alignment.justify_content,
             true,
             flow.style.flex.direction,
+            is_grid,
         )),
         gap: TaffySize {
-            width: gap(flow.style.flex.column_gap),
-            height: gap(flow.style.flex.row_gap),
+            width: gap(flow.style.alignment.column_gap),
+            height: gap(flow.style.alignment.row_gap),
         },
+        grid_template_columns: template(flow.style.grid.template_columns, styles, calc_values),
+        grid_template_rows: template(flow.style.grid.template_rows, styles, calc_values),
+        grid_template_column_names: line_names(flow.style.grid.template_columns, styles),
+        grid_template_row_names: line_names(flow.style.grid.template_rows, styles),
+        grid_auto_columns: auto_tracks(flow.style.grid.auto_columns, styles, calc_values),
+        grid_auto_rows: auto_tracks(flow.style.grid.auto_rows, styles, calc_values),
+        grid_auto_flow: match flow.style.grid.auto_flow {
+            GridAutoFlow::Row => TaffyGridAutoFlow::Row,
+            GridAutoFlow::Column => TaffyGridAutoFlow::Column,
+            GridAutoFlow::RowDense => TaffyGridAutoFlow::RowDense,
+            GridAutoFlow::ColumnDense => TaffyGridAutoFlow::ColumnDense,
+        },
+        grid_template_areas: template_areas(flow.style.grid.template_areas, styles),
+        grid_row: placement_line(flow.style.grid.row, styles),
+        grid_column: placement_line(flow.style.grid.column, styles),
         ..Default::default()
+    }
+}
+
+/// Taffy's grid engine reads the whole track list, its line names and its areas out of the style
+/// it is handed, so the interned payloads are expanded here — the one place that knows both our
+/// style types and Taffy's.
+fn template(
+    handle: Option<GridTemplate>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+) -> Vec<TaffyGridTemplateComponent<String>> {
+    let Some(data) = handle.and_then(|handle| styles.grid().template(handle)) else {
+        return Vec::new();
+    };
+    data.components
+        .iter()
+        .map(|component| match component {
+            GridTemplateComponent::Single(track) => {
+                TaffyGridTemplateComponent::Single(track_size(*track, values))
+            }
+            GridTemplateComponent::Repeat(repeat) => {
+                TaffyGridTemplateComponent::Repeat(TaffyGridTemplateRepetition {
+                    count: match repeat.count {
+                        RepeatCount::Count(count) => TaffyRepetitionCount::Count(count),
+                        RepeatCount::AutoFill => TaffyRepetitionCount::AutoFill,
+                        RepeatCount::AutoFit => TaffyRepetitionCount::AutoFit,
+                    },
+                    tracks: repeat
+                        .tracks
+                        .iter()
+                        .map(|track| track_size(*track, values))
+                        .collect(),
+                    line_names: names(&repeat.line_names, styles),
+                })
+            }
+        })
+        .collect()
+}
+
+fn line_names(handle: Option<GridTemplate>, styles: &StyleTree) -> Vec<Vec<String>> {
+    handle
+        .and_then(|handle| styles.grid().template(handle))
+        .map(|data| names(&data.line_names, styles))
+        .unwrap_or_default()
+}
+
+fn names(sets: &[Vec<crate::core::style::GridIdent>], styles: &StyleTree) -> Vec<Vec<String>> {
+    sets.iter()
+        .map(|set| {
+            set.iter()
+                .filter_map(|name| styles.grid().ident(*name).map(str::to_owned))
+                .collect()
+        })
+        .collect()
+}
+
+fn auto_tracks(
+    handle: Option<GridTracks>,
+    styles: &StyleTree,
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+) -> Vec<TaffyTrackSizingFunction> {
+    handle
+        .and_then(|handle| styles.grid().tracks(handle))
+        .map(|tracks| {
+            tracks
+                .iter()
+                .map(|track| track_size(*track, values))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn track_size(
+    value: TrackSize,
+    values: &std::cell::RefCell<Vec<crate::core::style::CssCalc>>,
+) -> TaffyTrackSizingFunction {
+    TaffyTrackSizingFunction {
+        min: match value.min {
+            TrackBreadthMin::Auto => TaffyMinTrack::auto(),
+            TrackBreadthMin::MinContent => TaffyMinTrack::min_content(),
+            TrackBreadthMin::MaxContent => TaffyMinTrack::max_content(),
+            TrackBreadthMin::Length(GridLength::Cells(cells)) => {
+                TaffyMinTrack::length(cells as f32)
+            }
+            TrackBreadthMin::Length(GridLength::Percent(percent)) => {
+                TaffyMinTrack::percent(percent.basis_points() as f32 / 10_000.0)
+            }
+            TrackBreadthMin::Length(GridLength::Calc(value)) => {
+                TaffyMinTrack::calc(calc_handle(values, value))
+            }
+        },
+        max: match value.max {
+            TrackBreadthMax::Auto => TaffyMaxTrack::auto(),
+            TrackBreadthMax::MinContent => TaffyMaxTrack::min_content(),
+            TrackBreadthMax::MaxContent => TaffyMaxTrack::max_content(),
+            TrackBreadthMax::Length(GridLength::Cells(cells)) => {
+                TaffyMaxTrack::length(cells as f32)
+            }
+            TrackBreadthMax::Length(GridLength::Percent(percent)) => {
+                TaffyMaxTrack::percent(percent.basis_points() as f32 / 10_000.0)
+            }
+            TrackBreadthMax::Length(GridLength::Calc(value)) => {
+                TaffyMaxTrack::calc(calc_handle(values, value))
+            }
+            TrackBreadthMax::Fr(value) => TaffyMaxTrack::fr(value.get()),
+            TrackBreadthMax::FitContent(GridLength::Cells(cells)) => {
+                TaffyMaxTrack::fit_content(LengthPercentage::length(cells as f32))
+            }
+            TrackBreadthMax::FitContent(GridLength::Percent(percent)) => {
+                TaffyMaxTrack::fit_content(LengthPercentage::percent(
+                    percent.basis_points() as f32 / 10_000.0,
+                ))
+            }
+            TrackBreadthMax::FitContent(GridLength::Calc(value)) => {
+                TaffyMaxTrack::fit_content(LengthPercentage::calc(calc_handle(values, value)))
+            }
+        },
+    }
+}
+
+fn template_areas(
+    handle: Option<GridAreas>,
+    styles: &StyleTree,
+) -> Option<TaffyGridTemplateAreas<String>> {
+    let data = handle.and_then(|handle| styles.grid().areas(handle))?;
+    Some(TaffyGridTemplateAreas {
+        areas: data
+            .areas
+            .iter()
+            .filter_map(|area| {
+                Some(TaffyGridTemplateArea {
+                    name: styles.grid().ident(area.name)?.to_owned(),
+                    row_start: area.row_start,
+                    row_end: area.row_end,
+                    column_start: area.column_start,
+                    column_end: area.column_end,
+                })
+            })
+            .collect(),
+        row_count: data.row_count,
+        column_count: data.column_count,
+    })
+}
+
+fn placement_line(value: GridLines, styles: &StyleTree) -> TaffyLine<TaffyGridPlacement<String>> {
+    TaffyLine {
+        start: placement(value.start, styles),
+        end: placement(value.end, styles),
+    }
+}
+
+fn placement(value: GridPlacement, styles: &StyleTree) -> TaffyGridPlacement<String> {
+    let named = |name: crate::core::style::GridIdent| styles.grid().ident(name).map(str::to_owned);
+    match value {
+        GridPlacement::Auto => TaffyGridPlacement::Auto,
+        GridPlacement::Line(line) => TaffyGridPlacement::Line(line.into()),
+        GridPlacement::Span(count) => TaffyGridPlacement::Span(count),
+        GridPlacement::NamedLine(name, index) => named(name)
+            .map(|name| TaffyGridPlacement::NamedLine(name, index))
+            .unwrap_or(TaffyGridPlacement::Auto),
+        GridPlacement::NamedSpan(name, count) => named(name)
+            .map(|name| TaffyGridPlacement::NamedSpan(name, count))
+            .unwrap_or(TaffyGridPlacement::Auto),
     }
 }
 
@@ -313,13 +517,17 @@ fn item_alignment(value: Alignment<ItemAlignment>) -> TaffyAlignItems {
     }
 }
 
+/// `normal` resolves per formatting context: it behaves as `flex-start` for a flex container's
+/// main axis, but as `stretch` for a grid container in both axes, which is also what Taffy's grid
+/// falls back to when the style leaves the value unset.
 fn content_alignment(
     value: Alignment<ContentAlignment>,
     justify: bool,
     direction: FlexDirection,
+    grid: bool,
 ) -> TaffyAlignContent {
     let keyword = match value.keyword {
-        ContentAlignment::Normal if justify => TaffyContentKeyword::FlexStart,
+        ContentAlignment::Normal if justify && !grid => TaffyContentKeyword::FlexStart,
         ContentAlignment::Normal | ContentAlignment::Stretch => TaffyContentKeyword::Stretch,
         ContentAlignment::Start => TaffyContentKeyword::Start,
         ContentAlignment::End => TaffyContentKeyword::End,

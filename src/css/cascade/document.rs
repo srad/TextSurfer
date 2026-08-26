@@ -5,8 +5,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::style::{
-    ComputedStyle, CssCalcStore, CssMaxSize, CssSize, Display, DisplayInside, ListStylePosition,
-    Marker, PseudoBox, PseudoElement, StyleTree,
+    ComputedStyle, CssMaxSize, CssSize, Display, DisplayInside, ListStylePosition, Marker,
+    PseudoBox, PseudoElement, StyleStore, StyleTree,
 };
 use crate::css::StyleSheet;
 use crate::css::parser::{StyleRule, parse_declarations};
@@ -28,7 +28,7 @@ pub(super) fn cascade_document(
     bucketed: bool,
 ) -> StyleTree {
     let mut tree = StyleTree::default();
-    let mut calculations = CssCalcStore::default();
+    let mut store = StyleStore::default();
     let rules = active_style_rules(sheets, media);
     let index = bucketed.then(|| RuleIndex::new(&rules, document));
     let mut counters = CounterScopes::default();
@@ -138,7 +138,7 @@ pub(super) fn cascade_document(
                 ua_baseline,
                 &declaration,
                 element_media,
-                &mut calculations,
+                &mut store,
             );
             authored_counters.apply(&declaration);
         }
@@ -179,9 +179,9 @@ pub(super) fn cascade_document(
                 style,
                 &counters,
                 None,
-                pseudo_is_flex_item(document, &tree, id, style),
+                pseudo_is_layout_item(document, &tree, id, style),
                 environment.clone(),
-                &mut calculations,
+                &mut store,
             ) {
                 tree.insert_pseudo(id, which, pseudo);
             }
@@ -200,7 +200,7 @@ pub(super) fn cascade_document(
                 fallback,
                 false,
                 environment.clone(),
-                &mut calculations,
+                &mut store,
             ) {
                 markers.push(PendingMarker {
                     node: id,
@@ -236,7 +236,7 @@ pub(super) fn cascade_document(
             },
         );
     }
-    tree.set_calculations(calculations);
+    tree.set_store(store);
     tree
 }
 
@@ -263,7 +263,7 @@ fn cascade_pseudo(
     fallback: Option<String>,
     flex_item: bool,
     origin_environment: Rc<Environment>,
-    calculations: &mut CssCalcStore,
+    store: &mut StyleStore,
 ) -> Option<PseudoBox> {
     let mut declarations = Vec::new();
     let mut order = 0usize;
@@ -344,7 +344,7 @@ fn cascade_pseudo(
             ua_baseline,
             &declaration,
             pseudo_media,
-            calculations,
+            store,
         );
         if declaration.name == "content"
             && let Some(spec) = parse_content(&declaration.value)
@@ -477,24 +477,32 @@ fn computed_display(
         } else {
             display.blockify()
         }
-    } else if nearest_box_parent_is_flex(document, tree, id) {
+    } else if nearest_box_parent_lays_out_items(document, tree, id) {
         display.blockify()
     } else {
         display
     }
 }
 
-fn pseudo_is_flex_item(
+/// Flex and grid items are both blockified, so both formatting contexts answer this the same way.
+fn pseudo_is_layout_item(
     document: &Document,
     tree: &StyleTree,
     id: NodeId,
     style: ComputedStyle,
 ) -> bool {
-    matches!(style.display.inside(), Some(DisplayInside::Flex))
-        || (style.display.is_contents() && nearest_box_parent_is_flex(document, tree, id))
+    is_layout_container(style)
+        || (style.display.is_contents() && nearest_box_parent_lays_out_items(document, tree, id))
 }
 
-fn nearest_box_parent_is_flex(document: &Document, tree: &StyleTree, id: NodeId) -> bool {
+fn is_layout_container(style: ComputedStyle) -> bool {
+    matches!(
+        style.display.inside(),
+        Some(DisplayInside::Flex | DisplayInside::Grid)
+    )
+}
+
+fn nearest_box_parent_lays_out_items(document: &Document, tree: &StyleTree, id: NodeId) -> bool {
     let mut parent = document.parent(id);
     while let Some(node) = parent {
         if !matches!(document.node(node), Some(Node::Element { .. })) {
@@ -506,7 +514,7 @@ fn nearest_box_parent_is_flex(document: &Document, tree: &StyleTree, id: NodeId)
             parent = document.parent(node);
             continue;
         }
-        return matches!(style.display.inside(), Some(DisplayInside::Flex));
+        return is_layout_container(style);
     }
     false
 }

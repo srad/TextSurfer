@@ -32,8 +32,8 @@ fn flex_and_sizing_properties_compute_atomically() {
     let container = styles.get(root);
     assert_eq!(container.flex.direction, FlexDirection::ColumnReverse);
     assert_eq!(container.flex.wrap, FlexWrap::Wrap);
-    assert_eq!(container.flex.row_gap.cells(), Some(1));
-    assert_eq!(container.flex.column_gap.cells(), Some(1));
+    assert_eq!(container.alignment.row_gap.cells(), Some(1));
+    assert_eq!(container.alignment.column_gap.cells(), Some(1));
     assert_eq!(container.height, CssSize::Cells(4));
     assert_eq!(
         container.min_width,
@@ -44,7 +44,7 @@ fn flex_and_sizing_properties_compute_atomically() {
     assert_eq!(item.flex.grow.get(), 2.0);
     assert_eq!(item.flex.shrink.get(), 3.0);
     assert_eq!(item.flex.basis, FlexBasis::Content);
-    assert_eq!(item.flex.order, -4);
+    assert_eq!(item.order, -4);
 }
 
 #[test]
@@ -131,7 +131,11 @@ fn flex_shorthand_matrix_preserves_each_omission_rule() {
         FlexDirection::Column
     );
     assert_eq!(
-        flex("1 1 auto;align-self:end").align_self.unwrap().keyword,
+        computed("flex:1 1 auto;align-self:end")
+            .alignment
+            .align_self
+            .unwrap()
+            .keyword,
         ItemAlignment::End
     );
 }
@@ -154,7 +158,7 @@ fn flex_alignment_keywords_and_safety_compute_without_cross_property_leaks() {
     ] {
         assert_eq!(
             computed(&format!("justify-content:{value}"))
-                .flex
+                .alignment
                 .justify_content,
             Alignment {
                 keyword,
@@ -176,7 +180,9 @@ fn flex_alignment_keywords_and_safety_compute_without_cross_property_leaks() {
         ("baseline", ItemAlignment::Baseline),
     ] {
         assert_eq!(
-            computed(&format!("align-items:{value}")).flex.align_items,
+            computed(&format!("align-items:{value}"))
+                .alignment
+                .align_items,
             Alignment {
                 keyword,
                 safety: AlignmentSafety::Unsafe,
@@ -187,10 +193,13 @@ fn flex_alignment_keywords_and_safety_compute_without_cross_property_leaks() {
     let safe = computed(
         "justify-content:safe center;align-content:safe center;align-items:unsafe self-end;align-self:safe flex-start",
     );
-    assert_eq!(safe.flex.justify_content.safety, AlignmentSafety::Safe);
-    assert_eq!(safe.flex.align_content.safety, AlignmentSafety::Safe);
-    assert_eq!(safe.flex.align_items.safety, AlignmentSafety::Unsafe);
-    assert_eq!(safe.flex.align_self.unwrap().safety, AlignmentSafety::Safe);
+    assert_eq!(safe.alignment.justify_content.safety, AlignmentSafety::Safe);
+    assert_eq!(safe.alignment.align_content.safety, AlignmentSafety::Safe);
+    assert_eq!(safe.alignment.align_items.safety, AlignmentSafety::Unsafe);
+    assert_eq!(
+        safe.alignment.align_self.unwrap().safety,
+        AlignmentSafety::Safe
+    );
 }
 
 #[test]
@@ -200,10 +209,10 @@ fn invalid_flex_numbers_gaps_and_order_leave_prior_values_intact() {
     );
     assert_eq!(style.flex.grow.get(), 2.0);
     assert_eq!(style.flex.shrink.get(), 3.0);
-    assert_eq!(style.flex.order, -7);
-    assert_eq!(style.flex.row_gap, CssGap::Cells(1));
+    assert_eq!(style.order, -7);
+    assert_eq!(style.alignment.row_gap, CssGap::Cells(1));
     assert_eq!(
-        style.flex.column_gap,
+        style.alignment.column_gap,
         CssGap::Percent(CssPercentage::new(1_000))
     );
     assert_eq!(
@@ -241,20 +250,29 @@ fn every_flex_css_wide_group_inherits_or_resets_as_one_atomic_property() {
 #[test]
 fn gap_and_place_content_cover_one_and_two_value_forms() {
     let normal = computed("gap:normal");
-    assert_eq!(normal.flex.row_gap, CssGap::Normal);
-    assert_eq!(normal.flex.column_gap, CssGap::Normal);
+    assert_eq!(normal.alignment.row_gap, CssGap::Normal);
+    assert_eq!(normal.alignment.column_gap, CssGap::Normal);
     let percent = computed("gap:12.5%");
     assert_eq!(
-        percent.flex.row_gap,
+        percent.alignment.row_gap,
         CssGap::Percent(CssPercentage::new(1_250))
     );
-    assert_eq!(percent.flex.column_gap, percent.flex.row_gap);
+    assert_eq!(percent.alignment.column_gap, percent.alignment.row_gap);
     let one = computed("place-content:center");
-    assert_eq!(one.flex.align_content.keyword, ContentAlignment::Center);
-    assert_eq!(one.flex.justify_content.keyword, ContentAlignment::Center);
+    assert_eq!(
+        one.alignment.align_content.keyword,
+        ContentAlignment::Center
+    );
+    assert_eq!(
+        one.alignment.justify_content.keyword,
+        ContentAlignment::Center
+    );
     let two = computed("place-content:end left");
-    assert_eq!(two.flex.align_content.keyword, ContentAlignment::End);
-    assert_eq!(two.flex.justify_content.keyword, ContentAlignment::Left);
+    assert_eq!(two.alignment.align_content.keyword, ContentAlignment::End);
+    assert_eq!(
+        two.alignment.justify_content.keyword,
+        ContentAlignment::Left
+    );
 }
 
 #[test]
@@ -263,17 +281,17 @@ fn invalid_alignment_gap_and_flow_values_leave_prior_values_intact() {
         "justify-content:center;justify-content:safe space-between;align-items:end;align-items:safe stretch;align-content:flex-end;align-content:safe normal;align-self:end;align-self:auto;gap:1ch;gap:normal junk;flex-flow:column wrap;flex-flow:row row",
     );
     assert_eq!(
-        invalid.flex.justify_content.keyword,
+        invalid.alignment.justify_content.keyword,
         ContentAlignment::Center
     );
-    assert_eq!(invalid.flex.align_items.keyword, ItemAlignment::End);
+    assert_eq!(invalid.alignment.align_items.keyword, ItemAlignment::End);
     assert_eq!(
-        invalid.flex.align_content.keyword,
+        invalid.alignment.align_content.keyword,
         ContentAlignment::FlexEnd
     );
-    assert_eq!(invalid.flex.align_self, None);
-    assert_eq!(invalid.flex.row_gap, CssGap::Cells(1));
-    assert_eq!(invalid.flex.column_gap, CssGap::Cells(1));
+    assert_eq!(invalid.alignment.align_self, None);
+    assert_eq!(invalid.alignment.row_gap, CssGap::Cells(1));
+    assert_eq!(invalid.alignment.column_gap, CssGap::Cells(1));
     assert_eq!(invalid.flex.direction, FlexDirection::Column);
     assert_eq!(invalid.flex.wrap, FlexWrap::Wrap);
 }
@@ -311,5 +329,5 @@ fn direct_and_contents_flattened_flex_items_are_blockified() {
     assert_eq!(styles.get(internal).display, Display::BLOCK);
     let before = styles.pseudo(root, PseudoElement::Before).unwrap();
     assert_eq!(before.style.display, Display::flex(DisplayOutside::Block));
-    assert_eq!(before.style.flex.order, -1);
+    assert_eq!(before.style.order, -1);
 }

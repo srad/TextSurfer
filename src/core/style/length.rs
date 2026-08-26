@@ -2,6 +2,35 @@ use crate::core::geom::Size;
 
 const MAX_LAYOUT_CELLS: f64 = u16::MAX as f64;
 
+/// A finite, non-negative CSS `<number>`, stored as bits so it stays `Eq` and `Hash`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CssNumber(u32);
+
+impl CssNumber {
+    pub const ZERO: Self = Self(0.0f32.to_bits());
+    pub const ONE: Self = Self(1.0f32.to_bits());
+
+    pub fn new(value: f32) -> Option<Self> {
+        (value.is_finite() && value >= 0.0).then(|| {
+            if value == 0.0 {
+                Self::ZERO
+            } else {
+                Self(value.to_bits())
+            }
+        })
+    }
+
+    pub const fn get(self) -> f32 {
+        f32::from_bits(self.0)
+    }
+}
+
+impl Default for CssNumber {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CssLengthUnit {
     Px,

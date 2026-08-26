@@ -194,7 +194,29 @@ pub(crate) struct CssCalcStore {
     nodes: usize,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct CssCalcCheckpoint {
+    expressions: usize,
+    nodes: usize,
+}
+
 impl CssCalcStore {
+    pub(crate) fn checkpoint(&self) -> CssCalcCheckpoint {
+        CssCalcCheckpoint {
+            expressions: self.expressions.len(),
+            nodes: self.nodes,
+        }
+    }
+
+    pub(crate) fn rollback(&mut self, checkpoint: CssCalcCheckpoint) {
+        while self.expressions.len() > checkpoint.expressions {
+            if let Some(expression) = self.expressions.pop() {
+                self.ids.remove(expression.as_ref());
+            }
+        }
+        self.nodes = checkpoint.nodes;
+    }
+
     pub(crate) fn insert(&mut self, expression: CssCalcExpr) -> Option<CssCalc> {
         if let Some(value) = self.ids.get(&expression) {
             return Some(*value);
@@ -213,6 +235,11 @@ impl CssCalcStore {
 
     pub(crate) fn resolve(&self, value: CssCalc, basis: f32) -> Option<f32> {
         self.expressions.get(value.0 as usize)?.resolve(basis)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stored_nodes(&self) -> usize {
+        self.nodes
     }
 }
 

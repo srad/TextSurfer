@@ -32,7 +32,7 @@ use flow::{
 };
 use links::{assign_link_rects, collect_links};
 use tables::append_table_output;
-use taffy_style::{layout_rect, taffy_style};
+use taffy_style::{TaffyStyleInput, layout_rect, taffy_style};
 use tree::LayoutTree;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -309,13 +309,14 @@ fn try_layout_flow(
     });
     let mut taffy_nodes = vec![None; flow.len()];
     for index in (0..flow.len()).rev() {
-        let style = taffy_style(
-            &flow[index],
-            index == 0 && root_index == 0,
+        let style = taffy_style(TaffyStyleInput {
+            flow: &flow[index],
+            root: index == 0 && root_index == 0,
             viewport_width,
-            parent_direction[index],
-            &calc_values,
-        );
+            parent_direction: parent_direction[index],
+            calc_values: &calc_values,
+            styles,
+        });
         let node = if !flow[index].inline.is_empty() || flow[index].table.is_some() {
             taffy.new_leaf(style, index)
         } else {
@@ -614,14 +615,17 @@ fn propagates_overflow(document: &Document, node: NodeId) -> bool {
     )
 }
 
+/// Apply `order` to each flex or grid container's in-flow children, and record the flex direction
+/// each item sits in so `flex-basis` can pick an axis. Grid items are reordered too — auto
+/// placement and paint order both follow order-modified document order — but a grid has no main
+/// axis, so their direction stays `None`.
 fn prepare_flow(flow: &mut [FlowBox]) -> Vec<Option<FlexDirection>> {
     let mut parent_direction = vec![None; flow.len()];
     for index in 0..flow.len() {
-        if matches!(
-            flow[index].style.display.inside(),
-            Some(DisplayInside::Flex)
-        ) {
-            let direction = flow[index].style.flex.direction;
+        let inside = flow[index].style.display.inside();
+        if matches!(inside, Some(DisplayInside::Flex | DisplayInside::Grid)) {
+            let direction = matches!(inside, Some(DisplayInside::Flex))
+                .then(|| flow[index].style.flex.direction);
             let mut children = flow[index].children.clone();
             let positions: Vec<_> = children
                 .iter()
@@ -634,10 +638,10 @@ fn prepare_flow(flow: &mut [FlowBox]) -> Vec<Option<FlexDirection>> {
                 .iter()
                 .map(|position| children[*position])
                 .collect();
-            in_flow.sort_by_key(|child| flow[*child].style.flex.order);
+            in_flow.sort_by_key(|child| flow[*child].style.order);
             for (position, child) in positions.into_iter().zip(in_flow) {
                 children[position] = child;
-                parent_direction[child] = Some(direction);
+                parent_direction[child] = direction;
             }
             flow[index].children = children;
         }
@@ -699,7 +703,7 @@ fn resolve_inline(
                 InlineAtomSource::Node(node)
                     if matches!(
                         styles.get(*node).display.inside(),
-                        Some(DisplayInside::Flex)
+                        Some(DisplayInside::Flex | DisplayInside::Grid)
                     ) && nesting < TableLimits::default().max_nesting =>
                 {
                     let flow = build_flow_subtree(input, viewport_width, *node);

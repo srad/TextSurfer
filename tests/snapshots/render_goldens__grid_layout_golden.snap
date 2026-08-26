@@ -1,0 +1,10 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"grid.html\")"
+---
+HEADER
+
+NAV      ONE     TWO
+
+
+FOOT A B
