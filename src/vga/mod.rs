@@ -11,9 +11,11 @@
 //! the whole existing UI by implementing ratatui's `Backend` and mapping window events
 //! onto `core::event` types — exactly what `main.rs` does for crossterm.
 //!
-//! Everything here except `window` is pure and tested without opening a window.
+//! Everything here except `window`, and `capture`'s writing half, is pure and tested
+//! without opening a window.
 
 pub mod backend;
+pub mod capture;
 pub mod font;
 pub mod input;
 mod surface;

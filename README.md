@@ -152,6 +152,7 @@ to DuckDuckGo's lite search for anything that isn't a URL.
 | `Alt+Left` / `Alt+Right` | Back / forward |
 | `r` / `Alt+Home` | Reload / start page |
 | `F10` or `Alt+F/N/V/H` | Open the menu bar |
+| `F12` | Save the whole rendered page to `screenshots/*.png` |
 | `j` / `k` · arrows | Scroll down / up |
 | `Space` / `b` · `PageDown` / `PageUp` | Page down / up |
 | `Home` / `End` | Top / bottom of page |
@@ -159,6 +160,13 @@ to DuckDuckGo's lite search for anything that isn't a URL.
 
 Open View with `Alt+V` (or through `F10`) to select a colour scheme. The bullet marks the current
 session choice.
+
+`F12` writes the page itself, not the screen: no chrome, and every painted row rather than the
+screenful in view. A notice flashes over the page for three seconds with the file that was saved —
+or why none was — and the same line stays on the status bar afterwards. The file is named for the frontend that drew it, as in
+`screenshots/20260827-153012-vga.png` or `…-terminal.png`, because the window has scaled headings
+and true raster images that a terminal capture cannot show. A very long page stops at a 32 MP budget
+and the status line says how many of its rows were captured.
 
 ## Mouse
 

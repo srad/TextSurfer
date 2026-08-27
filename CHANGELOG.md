@@ -4,6 +4,34 @@ Dated decisions, dependency pins and plan changes, newest first. Moved verbatim 
 `ROADMAP.md` on 2026-08-27, where it had grown into a work journal; the roadmap now carries
 only current status, decisions still in force, and open plans.
 
+- 2026-08-27 — **A screenshot now announces itself in a flash notice, not just the status bar.**
+  `ui::widgets::flash` draws a centred box over the page carrying what happened — the file that was
+  saved, or why none was — and `App::flash` takes it down three seconds later; the line stays on the
+  status bar afterwards as the record. The notice carries a deadline rather than a frame count
+  because the two frontends redraw on different schedules, and `next_wake` treats it like the resize
+  and dynamic-state deadlines so the loop wakes to clear it. Two composition rules came with it, both
+  the same shape as the ones images already needed: a retained scroll would carry the box up the
+  content band with the text, so a live notice forces a full content repaint instead (`pinned_scroll`
+  in `FrameComposer::present`, and the matching condition in the window frontend's scaled-text
+  filter); and the notice joins `occlusion_rects`, so framebuffer images and scaled headings stay off
+  it. Any content repaint redraws it, because the rows it covers belong to the content widget.
+
+- 2026-08-27 — **F12 writes the whole rendered page to `screenshots/*.png`, named after the frontend
+  that drew it.** The key captures the page, not the screen: no menu bar, toolbar, tab strip,
+  scrollbar or status line, and every painted row rather than the screenful in view. `vga::capture`
+  builds a second, page-tall `Surface` from the same display list, glyph table and palette the live
+  frontend uses, then encodes its pixels with `image`'s PNG encoder; scaled headings and decoded
+  raster images come along because the capture runs the same `draw_overlays` path. Two decisions
+  worth keeping: the file name carries the frontend (`20260827-153012-vga.png` /
+  `-terminal.png`) because the two rasterise the same page differently — the terminal has neither
+  scaled headings nor true images — and a same-second second capture takes a `-2` suffix rather than
+  overwriting. `app` stays I/O-free: the key sets a request the frontend takes and answers with
+  `App::report_status`, so the file write lives in the frontends. A 32 MP budget (about 1500 rows at
+  160 columns) caps the buffer; past it the capture stops at the top of the page and the status line
+  says how many rows it got. The glyph table is the window frontend's, so a `--no-default-features`
+  build reports that instead of writing a file. Format, all three strict Clippy configurations and
+  the default/JS/VGA/no-default matrices are green at 870 library tests (767 without defaults).
+
 - 2026-08-27 — **Terminal graphics-protocol images were being overprinted by their own halfblock
   fallback; confirmed from user smoke and fixed.** Reported symptom: the top band of every image
   rendered at full resolution, the rest as halfblocks, with the real picture visible behind the

@@ -52,6 +52,7 @@ impl App {
                 message: Cow::Borrowed(active.message.as_str()),
                 hover: self.hovered_href().map(Cow::Borrowed),
             },
+            flash: self.flash_message(),
         }
     }
 }

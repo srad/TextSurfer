@@ -81,8 +81,8 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-27): **858 lib · 13 binary · 6 fetch-pipeline · 14
-corpus · 42 golden · 3 atlas** with the default VGA frontend, **764 lib · 12 binary · 2 atlas**
+Test counts at the last green run (2026-08-27): **874 lib · 13 binary · 6 fetch-pipeline · 14
+corpus · 42 golden · 3 atlas** with the default VGA frontend, **771 lib · 12 binary · 2 atlas**
 with `--no-default-features`; the WPT target adds 6 passing tests (5 without `vga`), plus two
 deliberately ignored entries (the child worker and the VGA reference generator).
 
@@ -141,7 +141,8 @@ before any item is marked `(done)`.
   and the start page. The rendering pipeline (`PageLoad` resource graph, cascade→layout→paint
   facade, `--dump`) is `pipeline`, so `main` and the golden tests never import into `app`.
 - `app` never imports crossterm: events arrive as `core` types, results via `deliver_fetch`, time
-  is injected.
+  is injected. It writes no files either — a screenshot key leaves a request the frontend takes,
+  performs and reports back through `App::flash`.
 - DOM never crosses threads. One thread owns all mutable browser state; bounded fetch, image-decode
   and frontend image-preparation workers receive and return only owned immutable bytes, pixels,
   identifiers and value metadata.
@@ -383,8 +384,8 @@ fixed-position repaint layer remain unimplemented.
 
 Started from the robustness end rather than the keyboard end, because the failure paths were what
 the browser did worst. Render robustness, the non-2xx body, the load-status line, declarative
-refresh, the designed start page and linear-time DOM child construction are done; the keyboard and
-forms work resumes once images close.
+refresh, the designed start page, page screenshots and linear-time DOM child construction are done;
+the keyboard and forms work resumes once images close.
 
 - [ ] **Keymap unification** (extends the M0 keymap tests, same file): `Ctrl+L` (+ existing `a`)
       focuses the address bar so `/` is freed; `/` becomes in-page search; `Tab` in the address bar
@@ -445,6 +446,15 @@ forms work resumes once images close.
 - [x] Designed start page — `about:blank` is a viewport-aware half-block scene with an exact 78×18
       default canvas that scales and centers with the content viewport. It deliberately carries no
       instructional copy; the help overlay owns the keymap reference.
+- [x] Page screenshots — `F12` writes the rendered page, not the screen: every painted row, no
+      chrome, into `screenshots/<utc-stamp>-<frontend>.png`, rasterised by `vga::capture` through the
+      same glyph table, palette and overlay path the window draws with. *Contracts a future reader
+      must honour:* the frontend name is part of the file name because the two rasterise a page
+      differently, and a same-second repeat takes a `-2` suffix; `app` stays I/O-free, so the key
+      leaves a request the frontend answers with `App::flash`; a live flash notice forces a full
+      content repaint instead of a retained scroll and joins `occlusion_rects`; a capture stops at a
+      32 MP budget and reports how many rows it got; a `--no-default-features` build has no glyph
+      table and says so instead of writing a file.
 
 **Acceptance:** a scripted-drive checklist of every keybinding including the rebinds; per-tab state
 isolation tests; snapshot-tested chrome items (titles, error pages, search, help overlay); the

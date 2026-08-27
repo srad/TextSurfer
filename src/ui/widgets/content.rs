@@ -144,7 +144,7 @@ fn sampled_color(
         })
 }
 
-fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
+pub fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
     let CellStyle {
         fg,
         bg,

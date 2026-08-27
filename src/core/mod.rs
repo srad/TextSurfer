@@ -3,6 +3,7 @@ pub mod event;
 pub mod focus;
 pub mod form;
 pub mod frame;
+pub mod frontend;
 pub mod geom;
 pub mod image;
 pub mod style;

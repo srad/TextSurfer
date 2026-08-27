@@ -1,6 +1,7 @@
 use proptest::prelude::*;
 
 use super::*;
+use crate::core::event::InputBatch;
 
 proptest! {
     #[test]
@@ -95,6 +96,44 @@ fn scroll_clamps_to_the_content_window() {
     assert_eq!(app.tabs.active().scroll, max);
     app.handle_key(press(Key::Home));
     assert_eq!(app.tabs.active().scroll, 0);
+}
+
+#[test]
+fn a_screenshot_key_leaves_one_request_for_the_frontend_to_take() {
+    let mut app = App::new();
+    app.handle_key(press(Key::Esc));
+    assert!(!app.take_screenshot_request());
+
+    app.handle_key(press(Key::F(12)));
+
+    assert!(app.take_screenshot_request());
+    assert!(!app.take_screenshot_request());
+}
+
+#[test]
+fn a_flash_shows_in_front_of_the_page_and_stays_on_the_status_bar() {
+    let mut app = App::new();
+    app.flash("saved screenshots/x.png".to_string());
+
+    assert_eq!(app.flash_message(), Some("saved screenshots/x.png"));
+    assert_eq!(app.tabs.active().message, "saved screenshots/x.png");
+    assert_eq!(app.chrome_view().flash, Some("saved screenshots/x.png"));
+}
+
+#[test]
+fn a_flash_comes_down_on_its_own_deadline_and_wakes_the_loop_to_do_it() {
+    let mut app = App::new();
+    app.flash("saved screenshots/x.png".to_string());
+    let deadline = crate::app::controller::flash::FLASH;
+
+    assert_eq!(app.next_wake(), Some(deadline));
+
+    app.advance(&InputBatch::new(), deadline - Duration::from_millis(1));
+    assert!(app.flash_message().is_some());
+
+    app.advance(&InputBatch::new(), deadline);
+    assert_eq!(app.flash_message(), None);
+    assert_eq!(app.tabs.active().message, "saved screenshots/x.png");
 }
 
 #[test]

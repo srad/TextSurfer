@@ -4,6 +4,9 @@
 # Insta pending snapshots (review, never commit blindly)
 *.snap.new
 
+# F12 page captures
+/screenshots
+
 # Editors and OS
 .idea/
 .vscode/

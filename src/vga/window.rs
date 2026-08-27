@@ -23,6 +23,7 @@ use crate::app::App;
 use crate::app::net::Navigate;
 use crate::core::event::{InputBatch, InputEvent, MouseEvent, MouseKind, ResizePhase};
 use crate::core::frame::{FrameDamage, FrameScheduler, RowDamage};
+use crate::core::frontend::Frontend;
 use crate::core::geom::{Point, Size};
 use crate::core::style::{Cursor, RenderMetrics, Rgb};
 use crate::layout::LayoutRect;
@@ -176,6 +177,13 @@ impl VgaApp {
             advanced = true;
         }
         self.sync_theme();
+        if self.app.take_screenshot_request() {
+            super::capture::save_active_page(
+                &mut self.app,
+                Frontend::Vga,
+                std::path::Path::new(super::capture::SCREENSHOT_DIR),
+            );
+        }
         let damage = self.app.take_damage();
         let changed = !damage.is_empty();
         self.pending_damage.merge(damage);
@@ -336,9 +344,12 @@ impl VgaApp {
             self.backend.clear_scaled_overlay();
         }
         self.composer.present(&mut self.backend, &view, &damage)?;
+        // Only a scroll the composer actually retained leaves the rest of the band intact;
+        // a flash notice makes it repaint the whole thing, and every run has to go back.
         let scaled = if damage.content.scroll_rows != 0
             && !damage.content.full
             && damage.content.repaint == RowDamage::None
+            && view.flash.is_none()
         {
             let height = content.map_or(0, |rect| usize::from(rect.height));
             let amount = damage.content.scroll_rows.unsigned_abs() as usize;

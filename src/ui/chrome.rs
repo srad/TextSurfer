@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::Theme;
 use crate::ui::widgets::content::{Content, ContentLines};
+use crate::ui::widgets::flash::{Flash, flash_rect};
 use crate::ui::widgets::menu::{MenuBar, MenuPopup, popup_rect};
 use crate::ui::widgets::scrollbar::{ScrollExtent, Scrollbar};
 use crate::ui::widgets::status::{StatusBar, StatusView};
@@ -33,6 +34,8 @@ pub struct ChromeView<'a> {
     pub active_tab: usize,
     pub content: ContentLines<'a>,
     pub status: StatusView<'a>,
+    /// A notice in front of the page, while one is live.
+    pub flash: Option<&'a str>,
 }
 
 pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
@@ -138,6 +141,8 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         }
         .render(rect, buffer);
     }
+
+    compose_flash(buffer, view, area);
 
     if view.menu_open {
         MenuPopup {
@@ -245,11 +250,33 @@ fn clear_rect(buffer: &mut Buffer, rect: Rect, style: Style) {
 }
 
 pub fn occlusion_rects(view: &ChromeView<'_>, area: Rect) -> Vec<Rect> {
+    let mut rects = Vec::new();
     if view.menu_open {
-        vec![popup_rect(area, area, view.menu_active)]
-    } else {
-        Vec::new()
+        rects.push(popup_rect(area, area, view.menu_active));
     }
+    if let Some(rect) = flash_position(view, area) {
+        rects.push(rect);
+    }
+    rects
+}
+
+/// Draw the flash notice over the page, if there is one.
+///
+/// Its own function because the rows it covers belong to the content widget: every path
+/// that repaints those rows — a scroll, a row range, a whole page — paints over the box,
+/// and owes it a redraw before the frame reaches the screen.
+pub fn compose_flash(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    let rect = flash_position(view, area)?;
+    Flash {
+        message: view.flash?,
+        theme: &view.theme,
+    }
+    .render(rect, buffer);
+    Some(rect)
+}
+
+fn flash_position(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    flash_rect(content_rect(view, area)?, view.flash?)
 }
 
 fn buf_set_string(buffer: &mut Buffer, rect: Rect, col: u16, text: &str, style: Style) {
@@ -322,6 +349,27 @@ mod tests {
     #[test]
     fn standard_sized_chrome_snapshot() {
         insta::assert_snapshot!(snapshot(Size { cols: 80, rows: 24 }));
+    }
+
+    #[test]
+    fn a_flash_notice_sits_in_front_of_the_page() {
+        let mut view = draft();
+        view.flash = Some("saved screenshots/x.png");
+        insta::assert_snapshot!(render(&view, Size { cols: 60, rows: 10 }));
+    }
+
+    #[test]
+    fn a_flash_notice_is_an_occlusion_so_overlays_stay_off_it() {
+        let mut view = draft();
+        let area = Rect::new(0, 0, 60, 10);
+        assert!(occlusion_rects(&view, area).is_empty());
+
+        view.flash = Some("saved screenshots/x.png");
+        let rects = occlusion_rects(&view, area);
+
+        let content = content_rect(&view, area).expect("a content rect");
+        assert_eq!(rects.len(), 1);
+        assert!(content.contains(Position::new(rects[0].x, rects[0].y)));
     }
 
     #[test]

@@ -90,6 +90,7 @@ impl App {
             }
             Action::MenuSelect => self.menu_select(),
             Action::SetTheme(index) => self.set_theme(index),
+            Action::Screenshot => self.screenshot_request = true,
         }
     }
 
@@ -161,6 +162,15 @@ impl App {
     pub(super) fn pending(&mut self, notice: &str) {
         self.tabs.active_mut().message = notice.to_string();
         self.touch_status();
+    }
+
+    /// Whether a screenshot was asked for since this was last called.
+    ///
+    /// The controller cannot take one itself — `app` writes no files, and only the
+    /// frontend knows which frontend it is — so the key press becomes a request the
+    /// frontend picks up and answers with [`App::flash`].
+    pub fn take_screenshot_request(&mut self) -> bool {
+        std::mem::take(&mut self.screenshot_request)
     }
 
     pub(super) fn touch(&mut self) {

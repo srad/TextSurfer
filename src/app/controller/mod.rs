@@ -1,5 +1,6 @@
 mod actions;
 mod delivery;
+mod flash;
 mod navigation;
 mod pointer;
 mod session;
@@ -26,6 +27,7 @@ use super::net::{Navigate, NoopNet};
 use super::startpage::start_page_for;
 use super::tabs::TabManager;
 use delivery::{apply_rendered_page, update_load_message};
+use flash::FlashNotice;
 use pointer::{HoverTarget, PressedTarget, ScrollDrag};
 use viewport::content_viewport;
 
@@ -59,6 +61,8 @@ pub struct App {
     dynamic_settle: Option<Duration>,
     net_lost: bool,
     image_decode_lost: bool,
+    screenshot_request: bool,
+    flash: Option<FlashNotice>,
 }
 
 impl Default for App {
@@ -130,6 +134,8 @@ impl App {
             dynamic_settle: None,
             net_lost: false,
             image_decode_lost: false,
+            screenshot_request: false,
+            flash: None,
         }
     }
 

@@ -237,6 +237,9 @@ where
         } else if app.next_wake().is_some_and(|deadline| deadline <= current) {
             app.advance(&InputBatch::new(), current);
         }
+        if app.take_screenshot_request() {
+            save_screenshot(app);
+        }
         let mut damage = app.take_damage();
         if damage.is_empty() && image_work.as_ref().is_some_and(|work| work.ready()) {
             damage = FrameDamage::full();
@@ -266,6 +269,23 @@ where
             }
         }
     }
+}
+
+/// Write the whole page to `screenshots/`, naming the file after this frontend.
+#[cfg(feature = "vga")]
+fn save_screenshot(app: &mut App) {
+    textsurfer::vga::capture::save_active_page(
+        app,
+        textsurfer::core::frontend::Frontend::Terminal,
+        std::path::Path::new(textsurfer::vga::capture::SCREENSHOT_DIR),
+    );
+}
+
+/// The glyph table that rasterises a capture is the window frontend's, so a build
+/// without it can only say so.
+#[cfg(not(feature = "vga"))]
+fn save_screenshot(app: &mut App) {
+    app.flash("screenshots need a build with --features vga".to_string());
 }
 
 fn push_terminal_event(scheduler: &mut FrameScheduler, event: Event, now: Duration) {

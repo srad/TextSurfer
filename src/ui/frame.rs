@@ -14,8 +14,8 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use crate::core::frame::{ChromeDamage, FrameDamage, RowDamage};
 
 use super::chrome::{
-    ChromeView, compose, compose_content_rows, compose_scrollbar, compose_status, content_rect,
-    cursor_position,
+    ChromeView, compose, compose_content_rows, compose_flash, compose_scrollbar, compose_status,
+    content_rect, cursor_position,
 };
 
 pub struct FrameComposer {
@@ -188,15 +188,18 @@ impl FrameComposer {
             regions.push(area);
             cursor
         } else {
-            let fresh_image_scroll =
-                damage.content.scroll_rows != 0 && !view.content.painted.images.is_empty();
-            if damage.content.scroll_rows != 0 && !fresh_image_scroll {
+            // A retained scroll moves the whole content band, and anything pinned on top
+            // of it travels along: an image the frontend places itself, or a flash notice.
+            // Those pages repaint instead of scrolling.
+            let pinned_scroll = damage.content.scroll_rows != 0
+                && (!view.content.painted.images.is_empty() || view.flash.is_some());
+            if damage.content.scroll_rows != 0 && !pinned_scroll {
                 let rows = self.scroll(backend, view, damage.content.scroll_rows)?;
                 if let Some(rect) = compose_content_rows(&mut self.current, view, area, rows) {
                     regions.push(rect);
                 }
             }
-            if damage.content.full || fresh_image_scroll {
+            if damage.content.full || pinned_scroll {
                 if let Some(content) = content_rect(view, area)
                     && let Some(rect) =
                         compose_content_rows(&mut self.current, view, area, 0..content.height)
@@ -235,6 +238,11 @@ impl FrameComposer {
                 || damage.content.repaint != RowDamage::None;
             if content_changed && let Some(rect) = compose_scrollbar(&mut self.current, view, area)
             {
+                regions.push(rect);
+            }
+            // The content rows this sits on were just repainted, so the notice has to go
+            // back on top of them.
+            if content_changed && let Some(rect) = compose_flash(&mut self.current, view, area) {
                 regions.push(rect);
             }
             if damage.chrome == ChromeDamage::Status
@@ -566,6 +574,34 @@ mod tests {
         compose(area, &mut expected, &view);
         assert_eq!(backend.buffer(), &expected);
         assert!(composer.last_drawn_cells() < usize::from(area.width * area.height));
+    }
+
+    #[test]
+    fn a_retained_scroll_puts_the_flash_notice_back_on_top() {
+        // The notice covers content rows, so a scroll that repaints them in place would
+        // otherwise leave half a box behind until it expired.
+        let lines = (0..40).map(|row| format!("row {row}")).collect::<Vec<_>>();
+        let painted = DisplayList::from_lines(&lines);
+        let size = crate::core::geom::Size { cols: 60, rows: 24 };
+        let area = Rect::new(0, 0, size.cols, size.rows);
+        let mut view = draft_view();
+        view.geometry = crate::ui::mouse::ChromeGeometry::for_size(size);
+        view.content.painted = &painted;
+        view.flash = Some("saved screenshots/x.png");
+        let mut backend = TestBackend::new(size.cols, size.rows);
+        let mut composer = FrameComposer::new(area);
+        composer
+            .present(&mut backend, &view, &FrameDamage::full())
+            .unwrap();
+
+        view.content.scroll = 3;
+        let mut damage = FrameDamage::default();
+        damage.scroll(3);
+        composer.present(&mut backend, &view, &damage).unwrap();
+
+        let mut expected = Buffer::empty(area);
+        compose(area, &mut expected, &view);
+        assert_eq!(backend.buffer(), &expected);
     }
 
     #[test]

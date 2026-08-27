@@ -30,6 +30,7 @@ impl App {
             load,
             self.pending_resize.map(|(_, deadline)| deadline),
             self.dynamic_settle,
+            self.flash_deadline(),
         ]
         .into_iter()
         .flatten()
@@ -40,6 +41,7 @@ impl App {
         self.now = now;
         self.settle_resize(now);
         self.settle_dynamic_state(now);
+        self.expire_flash(now);
         for _ in 0..FETCH_RESULTS_PER_STEP {
             match self.net.poll_result() {
                 FetchPoll::Ready(payload) => {

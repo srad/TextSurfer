@@ -34,6 +34,7 @@ pub enum Action {
     MenuRight,
     MenuSelect,
     SetTheme(usize),
+    Screenshot,
 }
 
 pub trait Keymap {
@@ -62,6 +63,7 @@ impl Keymap for DefaultKeymap {
                 Key::Right => Some(Action::MenuRight),
                 Key::Enter => Some(Action::MenuSelect),
                 Key::F(10) => Some(Action::MenuClose),
+                Key::F(12) => Some(Action::Screenshot),
                 _ => None,
             };
         }
@@ -70,6 +72,7 @@ impl Keymap for DefaultKeymap {
                 Key::Enter => Some(Action::SubmitAddress),
                 Key::Esc => Some(Action::FocusContent),
                 Key::F(10) => Some(Action::FocusMenu),
+                Key::F(12) => Some(Action::Screenshot),
                 _ => None,
             };
         }
@@ -120,6 +123,7 @@ impl Keymap for DefaultKeymap {
             Key::PageDown if plain => Some(Action::ScrollPageDown),
             Key::PageUp if plain => Some(Action::ScrollPageUp),
             Key::F(10) => Some(Action::FocusMenu),
+            Key::F(12) => Some(Action::Screenshot),
             Key::Home => match (alt, plain, focus) {
                 (true, false, Focus::Content)
                     if !event.modifiers.shift && !event.modifiers.ctrl =>
@@ -411,6 +415,16 @@ mod tests {
             None
         );
         assert_eq!(DefaultKeymap.resolve(&alt(Key::End), Focus::Content), None);
+    }
+
+    #[test]
+    fn f12_asks_for_a_screenshot_from_any_focus() {
+        for focus in [Focus::Content, Focus::Tabs, Focus::Address, Focus::Menu] {
+            assert_eq!(
+                DefaultKeymap.resolve(&press(Key::F(12)), focus),
+                Some(Action::Screenshot)
+            );
+        }
     }
 
     #[test]
