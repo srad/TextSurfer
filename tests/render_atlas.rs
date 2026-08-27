@@ -29,6 +29,7 @@ const CASES: &[&str] = &[
     "search-flex",
     "box-layout",
     "flex-grid",
+    "floats",
     "images",
     "presentational",
 ];
@@ -265,6 +266,9 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
         } else {
             assert!(!text.contains("Search Wikipedia"));
         }
+        assert!(text.contains("FLOAT-L"));
+        assert!(text.contains("FLOAT-R"));
+        assert!(text.contains("clear after floats"));
         for (case, start, end) in panel_ranges(&decoded.painted) {
             assert!(
                 end - start <= usize::from(rows),

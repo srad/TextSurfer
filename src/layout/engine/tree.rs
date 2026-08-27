@@ -22,7 +22,7 @@ pub(super) struct LayoutTree<'a, M, R> {
 
 impl<'a, M, R> LayoutTree<'a, M, R>
 where
-    M: FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, usize, &Style, Option<&mut BlockContext<'_>>) -> LayoutOutput,
     R: Fn(*const (), f32) -> f32,
 {
     pub(super) fn new(measure: &'a mut M, resolve: R) -> Self {
@@ -67,12 +67,19 @@ where
         inputs: LayoutInput,
         block: Option<&mut BlockContext<'_>>,
     ) -> LayoutOutput {
+        let index = usize::from(node);
+        if let Some(context) = self.nodes[index].context
+            && block.is_some()
+        {
+            let style = self.nodes[index].style.clone();
+            return (self.measure)(inputs, context, &style, block);
+        }
         compute_cached_layout(self, node, inputs, |tree, node, inputs| {
             let index = usize::from(node);
             let context = tree.nodes[index].context;
             if let Some(context) = context {
                 let style = tree.nodes[index].style.clone();
-                return (tree.measure)(inputs, context, &style);
+                return (tree.measure)(inputs, context, &style, None);
             }
             match tree.nodes[index].style.display {
                 Display::Flex => compute_flexbox_layout(tree, node, inputs),
@@ -114,7 +121,7 @@ impl<M, R> TraversePartialTree for LayoutTree<'_, M, R> {
 
 impl<M, R> LayoutPartialTree for LayoutTree<'_, M, R>
 where
-    M: FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, usize, &Style, Option<&mut BlockContext<'_>>) -> LayoutOutput,
     R: Fn(*const (), f32) -> f32,
 {
     type CoreContainerStyle<'a>
@@ -156,7 +163,7 @@ impl<M, R> CacheTree for LayoutTree<'_, M, R> {
 
 impl<M, R> LayoutFlexboxContainer for LayoutTree<'_, M, R>
 where
-    M: FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, usize, &Style, Option<&mut BlockContext<'_>>) -> LayoutOutput,
     R: Fn(*const (), f32) -> f32,
 {
     type FlexboxContainerStyle<'a>
@@ -179,7 +186,7 @@ where
 
 impl<M, R> LayoutGridContainer for LayoutTree<'_, M, R>
 where
-    M: FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, usize, &Style, Option<&mut BlockContext<'_>>) -> LayoutOutput,
     R: Fn(*const (), f32) -> f32,
 {
     type GridContainerStyle<'a>
@@ -202,7 +209,7 @@ where
 
 impl<M, R> LayoutBlockContainer for LayoutTree<'_, M, R>
 where
-    M: FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+    M: FnMut(LayoutInput, usize, &Style, Option<&mut BlockContext<'_>>) -> LayoutOutput,
     R: Fn(*const (), f32) -> f32,
 {
     type BlockContainerStyle<'a>

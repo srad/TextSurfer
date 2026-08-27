@@ -1,0 +1,43 @@
+---
+source: tests/render_atlas.rs
+expression: "styled_panel(&page.painted, cols, start, end)"
+---
+│ATLAS:floats                            │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..13 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
+  13..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│FLOAT-LText wraps      FLOAT-R          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..8 fg=Rgb(224, 224, 224) bg=Rgb(64, 0, 0) mod=NONE
+  8..18 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  18..24 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  24..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│       between opposing                 │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..8 fg=Rgb(16, 16, 16) bg=Rgb(64, 0, 0) mod=NONE
+  8..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  24..31 fg=Rgb(16, 16, 16) bg=Rgb(0, 64, 0) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│floats and recovers the full            │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..29 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  29..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│line below them.                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..17 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  17..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│clear after floats                      │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..19 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  19..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

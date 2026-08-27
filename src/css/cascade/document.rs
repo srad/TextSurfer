@@ -143,7 +143,7 @@ pub(super) fn cascade_document(
             authored_counters.apply(&declaration);
         }
         style.overflow = style.overflow.computed();
-        style.display = computed_display(document, &tree, id, style.display, style.position);
+        compute_box_values(document, &tree, id, &mut style);
         if style.display.is_inline_flow() && !is_replaced_element(document, id)
             || matches!(
                 style.display,
@@ -362,10 +362,10 @@ fn cascade_pseudo(
         }
     }
     style.overflow = style.overflow.computed();
-    if style.position.is_absolute() {
+    if style.position.is_absolute() || flex_item {
+        style.float = crate::core::style::CssFloat::None;
         style.display = style.display.blockify();
-    }
-    if flex_item {
+    } else if style.float.is_floating() {
         style.display = style.display.blockify();
     }
     let text = match content {
@@ -373,9 +373,11 @@ fn cascade_pseudo(
         Some(ContentSpec::Pieces(pieces)) => resolve_content(&pieces, document, id, counters),
         Some(ContentSpec::Normal) | None => fallback?,
     };
-    // An empty string would be an empty inline box in CSS. Generated content is inline-level here
-    // and inline borders are a non-goal, so such a box can never paint a cell: drop it.
-    if text.is_empty() {
+    if text.is_empty()
+        && !style.float.is_floating()
+        && matches!(style.clear, crate::core::style::Clear::None)
+        && style.display.is_inline_flow()
+    {
         return None;
     }
     Some(PseudoBox { text, style })
@@ -440,14 +442,13 @@ fn computed_value_is_valid(
     }
 }
 
-fn computed_display(
+fn compute_box_values(
     document: &Document,
     tree: &StyleTree,
     id: NodeId,
-    display: Display,
-    position: crate::core::style::Position,
-) -> Display {
-    let display = if display.is_contents()
+    style: &mut ComputedStyle,
+) {
+    style.display = if style.display.is_contents()
         && matches!(
             document.node(id),
             Some(Node::Element {
@@ -476,20 +477,23 @@ fn computed_display(
         ) {
         Display::NONE
     } else {
-        display
+        style.display
     };
-    if position.is_absolute() {
-        display.blockify()
+    if style.position.is_absolute() {
+        style.float = crate::core::style::CssFloat::None;
+        style.display = style.display.blockify();
     } else if document.parent(id).is_none() {
-        if display.is_contents() {
+        style.float = crate::core::style::CssFloat::None;
+        style.display = if style.display.is_contents() {
             Display::BLOCK
         } else {
-            display.blockify()
-        }
+            style.display.blockify()
+        };
     } else if nearest_box_parent_lays_out_items(document, tree, id) {
-        display.blockify()
-    } else {
-        display
+        style.float = crate::core::style::CssFloat::None;
+        style.display = style.display.blockify();
+    } else if style.float.is_floating() {
+        style.display = style.display.blockify();
     }
 }
 

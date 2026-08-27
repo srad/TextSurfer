@@ -7,9 +7,10 @@ use taffy::prelude::{
 use taffy::style::{
     AlignContent as TaffyAlignContent, AlignContentKeyword as TaffyContentKeyword,
     AlignItems as TaffyAlignItems, AlignItemsKeyword as TaffyItemKeyword,
-    AlignmentSafety as TaffySafety, FlexDirection as TaffyFlexDirection, FlexWrap as TaffyFlexWrap,
-    GridAutoFlow as TaffyGridAutoFlow, GridPlacement as TaffyGridPlacement,
-    GridTemplateArea as TaffyGridTemplateArea, GridTemplateAreas as TaffyGridTemplateAreas,
+    AlignmentSafety as TaffySafety, Clear as TaffyClear, FlexDirection as TaffyFlexDirection,
+    FlexWrap as TaffyFlexWrap, Float as TaffyFloat, GridAutoFlow as TaffyGridAutoFlow,
+    GridPlacement as TaffyGridPlacement, GridTemplateArea as TaffyGridTemplateArea,
+    GridTemplateAreas as TaffyGridTemplateAreas,
     GridTemplateComponent as TaffyGridTemplateComponent,
     GridTemplateRepetition as TaffyGridTemplateRepetition, MaxTrackSizingFunction as TaffyMaxTrack,
     MinTrackSizingFunction as TaffyMinTrack, Overflow as TaffyOverflow, Position as TaffyPosition,
@@ -18,11 +19,11 @@ use taffy::style::{
 };
 
 use crate::core::style::{
-    Alignment, AlignmentSafety, BoxSizing, ContentAlignment, CssCalc, CssGap, CssInset, CssMargin,
-    CssMaxSize, CssPadding, CssSize, DisplayInside, FlexBasis, FlexDirection, FlexWrap, GridAreas,
-    GridAutoFlow, GridLength, GridLines, GridPlacement, GridTemplate, GridTemplateComponent,
-    GridTracks, ItemAlignment, LegacyAlign, Overflow, Position, RepeatCount, StyleTree,
-    TrackBreadthMax, TrackBreadthMin, TrackSize,
+    Alignment, AlignmentSafety, BoxSizing, Clear, ContentAlignment, CssCalc, CssFloat, CssGap,
+    CssInset, CssMargin, CssMaxSize, CssPadding, CssSize, DisplayInside, FlexBasis, FlexDirection,
+    FlexWrap, GridAreas, GridAutoFlow, GridLength, GridLines, GridPlacement, GridTemplate,
+    GridTemplateComponent, GridTracks, ItemAlignment, LegacyAlign, Overflow, Position, RepeatCount,
+    StyleTree, TrackBreadthMax, TrackBreadthMin, TrackSize,
 };
 
 use super::LayoutRect;
@@ -136,6 +137,17 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
         position: match flow.style.position {
             Position::Absolute | Position::Fixed => TaffyPosition::Absolute,
             Position::Static | Position::Relative | Position::Sticky => TaffyPosition::Relative,
+        },
+        float: match flow.style.float {
+            CssFloat::None => TaffyFloat::None,
+            CssFloat::Left => TaffyFloat::Left,
+            CssFloat::Right => TaffyFloat::Right,
+        },
+        clear: match flow.style.clear {
+            Clear::None => TaffyClear::None,
+            Clear::Left => TaffyClear::Left,
+            Clear::Right => TaffyClear::Right,
+            Clear::Both => TaffyClear::Both,
         },
         inset: TaffyRect {
             left: inset(flow.style.inset.left, styles, calc_values),

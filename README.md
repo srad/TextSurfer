@@ -54,9 +54,10 @@ Ready                              https://example.com
 - Cascade over inline, embedded, linked and recursively imported CSS in document order (cssparser +
   selectors), with selector bucketing and terminal-aware `@media` for scripting, colour scheme and
   CSS-pixel viewport dimensions including MQ4 ranges
-- Taffy-backed block, flex and grid layout — wrapping, gaps, alignment, ordering, growth, named grid
-  lines and areas, auto-placement, atomic inline-flex and inline-grid — beside an in-house table
-  formatter with anonymous boxes, spans, captions and nesting
+- Taffy-backed block, flex, grid and physical float layout — wrapping, gaps, alignment, ordering,
+  growth, named grid lines and areas, auto-placement, atomic inline-flex and inline-grid, and text
+  shaping around left/right floats — beside an in-house table formatter with anonymous boxes,
+  spans, captions and nesting
 - CSS lengths resolve through a frontend-injected cell metric; `calc()`/`min()`/`max()`/`clamp()`
   reach sizing, margins, padding, insets, gaps, flex basis, font size and grid tracks
 - Custom properties with stable Level 1 `var()` semantics: inherited variables, nested and empty
@@ -200,10 +201,10 @@ its override key (usually `Shift`) while TextSurfer has the screen.
   joined by ten layout laws covering viewport monotonicity, painted-row bounds, disjoint glyph
   cells, laminar row families, deepest-hit round trips and scroll clamping.
 - **Render goldens** — fixture pages covering margins, headings, borders, links, wide characters,
-  `pre`, lists and markers, generated content, tables, display modes, flex, grid and CSS math, with
-  assertions for link geometry, colour contrast and `--dump` parity.
-- **Rendering atlas** — one offline document of 10 named panels rendered at 40, 100 and 160 columns,
-  asserted semantically and then locked by 33 styled-cell snapshots and 30 exact VGA PNG references.
+  `pre`, lists and markers, generated content, tables, display modes, flex, grid, floats and CSS
+  math, with assertions for link geometry, colour contrast and `--dump` parity.
+- **Rendering atlas** — one offline document of 11 named panels rendered at 40, 100 and 160 columns,
+  asserted semantically and then locked by 36 styled-cell snapshots and 33 exact VGA PNG references.
   Ordinary runs never rewrite a reference.
 - **Static WPT profiles** — a pinned, vendored slice run offline in an isolated child with a parent
   watchdog: `terminal-cell-v1` for cell rendering and crash safety, `vga-pixel-v1` for exact-RGB
@@ -229,12 +230,11 @@ harness would otherwise hand it.
 ## Roadmap
 
 Status, decisions in force, acceptance criteria and open plans live in
-**[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history is in
-[`CHANGELOG.md`](CHANGELOG.md), and the standing rules coding agents follow are in
-[`AGENTS.md`](AGENTS.md).
+**[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
+`git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: keyboard link navigation, form editing and submission, and in-page search; then floats,
-followed by the JavaScript seam and Boa integration.
+Next up: the human image smoke in VGA and terminal, then keyboard link navigation, form editing and
+submission, in-page search, and the remaining M6 performance gate.
 
 ## Built on great libraries
 

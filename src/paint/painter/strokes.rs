@@ -21,9 +21,7 @@ pub(super) fn draw_strokes(
     strokes: &[BorderStroke],
 ) {
     let mut cells = BTreeMap::<(usize, usize), StrokeCell>::new();
-    let mut ordered: Vec<_> = strokes.iter().collect();
-    ordered.sort_by_key(|stroke| stroke.depth);
-    for stroke in ordered {
+    for stroke in strokes {
         add_stroke(&mut cells, *stroke, viewport_width, document_height);
     }
     for ((row, col), cell) in cells {

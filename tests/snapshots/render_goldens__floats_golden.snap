@@ -1,0 +1,10 @@
+---
+source: tests/render_goldens.rs
+expression: "golden(\"floats.html\")"
+---
+LEFT    Text wraps through the  RIGHT   
+        middle and returns to           
+the full row below both floats.
+ TABLE Legacy table alignment also
+floats.
+Cleared by practical HTML.

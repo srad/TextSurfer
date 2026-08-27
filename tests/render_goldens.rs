@@ -125,6 +125,76 @@ fn nonempty_lines(page: &RenderedPage) -> Vec<String> {
 }
 
 #[test]
+fn leading_floats_shape_each_line_and_clear_restores_the_full_measure() {
+    let page = render_source(
+        "<!doctype html><style>*{margin:0;padding:0}aside{float:left;width:4ch;height:2rem}</style><main><aside>LLLL<br>LLLL</aside>alpha beta gamma delta<br clear=all>clear line</main>",
+        12,
+    );
+    assert_eq!(
+        page.painted.text_lines(),
+        ["LLLLalpha", "LLLLbeta", "gamma delta", "clear line"]
+    );
+}
+
+#[test]
+fn a_float_after_wrapped_text_starts_on_the_current_source_line() {
+    let page = render_source(
+        "<!doctype html><style>*{margin:0;padding:0}.float{float:left;width:3ch;height:2rem}</style><main>one two three four <span class=float>FFF<br>FFF</span> tail</main>",
+        12,
+    );
+    assert_eq!(
+        page.painted.text_lines(),
+        ["one two", "FFFthree", "FFFfour tail"]
+    );
+}
+
+#[test]
+fn opposing_floats_leave_a_safe_middle_band_and_keep_links_clickable() {
+    let page = render_source(
+        "<!doctype html><style>*{margin:0;padding:0}.l{float:left;width:3ch}.r{float:right;width:3ch}</style><main><a class=l href=/left>LLL</a><a class=r href=/right>RRR</a>middle text</main>",
+        12,
+    );
+    assert_eq!(page.painted.text_lines(), ["LLLmiddleRRR", "text"]);
+    assert_eq!(page.painted.links.len(), 2);
+    assert_eq!(
+        page.painted.link_at(0, 0).map(|link| link.node),
+        Some(page.painted.links[0].node)
+    );
+    assert_eq!(
+        page.painted.link_at(11, 0).map(|link| link.node),
+        Some(page.painted.links[1].node)
+    );
+}
+
+#[test]
+fn an_empty_generated_clearfix_contains_the_float_for_following_content() {
+    let page = render_source(
+        "<!doctype html><style>*{margin:0;padding:0}.group::after{content:'';display:block;clear:both}.float{float:left;width:4ch;height:2rem}</style><div class=group><span class=float>FFFF<br>FFFF</span>inside</div><p>after</p>",
+        12,
+    );
+    assert_eq!(page.painted.text_lines(), ["FFFFinside", "FFFF", "after"]);
+}
+
+#[test]
+fn float_decoration_paints_above_a_later_in_flow_block_background() {
+    let page = render_source(
+        "<!doctype html><style>*{margin:0;padding:0}.float{float:left;width:4ch;height:2rem;background:red}.normal{height:2rem;background:blue}</style><main><span class=float></span><div class=normal></div></main>",
+        12,
+    );
+    let background_at = |col: usize, row: usize| {
+        page.painted.rows[row]
+            .spans
+            .iter()
+            .find(|span| {
+                span.col <= col && col < span.col.saturating_add(span.text.chars().count())
+            })
+            .and_then(|span| span.style.bg)
+    };
+    assert_eq!(background_at(1, 1), Some(Rgb::new(255, 0, 0)));
+    assert_eq!(background_at(5, 1), Some(Rgb::new(0, 0, 255)));
+}
+
+#[test]
 fn responsive_css_pixel_breakpoint_uses_the_terminal_cell_metric() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -213,6 +283,11 @@ fn flex_layout_golden() {
 #[test]
 fn grid_layout_golden() {
     insta::assert_snapshot!(golden("grid.html"));
+}
+
+#[test]
+fn floats_golden() {
+    insta::assert_snapshot!(golden("floats.html"));
 }
 
 #[test]

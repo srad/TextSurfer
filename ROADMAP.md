@@ -1,8 +1,8 @@
 # TextSurfer — Roadmap
 
 A terminal text browser in Rust (ratatui). This file is the single source of truth for **current
-status, decisions in force, and open plans**. It is not a work journal: dated narration of what
-landed when lives in [`CHANGELOG.md`](CHANGELOG.md), and the tests are the record of what is proven.
+status, decisions in force, and open plans**. It is not a work journal: dated narration lives in
+`git log`, and the tests are the record of what is proven.
 
 Update it when a decision changes, a task lands, or a flaw is found — before writing code that
 depends on it. Standing rules and gate commands live in [`AGENTS.md`](AGENTS.md).
@@ -74,23 +74,23 @@ signed off.
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
 | M5 — Boa | Boa 0.21.1 behind the trait; host bindings subset; job pump; test262 slice | (open) |
-| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (smoke pending) · floats · perf | (in progress) |
+| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (smoke pending) · floats ✅ · perf | (in progress) |
 
 Cross-cutting: test infrastructure (in progress — static WPT backfill, corpus error-count and
 astral attribute-order gaps) · gates (done, local only) · coverage floor (open — optional local,
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-27): **874 lib · 13 binary · 6 fetch-pipeline · 14
-corpus · 42 golden · 3 atlas** with the default VGA frontend, **771 lib · 12 binary · 2 atlas**
+Test counts at the last green run (2026-08-27): **878 lib · 13 binary · 6 fetch-pipeline · 14
+corpus · 48 golden · 3 atlas** with the default VGA frontend, **775 lib · 12 binary · 2 atlas**
 with `--no-default-features`; the WPT target adds 6 passing tests (5 without `vga`), plus two
 deliberately ignored entries (the child worker and the VGA reference generator).
 
 ### Open risk register
 
 Confirmed regressions become acceptance items in their owning milestone. These static candidates
-were not promoted to bugs without an executable product reproduction; closed rows live in
-`CHANGELOG.md`.
+were not promoted to bugs without an executable product reproduction; closed rows live in Git
+history.
 
 | Owner | Unconfirmed risk or test gap | Required disposition |
 |---|---|---|
@@ -107,7 +107,7 @@ before any item is marked `(done)`.
 
 ## Session handoff
 
-1. Read this status board, then `CHANGELOG.md` for recent context.
+1. Read this status board, then recent `git log` entries for historical context.
 2. Smoke M6 images in both frontends; return to the remaining M2 robustness work afterward.
 3. Run the gates before and after; never mark `(done)` with red gates.
 4. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
@@ -268,9 +268,9 @@ before any item is marked `(done)`.
 
 - **M5 gate:** if Boa's async (fetch promises / timers / TLA) cannot keep the UI responsive after
   the contract suite + fixture, switch to Deno Core (V8) behind the same `JsEngine` trait.
-- Taffy owns block, flex and grid box calculation; inline formatting uses textwrap fragments plus
-  Unicode cell/grapheme libraries because Taffy has no inline layout. Table layout is in-house;
-  floats wait for line-flow-around-float conformance.
+- Taffy owns block, flex, grid and physical float box calculation; inline formatting uses textwrap
+  fragments plus Unicode cell/grapheme libraries because Taffy has no inline layout. TextSurfer
+  shapes source-ordered inline content around float bands; table layout remains in-house.
 - **Incremental and multi-process rendering** (chawan's model) is deferred, not rejected: our DOM is
   single-thread-owned and the fetch pool delivers whole bodies. Revisit if large-page latency
   becomes a complaint.
@@ -280,7 +280,7 @@ before any item is marked `(done)`.
 ## Shipped milestones
 
 `(done)` here means code and gates are green; the human smoke on the manual list may still be
-outstanding. Detail on how each landed is in `CHANGELOG.md`.
+outstanding. Detail on how each item landed is in `git log`.
 
 ### M0 — Foundations (complete)
 Scaffold, `core` types, every module trait with capability-parameterized contract suites against
@@ -359,7 +359,7 @@ Sequenced before M2 because a terminal browser is judged on whether real pages a
   `rules`, `frame`, `valign`, `<center>`, `<font color>` enter the normal author origin at zero
   specificity; attribute-dependent UA defaults stay at UA origin. Inherited `text-align`, table-cell
   `vertical-align`, reusable auto margins, WHATWG integer/dimension/color parsing.
-  `table[align=center]` uses auto margins; left/right table floats stay in M6.
+  `table[align=center]` uses auto margins; left/right table alignment maps to physical floats.
 - **VGA-native bitmap typography** — inherited `font-size` from the supported grammar, absolute and
   relative keywords, CSS-wide keywords and UA heading sizes. VGA rasterizes CP437/Unifont at integer
   1×–4× cell scales (thresholds 32px, 24px, 18.72px, 16px); positive smaller text stays 1× and dim,
@@ -374,9 +374,9 @@ content; cascaded and laid out `position`, `inset` and the four longhands, block
 boxes and resolving containing blocks through a source-order-preserving flow-tree pass; constrained
 definite-width auto-layout tables with a one-cell column floor and grapheme-boundary clipping.
 
-**Deliberate limits:** floats/clear, `z-index`, `clip: rect()`, relative positioning of non-replaced
-inline boxes, positioned descendants inside the table-cell formatter, true sticky behavior and a
-fixed-position repaint layer remain unimplemented.
+**Deliberate limits:** `z-index`, `clip: rect()`, relative positioning of non-replaced inline boxes,
+positioned descendants inside the table-cell formatter, true sticky behavior and a fixed-position
+repaint layer remain unimplemented.
 
 ## Open milestones
 
@@ -648,7 +648,12 @@ manual mouse walkthrough remain pending.
         `CellDiffOption::Skip`; because `FrameComposer` replaces ratatui's diff with its own damage
         tracking, it owes that rule too and must never hand a skipped cell to the backend.
       - **Human Wikipedia image smoke in both VGA and terminal is the final acceptance gate.**
-- [ ] **Floats** — conformant line-flow-around-float formatting.
+- [x] **Floats** — Taffy 0.14.0 `float_layout` owns CSS 2 physical placement, clearance and
+      shrink-to-fit sizing; source-ordered text wraps through cell-rounded bands, including generated
+      clearfixes and legacy HTML `align`/`hspace`/`vspace`/`br[clear]`, with float-aware paint, hits
+      and links. *Limits:* horizontal LTR rectangular margin boxes only; no `shape-outside`, logical
+      directions/writing modes, `z-index`, deliberate negative-margin overlap, or positioned
+      descendants whose containing block crosses the atomic float boundary.
 - [ ] **Perf gate:** largest corpus page layout+paint < 200 ms debug. Includes memoizing
       `format_inline`, currently recomputed on every Taffy measure call, again for intrinsic width,
       and again when emitting fragments; it also decides whether `DisplayList` can stay dense by row,
@@ -721,15 +726,15 @@ disputed cases.
 ### Rendering regression atlas
 
 - [x] *(done)* `tests/fixtures/render_atlas.html` is one deterministic offline document split into
-      10 stable named panels — `ua-flow`, `inline-state`, `lists`, `tables`, `controls`,
-      `search-flex`, `box-layout`, `flex-grid`, `images`, `presentational` — covering the
-      rendering-special element families and the supported block, table, flex, grid, form-control
-      and replaced-image constellations. Image requests are answered synchronously from fixed RGBA
-      fixtures; no network, worker, clock, OS font or JS is involved. Every panel carries semantic
+      11 stable named panels — `ua-flow`, `inline-state`, `lists`, `tables`, `controls`,
+      `search-flex`, `box-layout`, `flex-grid`, `floats`, `images`, `presentational` — covering the
+      rendering-special element families and the supported block, table, flex, grid, float,
+      form-control and replaced-image constellations. Image requests are answered synchronously from
+      fixed RGBA fixtures; no network, worker, clock, OS font or JS is involved. Every panel carries semantic
       and geometry assertions, and a manifest rejects duplicate, missing, oversized or untested
       panels.
-      **Inventory:** 33 insta snapshots (30 per-panel styled-cell, 3 whole-document structure) at
-      40, 100 and 160 columns, plus 30 exact VGA PNG references under
+      **Inventory:** 36 insta snapshots (33 per-panel styled-cell, 3 whole-document structure) at
+      40, 100 and 160 columns, plus 33 exact VGA PNG references under
       `tests/reference/vga/render_atlas/`.
       **Update rules:** ordinary runs compare and never rewrite. Terminal references need insta's
       explicit update mode; VGA references need both the ignored generator and

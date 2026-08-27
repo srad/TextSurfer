@@ -5,7 +5,7 @@ mod strokes;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -196,9 +196,10 @@ pub struct BasicPainter;
 impl Painter for BasicPainter {
     fn paint(&self, box_tree: &BoxTree, palette: Palette) -> DisplayList {
         let mut rows = BTreeMap::new();
-        let mut fills: Vec<_> = box_tree.fills.iter().collect();
-        fills.sort_by_key(|fill| fill.depth);
-        for fill in fills {
+        let float_fills: HashSet<_> = box_tree.float_fills.iter().copied().collect();
+        let mut fills: Vec<_> = box_tree.fills.iter().enumerate().collect();
+        fills.sort_by_key(|(index, fill)| (float_fills.contains(index), fill.depth));
+        for (_, fill) in fills {
             fill_background(
                 &mut rows,
                 box_tree.width,
@@ -207,16 +208,26 @@ impl Painter for BasicPainter {
                 fill.color,
             );
         }
-        draw_strokes(
-            &mut rows,
-            box_tree.width,
-            box_tree.height,
-            &box_tree.strokes,
-        );
-        let mut fragments: Vec<_> = box_tree.fragments.iter().collect();
-        fragments.sort_by_key(|fragment| (fragment.depth, fragment.row, fragment.col));
+        let float_strokes: HashSet<_> = box_tree.float_strokes.iter().copied().collect();
+        let mut strokes: Vec<_> = box_tree.strokes.iter().copied().enumerate().collect();
+        strokes.sort_by_key(|(index, stroke)| (float_strokes.contains(index), stroke.depth));
+        let strokes = strokes
+            .into_iter()
+            .map(|(_, stroke)| stroke)
+            .collect::<Vec<_>>();
+        draw_strokes(&mut rows, box_tree.width, box_tree.height, &strokes);
+        let float_fragments: HashSet<_> = box_tree.float_fragments.iter().copied().collect();
+        let mut fragments: Vec<_> = box_tree.fragments.iter().enumerate().collect();
+        fragments.sort_by_key(|(index, fragment)| {
+            (
+                float_fragments.contains(index),
+                fragment.depth,
+                fragment.row,
+                fragment.col,
+            )
+        });
         let mut scaled_text = Vec::new();
-        for fragment in fragments {
+        for (_, fragment) in fragments {
             if fragment.row >= box_tree.height || fragment.col >= box_tree.width {
                 continue;
             }
@@ -316,9 +327,10 @@ impl Painter for BasicPainter {
             painted[row] = buffer.into_row(palette);
         }
         let mut hits = Vec::new();
-        let mut boxes: Vec<_> = box_tree.boxes.iter().collect();
-        boxes.sort_by_key(|layout_box| layout_box.depth);
-        for layout_box in boxes {
+        let float_boxes: HashSet<_> = box_tree.float_boxes.iter().copied().collect();
+        let mut boxes: Vec<_> = box_tree.boxes.iter().enumerate().collect();
+        boxes.sort_by_key(|(index, layout_box)| (float_boxes.contains(index), layout_box.depth));
+        for (_, layout_box) in boxes {
             hits.push(HitRegion {
                 node: layout_box.node,
                 rect: layout_box.border_rect,
@@ -327,11 +339,14 @@ impl Painter for BasicPainter {
                 paint_order: hits.len(),
             });
         }
+        let float_images: HashSet<_> = box_tree.float_images.iter().copied().collect();
         let mut content_hits = box_tree
             .fragments
             .iter()
-            .map(|fragment| {
+            .enumerate()
+            .map(|(index, fragment)| {
                 (
+                    float_fragments.contains(&index),
                     fragment.depth,
                     box_tree
                         .paint_order
@@ -345,8 +360,9 @@ impl Painter for BasicPainter {
                     HitKind::Text,
                 )
             })
-            .chain(images.iter().map(|image| {
+            .chain(images.iter().enumerate().map(|(index, image)| {
                 (
+                    float_images.contains(&index),
                     image.depth,
                     box_tree
                         .paint_order
@@ -361,8 +377,10 @@ impl Painter for BasicPainter {
                 )
             }))
             .collect::<Vec<_>>();
-        content_hits.sort_by_key(|(depth, order, row, col, _, _, _)| (*depth, *order, *row, *col));
-        for (depth, _, _, _, node, rect, kind) in content_hits {
+        content_hits.sort_by_key(|(float, depth, order, row, col, _, _, _)| {
+            (*float, *depth, *order, *row, *col)
+        });
+        for (_, depth, _, _, _, node, rect, kind) in content_hits {
             hits.push(HitRegion {
                 node,
                 rect,

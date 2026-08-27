@@ -5,10 +5,11 @@ use super::alignment::apply_alignment_declaration;
 use super::flex::apply_flex_declaration;
 use super::grid::apply_grid_declaration;
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, BoxSizing, CalcRange, CaptionSide, ComputedStyle, CssInset,
-    CssMargin, CssMaxSize, CssPadding, CssPercentage, CssSignedPercentage, CssSize, InsetEdges,
-    LegacyAlign, LengthAxis, ListStyleType, MarginEdges, Overflow, PaddingEdges, Position,
-    StyleStore, TableLayoutMode, TextAlign, VerticalAlign, Visibility, WhiteSpace,
+    BorderCollapse, BorderSpacing, BoxSizing, CalcRange, CaptionSide, Clear, ComputedStyle,
+    CssFloat, CssInset, CssMargin, CssMaxSize, CssPadding, CssPercentage, CssSignedPercentage,
+    CssSize, InsetEdges, LegacyAlign, LengthAxis, ListStyleType, MarginEdges, Overflow,
+    PaddingEdges, Position, StyleStore, TableLayoutMode, TextAlign, VerticalAlign, Visibility,
+    WhiteSpace,
 };
 use crate::css::Declaration;
 use crate::css::values::{
@@ -73,6 +74,20 @@ fn apply_declaration_raw(
         "display" => {
             if let Some(display) = parse_display(&declaration.value) {
                 style.display = display;
+            }
+        }
+        "float" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| CssFloat::parse(&value))
+            {
+                style.float = value;
+            }
+        }
+        "clear" => {
+            if let Some(value) =
+                parse_ident(&declaration.value).and_then(|value| Clear::parse(&value))
+            {
+                style.clear = value;
             }
         }
         "overflow" => {
@@ -482,6 +497,8 @@ fn is_supported_property(property: &str) -> bool {
     matches!(
         property,
         "display"
+            | "float"
+            | "clear"
             | "overflow"
             | "overflow-x"
             | "overflow-y"
@@ -607,6 +624,8 @@ fn apply_css_wide(
     };
     match property {
         "display" => style.display = source.display,
+        "float" => style.float = source.float,
+        "clear" => style.clear = source.clear,
         "overflow" => style.overflow = source.overflow,
         "overflow-x" => style.overflow.x = source.overflow.x,
         "overflow-y" => style.overflow.y = source.overflow.y,

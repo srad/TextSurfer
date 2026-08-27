@@ -11,8 +11,11 @@ use crate::layout::LayoutInput;
 use crate::layout::replaced::{ReplacedBox, replaced_box, replaced_content};
 use crate::layout::table::{TableFormatter, TableLimits, TableOutput};
 use crate::layout::text_flow::{
-    Atom, Piece, format_inline, line_metrics, normalize_segment_breaks,
+    Atom, Glyph, Piece, flatten_glyphs, format_glyphs, format_inline, line_metrics,
+    normalize_segment_breaks,
 };
+use taffy::BlockContext;
+use taffy::style::Clear as TaffyClear;
 
 use super::tables::append_table_output;
 use super::{BoxTree, TextFragment};
@@ -163,6 +166,86 @@ impl Atom for InlineAtom {
 pub(super) type InlinePiece = Piece<InlineAtomSource>;
 pub(super) type ResolvedInlinePiece = Piece<InlineAtom>;
 
+#[derive(Clone)]
+pub(super) struct ShapedInline {
+    pub(super) lines: Vec<ShapedLine>,
+    pub(super) height: usize,
+    pub(super) baseline: Option<usize>,
+}
+
+#[derive(Clone)]
+pub(super) struct ShapedLine {
+    glyphs: Vec<Glyph>,
+    col: usize,
+    row: usize,
+    width: usize,
+}
+
+pub(super) fn shape_inline_around_floats(
+    pieces: &[ResolvedInlinePiece],
+    width: usize,
+    block: &BlockContext<'_>,
+) -> ShapedInline {
+    let mut remaining = flatten_glyphs(pieces);
+    let mut lines = Vec::new();
+    let mut row = 0usize;
+    let mut attempts = 0usize;
+    while !remaining.is_empty() && attempts <= remaining.len().saturating_mul(2).saturating_add(8) {
+        attempts = attempts.saturating_add(1);
+        let slot = block.find_content_slot(row as f32, TaffyClear::None, None);
+        let left = slot.x.max(0.0).round() as usize;
+        let right = (slot.x + slot.width).max(0.0).round() as usize;
+        let available = right.saturating_sub(left).min(width.saturating_sub(left));
+        if available == 0 {
+            let next = (slot.y + slot.height).ceil().max(row as f32 + 1.0) as usize;
+            row = next;
+            continue;
+        }
+        row = row.max(slot.y.max(0.0).round() as usize);
+        let formatted = format_glyphs(&mut remaining, available);
+        let line = formatted.first().cloned().unwrap_or_default();
+        let consumed = line
+            .iter()
+            .map(|glyph| glyph.source)
+            .max()
+            .map(|source| source.saturating_add(1))
+            .or_else(|| {
+                remaining.iter().find_map(|glyph| {
+                    (glyph.atom.is_none()
+                        && glyph.text == "\n"
+                        && matches!(
+                            glyph.white_space,
+                            WhiteSpace::Pre
+                                | WhiteSpace::PreWrap
+                                | WhiteSpace::PreLine
+                                | WhiteSpace::BreakSpaces
+                        ))
+                    .then_some(glyph.source.saturating_add(1))
+                })
+            });
+        let Some(consumed) = consumed else {
+            break;
+        };
+        let (height, _) = line_metrics(&line, pieces);
+        lines.push(ShapedLine {
+            glyphs: line,
+            col: left,
+            row,
+            width: available,
+        });
+        row = row.saturating_add(height);
+        remaining.retain(|glyph| glyph.source >= consumed);
+    }
+    let baseline = lines
+        .first()
+        .map(|line| line_metrics(&line.glyphs, pieces).1);
+    ShapedInline {
+        lines,
+        height: row,
+        baseline,
+    }
+}
+
 #[derive(Clone, Copy)]
 struct InlineContext {
     white_space: WhiteSpace,
@@ -269,14 +352,25 @@ fn build_flow_tree_from(
                     pseudo_depth,
                 );
             } else {
-                append_pseudo(styles, node, PseudoElement::Before, own, &mut buffer);
+                append_flow_pseudo(
+                    &mut flow,
+                    &mut children,
+                    &mut buffer,
+                    styles,
+                    node,
+                    PseudoElement::Before,
+                    own,
+                );
             }
         }
         let mut nested_tasks = Vec::new();
         while let Some(event) = events.pop() {
             match event {
                 FlowEvent::Exit(node, style, context, has_edge) => {
-                    append_pseudo(
+                    append_flow_pseudo(
+                        &mut flow,
+                        &mut children,
+                        &mut buffer,
                         styles,
                         node,
                         PseudoElement::After,
@@ -287,7 +381,6 @@ fn build_flow_tree_from(
                             depth: context.depth + 1,
                             inline_parent: context.inline_parent,
                         },
-                        &mut buffer,
                     );
                     if has_edge {
                         append_edge(
@@ -378,14 +471,26 @@ fn build_flow_tree_from(
                                 style.display.is_inline_flow()
                             },
                         };
+                        if style.float.is_floating() && !buffer.is_empty() {
+                            retain_current_line_before_float(
+                                &mut flow,
+                                &mut children,
+                                &mut buffer,
+                                context.depth,
+                                context.computed,
+                                viewport_width,
+                            );
+                        }
                         if style.display.is_contents() {
                             events.push(FlowEvent::Exit(node, style, Box::new(context), false));
-                            append_pseudo(
+                            append_flow_pseudo(
+                                &mut flow,
+                                &mut children,
+                                &mut buffer,
                                 styles,
                                 node,
                                 PseudoElement::Before,
                                 element_context,
-                                &mut buffer,
                             );
                             push_children(
                                 &mut events,
@@ -395,13 +500,15 @@ fn build_flow_tree_from(
                                 element_context,
                             );
                         } else if style.display == Display::TABLE {
-                            flush_inline(
-                                &mut flow,
-                                &mut children,
-                                &mut buffer,
-                                context.depth,
-                                context.computed,
-                            );
+                            if !style.float.is_floating() {
+                                flush_inline(
+                                    &mut flow,
+                                    &mut children,
+                                    &mut buffer,
+                                    context.depth,
+                                    context.computed,
+                                );
+                            }
                             let child = flow.len();
                             flow.push(FlowBox {
                                 table: Some(node),
@@ -431,13 +538,15 @@ fn build_flow_tree_from(
                                 &mut buffer,
                             );
                         } else if style.display.is_block_container() {
-                            flush_inline(
-                                &mut flow,
-                                &mut children,
-                                &mut buffer,
-                                context.depth,
-                                context.computed,
-                            );
+                            if !style.float.is_floating() {
+                                flush_inline(
+                                    &mut flow,
+                                    &mut children,
+                                    &mut buffer,
+                                    context.depth,
+                                    context.computed,
+                                );
+                            }
                             let child = flow.len();
                             flow.push(FlowBox {
                                 rule: *ns == ElementNs::Html && name == "hr",
@@ -524,6 +633,31 @@ fn build_flow_tree_from(
                             } else {
                                 nested_tasks.push((child, Some(node)));
                             }
+                        } else if *ns == ElementNs::Html
+                            && name == "br"
+                            && !matches!(style.clear, crate::core::style::Clear::None)
+                        {
+                            flush_inline(
+                                &mut flow,
+                                &mut children,
+                                &mut buffer,
+                                context.depth,
+                                context.computed,
+                            );
+                            let child = flow.len();
+                            flow.push(FlowBox::new(
+                                None,
+                                ComputedStyle {
+                                    display: Display::BLOCK,
+                                    clear: style.clear,
+                                    ..ComputedStyle::anonymous_inheriting(
+                                        context.computed,
+                                        Display::BLOCK,
+                                    )
+                                },
+                                context.depth,
+                            ));
+                            children.push(child);
                         } else if *ns == ElementNs::Html && name == "br" {
                             buffer.push(InlinePiece {
                                 node,
@@ -588,12 +722,14 @@ fn build_flow_tree_from(
                                 &mut buffer,
                             );
                             events.push(FlowEvent::Exit(node, style, Box::new(context), true));
-                            append_pseudo(
+                            append_flow_pseudo(
+                                &mut flow,
+                                &mut children,
+                                &mut buffer,
                                 styles,
                                 node,
                                 PseudoElement::Before,
                                 element_context,
-                                &mut buffer,
                             );
                             push_children(
                                 &mut events,
@@ -635,15 +771,18 @@ fn build_flow_tree_from(
                     pseudo_depth,
                 );
             } else {
-                append_pseudo(
+                let pseudo_depth = flow[flow_index].depth;
+                append_flow_pseudo(
+                    &mut flow,
+                    &mut children,
+                    &mut buffer,
                     styles,
                     node,
                     PseudoElement::After,
                     InlineContext {
-                        depth: flow[flow_index].depth,
+                        depth: pseudo_depth,
                         ..inherited
                     },
-                    &mut buffer,
                 );
             }
         }
@@ -851,17 +990,85 @@ fn flush_inline(
     children.push(child);
 }
 
-fn append_pseudo(
+fn retain_current_line_before_float(
+    flow: &mut Vec<FlowBox>,
+    children: &mut Vec<usize>,
+    buffer: &mut Vec<InlinePiece>,
+    depth: usize,
+    parent_style: ComputedStyle,
+    viewport_width: usize,
+) {
+    let width = match parent_style.width {
+        crate::core::style::CssSize::Cells(width) => width.min(viewport_width),
+        _ => viewport_width,
+    }
+    .max(1);
+    let lines = format_inline(buffer, width);
+    if lines.len() <= 1 {
+        return;
+    }
+    let source = std::mem::take(buffer);
+    for line in &lines[..lines.len() - 1] {
+        let child = flow.len();
+        flow.push(FlowBox {
+            inline: pieces_from_glyphs(line, &source),
+            ..FlowBox::new(
+                None,
+                ComputedStyle::anonymous_inheriting(parent_style, Display::BLOCK),
+                depth,
+            )
+        });
+        children.push(child);
+    }
+    *buffer = pieces_from_glyphs(lines.last().expect("multiple lines"), &source);
+}
+
+fn pieces_from_glyphs(glyphs: &[Glyph], source: &[InlinePiece]) -> Vec<InlinePiece> {
+    let mut pieces: Vec<InlinePiece> = Vec::new();
+    for glyph in glyphs {
+        if let Some(index) = glyph.atom {
+            if let Some(piece) = source.get(index) {
+                pieces.push(piece.clone());
+            }
+            continue;
+        }
+        if let Some(last) = pieces.last_mut()
+            && last.atom.is_none()
+            && last.node == glyph.node
+            && last.white_space == glyph.white_space
+            && last.depth == glyph.depth
+            && last.style == glyph.style
+            && last.hidden == glyph.hidden
+        {
+            last.text.push_str(&glyph.text);
+        } else {
+            pieces.push(InlinePiece {
+                node: glyph.node,
+                text: glyph.text.clone(),
+                white_space: glyph.white_space,
+                depth: glyph.depth,
+                style: glyph.style,
+                hidden: glyph.hidden,
+                atom: None,
+            });
+        }
+    }
+    pieces
+}
+
+fn append_flow_pseudo(
+    flow: &mut Vec<FlowBox>,
+    children: &mut Vec<usize>,
+    buffer: &mut Vec<InlinePiece>,
     styles: &StyleTree,
     node: NodeId,
     which: PseudoElement,
     context: InlineContext,
-    buffer: &mut Vec<InlinePiece>,
 ) {
     let Some(pseudo) = styles.pseudo(node, which) else {
         return;
     };
-    buffer.push(InlinePiece {
+    let piece = InlinePiece {
         node,
         text: pseudo.text.clone(),
         white_space: pseudo.style.white_space,
@@ -869,7 +1076,26 @@ fn append_pseudo(
         style: pseudo.style.cell_style(),
         hidden: pseudo.style.visibility.is_hidden(),
         atom: None,
+    };
+    if pseudo.style.display.is_inline_flow()
+        && !pseudo.style.float.is_floating()
+        && matches!(pseudo.style.clear, crate::core::style::Clear::None)
+    {
+        buffer.push(piece);
+        return;
+    }
+    if !pseudo.style.float.is_floating() {
+        flush_inline(flow, children, buffer, context.depth, context.computed);
+    }
+    let child = flow.len();
+    flow.push(FlowBox {
+        inline: (!piece.text.is_empty())
+            .then_some(piece)
+            .into_iter()
+            .collect(),
+        ..FlowBox::new(None, pseudo.style, context.depth)
     });
+    children.push(child);
 }
 
 /// A flex or grid container's `::before` / `::after` is an item of its own, not inline content.
@@ -961,85 +1187,132 @@ pub(super) fn append_inline(
 ) {
     let mut current_row = row;
     for line in format_inline(pieces, width) {
-        let (line_height, baseline) = line_metrics(&line, pieces);
-        let line_width = line.iter().map(|glyph| glyph.width).sum::<usize>();
-        let remaining = width.saturating_sub(line_width);
-        let offset = match text_align {
-            TextAlign::Right => remaining,
-            TextAlign::Center => remaining.div_ceil(2),
-            TextAlign::Start | TextAlign::Left | TextAlign::Justify => 0,
-        };
-        let mut current_col = col.saturating_add(offset as isize);
-        for glyph in line {
-            if let Some(index) = glyph.atom {
-                if let Some(atom) = &pieces[index].atom {
-                    let row = current_row
-                        .saturating_add(baseline.saturating_sub(atom.baseline()) as isize);
-                    match atom {
-                        InlineAtom::Offset(offset) => {
-                            current_col = current_col.saturating_add(*offset);
-                        }
-                        InlineAtom::Table(table) => append_table_output(
-                            tree,
-                            table.as_ref().clone(),
-                            current_col,
-                            row,
-                            pieces[index].depth,
-                            merge_base.saturating_mul(1_000).saturating_add(index),
-                        ),
-                        InlineAtom::Layout(layout) => append_atomic_layout(
-                            tree,
-                            &layout.tree,
-                            current_col,
-                            row,
-                            pieces[index].depth,
-                            merge_base.saturating_mul(1_000).saturating_add(index),
-                        ),
+        let (line_height, _) = line_metrics(&line, pieces);
+        append_inline_line(
+            tree,
+            pieces,
+            line,
+            col,
+            current_row,
+            width,
+            text_align,
+            merge_base,
+        );
+        current_row = current_row.saturating_add(line_height as isize);
+    }
+}
+
+pub(super) fn append_shaped_inline(
+    tree: &mut BoxTree,
+    pieces: &[ResolvedInlinePiece],
+    shaped: &ShapedInline,
+    col: isize,
+    row: isize,
+    text_align: TextAlign,
+    merge_base: usize,
+) {
+    for line in &shaped.lines {
+        append_inline_line(
+            tree,
+            pieces,
+            line.glyphs.clone(),
+            col.saturating_add(line.col as isize),
+            row.saturating_add(line.row as isize),
+            line.width,
+            text_align,
+            merge_base,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_inline_line(
+    tree: &mut BoxTree,
+    pieces: &[ResolvedInlinePiece],
+    line: Vec<Glyph>,
+    col: isize,
+    row: isize,
+    width: usize,
+    text_align: TextAlign,
+    merge_base: usize,
+) {
+    let current_row = row;
+    let (_, baseline) = line_metrics(&line, pieces);
+    let line_width = line.iter().map(|glyph| glyph.width).sum::<usize>();
+    let remaining = width.saturating_sub(line_width);
+    let offset = match text_align {
+        TextAlign::Right => remaining,
+        TextAlign::Center => remaining.div_ceil(2),
+        TextAlign::Start | TextAlign::Left | TextAlign::Justify => 0,
+    };
+    let mut current_col = col.saturating_add(offset as isize);
+    for glyph in line {
+        if let Some(index) = glyph.atom {
+            if let Some(atom) = &pieces[index].atom {
+                let row =
+                    current_row.saturating_add(baseline.saturating_sub(atom.baseline()) as isize);
+                match atom {
+                    InlineAtom::Offset(offset) => {
+                        current_col = current_col.saturating_add(*offset);
                     }
+                    InlineAtom::Table(table) => append_table_output(
+                        tree,
+                        table.as_ref().clone(),
+                        current_col,
+                        row,
+                        pieces[index].depth,
+                        merge_base.saturating_mul(1_000).saturating_add(index),
+                    ),
+                    InlineAtom::Layout(layout) => append_atomic_layout(
+                        tree,
+                        &layout.tree,
+                        current_col,
+                        row,
+                        pieces[index].depth,
+                        merge_base.saturating_mul(1_000).saturating_add(index),
+                    ),
                 }
-                current_col = current_col.saturating_add(glyph.width as isize);
-                continue;
-            }
-            if glyph.style.scale == 0 {
-                continue;
-            }
-            if glyph.hidden {
-                current_col = current_col.saturating_add(glyph.width as isize);
-                continue;
-            }
-            let baseline = current_row.saturating_add(baseline as isize);
-            let glyph_row =
-                baseline.saturating_sub(usize::from(glyph.style.scale).saturating_sub(1) as isize);
-            let glyph_end = current_col.saturating_add(glyph.width as isize);
-            if current_col < 0 || glyph_row < 0 || glyph_end <= 0 {
-                current_col = glyph_end;
-                continue;
-            }
-            let emission_col = current_col as usize;
-            let glyph_row = glyph_row as usize;
-            if let Some(last) = tree.fragments.last_mut()
-                && last.node == glyph.node
-                && last.row == glyph_row
-                && last.depth == glyph.depth
-                && last.style == glyph.style
-                && last.col
-                    + UnicodeWidthStr::width(last.text.as_str()) * usize::from(last.style.scale)
-                    == emission_col
-            {
-                last.text.push_str(&glyph.text);
-            } else {
-                tree.fragments.push(TextFragment {
-                    node: glyph.node,
-                    col: emission_col,
-                    row: glyph_row,
-                    text: glyph.text,
-                    depth: glyph.depth,
-                    style: glyph.style,
-                });
             }
             current_col = current_col.saturating_add(glyph.width as isize);
+            continue;
         }
-        current_row = current_row.saturating_add(line_height as isize);
+        if glyph.style.scale == 0 {
+            continue;
+        }
+        if glyph.hidden {
+            current_col = current_col.saturating_add(glyph.width as isize);
+            continue;
+        }
+        let baseline = current_row.saturating_add(baseline as isize);
+        let glyph_row =
+            baseline.saturating_sub(usize::from(glyph.style.scale).saturating_sub(1) as isize);
+        let glyph_end = current_col.saturating_add(glyph.width as isize);
+        if current_col < 0 || glyph_row < 0 || glyph_end <= 0 {
+            current_col = glyph_end;
+            continue;
+        }
+        let emission_col = current_col as usize;
+        let glyph_row = glyph_row as usize;
+        if let Some(last) = tree.fragments.last_mut()
+            && last.node == glyph.node
+            && last.row == glyph_row
+            && last.depth == glyph.depth
+            && last.style == glyph.style
+            && last.col + UnicodeWidthStr::width(last.text.as_str()) * usize::from(last.style.scale)
+                == emission_col
+        {
+            last.text.push_str(&glyph.text);
+        } else {
+            tree.fragments.push(TextFragment {
+                node: glyph.node,
+                col: emission_col,
+                row: glyph_row,
+                text: glyph.text,
+                depth: glyph.depth,
+                style: glyph.style,
+            });
+        }
+        current_col = current_col.saturating_add(glyph.width as isize);
     }
 }
 

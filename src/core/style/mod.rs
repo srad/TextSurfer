@@ -3,6 +3,7 @@ mod box_model;
 mod color;
 mod display;
 mod flex;
+mod float;
 mod grid;
 mod length;
 mod list;
@@ -31,6 +32,7 @@ pub use display::{
     Display, DisplayBox, DisplayInside, DisplayInternal, DisplayMode, DisplayOutside, Visibility,
 };
 pub use flex::{AxisCalc, AxisCellLength, FlexBasis, FlexDirection, FlexStyle, FlexWrap};
+pub use float::{Clear, CssFloat};
 pub(crate) use grid::GridStore;
 pub use grid::{
     GridArea, GridAreas, GridAreasData, GridAutoFlow, GridIdent, GridLength, GridLines,
@@ -135,6 +137,8 @@ pub(crate) enum LegacyAlign {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ComputedStyle {
     pub display: Display,
+    pub float: CssFloat,
+    pub clear: Clear,
     pub white_space: WhiteSpace,
     pub cursor: Cursor,
     pub width: CssSize,

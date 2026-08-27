@@ -19,6 +19,17 @@ pub(in crate::css) fn presentational_hints(document: &Document, id: NodeId) -> V
     if let Some(align) = attr_value(attrs, "align") {
         map_align(name, align, &mut hints);
     }
+    map_float_spacing(name, attrs, &mut hints);
+    if name == "br"
+        && let Some(value) = attr_value(attrs, "clear")
+    {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "left" => push(&mut hints, "clear", "left"),
+            "right" => push(&mut hints, "clear", "right"),
+            "all" | "both" => push(&mut hints, "clear", "both"),
+            _ => {}
+        }
+    }
     if let Some(value) = attr_value(attrs, "bgcolor")
         && matches!(
             name.as_str(),
@@ -97,9 +108,19 @@ fn map_align(name: &str, value: &str, hints: &mut Vec<Declaration>) {
             "left" | "right" | "center" | "justify" => push(hints, "text-align", &value),
             _ => {}
         },
-        "table" if value == "center" => {
-            push(hints, "margin-left", "auto");
-            push(hints, "margin-right", "auto");
+        "table" => match value.as_str() {
+            "left" | "right" => push(hints, "float", &value),
+            "center" => {
+                push(hints, "margin-left", "auto");
+                push(hints, "margin-right", "auto");
+            }
+            _ => {}
+        },
+        "embed" | "iframe" | "img" | "object" if matches!(value.as_str(), "left" | "right") => {
+            push(hints, "float", &value);
+        }
+        "input" if matches!(value.as_str(), "left" | "right") => {
+            push(hints, "float", &value);
         }
         "caption" if value == "bottom" => push(hints, "caption-side", "bottom"),
         "hr" => match value.as_str() {
@@ -118,6 +139,25 @@ fn map_align(name: &str, value: &str, hints: &mut Vec<Declaration>) {
             _ => {}
         },
         _ => {}
+    }
+}
+
+fn map_float_spacing(name: &str, attrs: &[crate::core::dom::Attr], hints: &mut Vec<Declaration>) {
+    if !matches!(name, "embed" | "img" | "object" | "input") {
+        return;
+    }
+    if name == "input"
+        && !attr_value(attrs, "type").is_some_and(|value| value.eq_ignore_ascii_case("image"))
+    {
+        return;
+    }
+    if let Some(value) = attr_value(attrs, "hspace").and_then(non_negative_integer) {
+        push(hints, "margin-left", &format!("{value}px"));
+        push(hints, "margin-right", &format!("{value}px"));
+    }
+    if let Some(value) = attr_value(attrs, "vspace").and_then(non_negative_integer) {
+        push(hints, "margin-top", &format!("{value}px"));
+        push(hints, "margin-bottom", &format!("{value}px"));
     }
 }
 

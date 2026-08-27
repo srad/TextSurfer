@@ -28,6 +28,7 @@ pub(super) struct Piece<A> {
 
 #[derive(Clone, Debug)]
 pub(super) struct Glyph {
+    pub source: usize,
     pub node: NodeId,
     pub text: String,
     pub width: usize,
@@ -68,6 +69,7 @@ pub(super) fn flatten_glyphs<A: Atom>(pieces: &[Piece<A>]) -> Vec<Glyph> {
             source.clear();
             spans.clear();
             glyphs.push(Glyph {
+                source: 0,
                 node: piece.node,
                 text: String::new(),
                 width: atom.width(),
@@ -92,6 +94,9 @@ pub(super) fn flatten_glyphs<A: Atom>(pieces: &[Piece<A>]) -> Vec<Glyph> {
         ));
     }
     append_text_glyphs(&mut glyphs, &source, &spans);
+    for (source, glyph) in glyphs.iter_mut().enumerate() {
+        glyph.source = source;
+    }
     glyphs
 }
 
@@ -110,6 +115,7 @@ fn append_text_glyphs(
         }
         let (_, _, node, white_space, depth, style, hidden) = spans[span];
         Glyph {
+            source: 0,
             node,
             text: text.to_string(),
             width: UnicodeWidthStr::width(text).saturating_mul(usize::from(style.scale)),
@@ -124,18 +130,22 @@ fn append_text_glyphs(
 
 pub(super) fn format_inline<A: Atom>(pieces: &[Piece<A>], width: usize) -> Vec<Vec<Glyph>> {
     let mut glyphs = flatten_glyphs(pieces);
-    apply_scale_caps(&mut glyphs, width);
+    format_glyphs(&mut glyphs, width)
+}
+
+pub(super) fn format_glyphs(glyphs: &mut [Glyph], width: usize) -> Vec<Vec<Glyph>> {
+    apply_scale_caps(glyphs, width);
     let mode = glyphs.first().map(|glyph| glyph.white_space);
     if glyphs.iter().all(|glyph| Some(glyph.white_space) == mode) {
         match mode.unwrap_or_default() {
-            WhiteSpace::Normal => format_collapsed(&glyphs, width, true),
-            WhiteSpace::NoWrap => format_collapsed(&glyphs, width, false),
-            WhiteSpace::Pre => format_preserved(&glyphs, width, false),
-            WhiteSpace::PreWrap | WhiteSpace::BreakSpaces => format_preserved(&glyphs, width, true),
-            WhiteSpace::PreLine => format_pre_line(&glyphs, width),
+            WhiteSpace::Normal => format_collapsed(glyphs, width, true),
+            WhiteSpace::NoWrap => format_collapsed(glyphs, width, false),
+            WhiteSpace::Pre => format_preserved(glyphs, width, false),
+            WhiteSpace::PreWrap | WhiteSpace::BreakSpaces => format_preserved(glyphs, width, true),
+            WhiteSpace::PreLine => format_pre_line(glyphs, width),
         }
     } else {
-        format_mixed(&glyphs, width)
+        format_mixed(glyphs, width)
     }
 }
 

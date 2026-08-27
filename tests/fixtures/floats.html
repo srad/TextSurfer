@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      * { margin: 0; padding: 0 }
+      .left { float: left; width: 8ch; height: 2rem; background: #800000 }
+      .right { float: right; width: 8ch; height: 2rem; background: #008000 }
+      .group::after { content: ""; display: block; clear: both }
+    </style>
+  </head>
+  <body>
+    <div class="group"><a class="left" href="/left">LEFT</a><a class="right" href="/right">RIGHT</a>Text wraps through the middle and returns to the full row below both floats.</div>
+    <table align="left"><tr><td>TABLE</td></tr></table>Legacy table alignment also floats.<br clear="all">
+    Cleared by practical HTML.
+  </body>
+</html>

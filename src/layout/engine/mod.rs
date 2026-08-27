@@ -28,7 +28,8 @@ use crate::layout::text_flow::{
 
 use flow::{
     AtomicLayout, FlowBox, FlowTree, InlineAtom, InlineAtomSource, ResolvedInlinePiece,
-    append_inline, build_flow_subtree, build_flow_tree,
+    ShapedInline, append_inline, append_shaped_inline, build_flow_subtree, build_flow_tree,
+    shape_inline_around_floats,
 };
 use links::{assign_link_rects, collect_links};
 use tables::append_table_output;
@@ -45,6 +46,11 @@ pub struct BoxTree {
     pub strokes: Vec<BorderStroke>,
     pub links: Vec<LinkBox>,
     pub images: Vec<ImagePlacement>,
+    pub(crate) float_boxes: Vec<usize>,
+    pub(crate) float_fragments: Vec<usize>,
+    pub(crate) float_fills: Vec<usize>,
+    pub(crate) float_strokes: Vec<usize>,
+    pub(crate) float_images: Vec<usize>,
     pub paint_order: HashMap<NodeId, usize>,
     pub limits: LayoutLimits,
 }
@@ -301,7 +307,11 @@ fn try_layout_flow(
     let parent_direction = prepare_flow(&mut flow);
     let mut table_cache = HashMap::new();
     let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
-    let mut measure = |inputs, index: usize, style: &taffy::Style| {
+    let mut shaped_cache: HashMap<(usize, MeasureWidth), ShapedInline> = HashMap::new();
+    let mut measure = |inputs,
+                       index: usize,
+                       style: &taffy::Style,
+                       block: Option<&mut taffy::BlockContext<'_>>| {
         let mut baseline = None;
         let mut output = compute_leaf_layout(
             inputs,
@@ -338,6 +348,28 @@ fn try_layout_flow(
                     AvailableSpace::MinContent => min_content_width(pieces) as f32,
                     AvailableSpace::MaxContent => natural as f32,
                 });
+                if let Some(block) = block.filter(|block| block.has_floats()) {
+                    let shaped = shape_inline_around_floats(
+                        pieces,
+                        measured_width.max(0.0).round() as usize,
+                        block,
+                    );
+                    baseline = shaped.baseline.map(|baseline| {
+                        let inset = styles
+                            .resolve_padding(
+                                flow[index].style.padding.top,
+                                measured_width.max(0.0) as usize,
+                            )
+                            .saturating_add(flow[index].style.border.top.layout_width());
+                        baseline.saturating_add(inset) as f32
+                    });
+                    let height = shaped.height as f32;
+                    shaped_cache.insert(key, shaped);
+                    return TaffySize {
+                        width: known.width.unwrap_or(measured_width),
+                        height: known.height.unwrap_or(height),
+                    };
+                }
                 let lines = format_inline(pieces, measured_width.max(0.0) as usize);
                 baseline = lines.first().map(|line| {
                     let (_, baseline) = line_metrics(line, pieces);
@@ -425,8 +457,19 @@ fn try_layout_flow(
         0.0f32,
         ClipRegion::viewport(viewport_width),
         false,
+        false,
     )];
-    while let Some((index, parent_col, parent_row, inherited_clip, fixed_subtree)) = stack.pop() {
+    while let Some((
+        index,
+        parent_col,
+        parent_row,
+        inherited_clip,
+        fixed_subtree,
+        inherited_float,
+    )) = stack.pop()
+    {
+        let float_subtree = inherited_float || flow[index].style.float.is_floating();
+        let float_starts = OutputStarts::new(&tree);
         let layout = layouts[index];
         let absolute_col = parent_col + layout.location.x;
         let absolute_row = parent_row + layout.location.y;
@@ -603,20 +646,35 @@ fn try_layout_flow(
                 resolve_inline(input, viewport_width, &flow[index].inline, measure, nesting)
             });
             let starts = OutputStarts::new(&tree);
-            append_inline(
-                &mut tree,
-                inline_cache.get(&key).expect("resolved inline"),
-                absolute_col.round() as isize,
-                absolute_row.round() as isize,
-                layout_width,
-                flow[index].style.text_align,
-                index.saturating_add(1),
-            );
+            if let Some(shaped) = shaped_cache.get(&key) {
+                append_shaped_inline(
+                    &mut tree,
+                    inline_cache.get(&key).expect("resolved inline"),
+                    shaped,
+                    absolute_col.round() as isize,
+                    absolute_row.round() as isize,
+                    flow[index].style.text_align,
+                    index.saturating_add(1),
+                );
+            } else {
+                append_inline(
+                    &mut tree,
+                    inline_cache.get(&key).expect("resolved inline"),
+                    absolute_col.round() as isize,
+                    absolute_row.round() as isize,
+                    layout_width,
+                    flow[index].style.text_align,
+                    index.saturating_add(1),
+                );
+            }
             extract_inline_images(&mut tree, input);
             clip_since(&mut tree, starts, child_clip);
             if !fixed_subtree && let Some(rect) = child_clip.rect(rect) {
                 layout_height = layout_height.max(rect.row.saturating_add(rect.height));
             }
+        }
+        if float_subtree {
+            mark_float_since(&mut tree, float_starts);
         }
         if !child_clip.is_empty() || index == root_index {
             for child in flow[index].children.iter().rev() {
@@ -630,6 +688,7 @@ fn try_layout_flow(
                             flow[*child].style.position,
                             crate::core::style::Position::Fixed
                         ),
+                    float_subtree,
                 ));
             }
         }
@@ -639,6 +698,16 @@ fn try_layout_flow(
     tree.fragments
         .sort_by_key(|fragment| (fragment.row, fragment.col, fragment.depth));
     Some(tree)
+}
+
+fn mark_float_since(tree: &mut BoxTree, starts: OutputStarts) {
+    tree.float_boxes.extend(starts.boxes..tree.boxes.len());
+    tree.float_fragments
+        .extend(starts.fragments..tree.fragments.len());
+    tree.float_fills.extend(starts.fills..tree.fills.len());
+    tree.float_strokes
+        .extend(starts.strokes..tree.strokes.len());
+    tree.float_images.extend(starts.images..tree.images.len());
 }
 
 #[derive(Clone, Copy)]
