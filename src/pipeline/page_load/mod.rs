@@ -91,7 +91,45 @@ enum ImageState {
 struct ImageEntry {
     asset_id: ImageAssetId,
     revision: u64,
+    requested: Url,
     state: ImageState,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImageFailureSummary {
+    pub invalid_address: usize,
+    pub rate_limited: usize,
+    pub fetch_failure: usize,
+    pub unknown_format: usize,
+    pub unsupported_format: usize,
+    pub invalid_data: usize,
+    pub resource_limit: usize,
+    pub unavailable: usize,
+}
+
+impl ImageFailureSummary {
+    pub fn total(self) -> usize {
+        self.invalid_address
+            .saturating_add(self.rate_limited)
+            .saturating_add(self.fetch_failure)
+            .saturating_add(self.unknown_format)
+            .saturating_add(self.unsupported_format)
+            .saturating_add(self.invalid_data)
+            .saturating_add(self.resource_limit)
+            .saturating_add(self.unavailable)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ImageFailure {
+    InvalidAddress,
+    RateLimited,
+    FetchFailure,
+    UnknownFormat,
+    UnsupportedFormat,
+    InvalidData,
+    ResourceLimit,
+    Unavailable,
 }
 
 pub struct PageLoad {
@@ -121,7 +159,7 @@ pub struct PageLoad {
     failed_resources: usize,
     image_raw_bytes: usize,
     image_decoded_bytes: usize,
-    failed_images: usize,
+    image_failures: ImageFailureSummary,
     external_disabled: bool,
     cancel_requested: bool,
     media: MediaContext,
@@ -182,7 +220,7 @@ impl PageLoad {
             failed_resources: 0,
             image_raw_bytes: 0,
             image_decoded_bytes: 0,
-            failed_images: 0,
+            image_failures: ImageFailureSummary::default(),
             external_disabled: false,
             cancel_requested: false,
             media: MediaContext::screen()
@@ -315,7 +353,11 @@ impl PageLoad {
     }
 
     pub fn failed_images(&self) -> usize {
-        self.failed_images
+        self.image_failures.total()
+    }
+
+    pub fn image_failures(&self) -> ImageFailureSummary {
+        self.image_failures
     }
 
     pub fn decoded_image(&self, node: NodeId) -> Option<&DecodedImage> {

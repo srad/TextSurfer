@@ -99,6 +99,7 @@ impl App {
             return;
         }
         self.net_lost = true;
+        tracing::warn!("fetch worker pool disconnected");
         for tab in self.tabs.tabs_mut() {
             let was_pending =
                 tab.document_pending || tab.load.as_ref().is_some_and(|load| !load.is_settled());
@@ -118,6 +119,7 @@ impl App {
             return;
         }
         self.image_decode_lost = true;
+        tracing::warn!("image decode worker disconnected");
         let active = self.tabs.active_index();
         let mut visible_change = false;
         for (index, tab) in self.tabs.tabs_mut().iter_mut().enumerate() {
@@ -326,12 +328,13 @@ impl App {
         }
         let mut closed_resources = Vec::new();
         for command in commands {
-            if self
+            let resource_id = command.resource_id;
+            let submitted = self
                 .net
-                .submit(tab_id, generation, command.resource_id, command.url)
-                == crate::net::Submitted::Closed
-            {
-                closed_resources.push(command.resource_id);
+                .submit(tab_id, generation, resource_id, command.url);
+            tracing::debug!(tab_id, generation, resource_id = resource_id.0, result = ?submitted, "resource fetch submitted");
+            if submitted == crate::net::Submitted::Closed {
+                closed_resources.push(resource_id);
             }
         }
         for resource_id in closed_resources {
@@ -352,6 +355,7 @@ impl App {
                 generation,
                 request,
             });
+            tracing::debug!(tab_id, generation, asset_id = asset_id.0, revision, result = ?submitted, "image decode submitted");
             if matches!(submitted, ImageSubmitted::Refused | ImageSubmitted::Closed) {
                 let _ = self.deliver_image_decode(ImageDecodePayload {
                     tab_id,
@@ -390,12 +394,33 @@ impl App {
         for payload in payloads {
             let Some((index, tab)) = self.tabs.find_load_mut(payload.tab_id, payload.generation)
             else {
+                tracing::debug!(
+                    tab_id = payload.tab_id,
+                    generation = payload.generation,
+                    asset_id = payload.asset_id.0,
+                    revision = payload.revision,
+                    "stale image decode discarded"
+                );
                 continue;
             };
             let Some(load) = tab.load.as_mut() else {
+                tracing::debug!(
+                    tab_id = payload.tab_id,
+                    generation = payload.generation,
+                    asset_id = payload.asset_id.0,
+                    revision = payload.revision,
+                    "image decode discarded without active load"
+                );
                 continue;
             };
             if !load.deliver_image_decode(payload.asset_id, payload.revision, payload.result) {
+                tracing::debug!(
+                    tab_id = payload.tab_id,
+                    generation = payload.generation,
+                    asset_id = payload.asset_id.0,
+                    revision = payload.revision,
+                    "image decode rejected by page load"
+                );
                 continue;
             }
             accepted += 1;
@@ -454,10 +479,34 @@ pub(super) fn update_load_message(tab: &mut Tab) {
     if load.external_disabled() {
         notes.push("external CSS disabled".to_string());
     }
-    let failed_images = load.failed_images();
-    if failed_images > 0 {
-        let suffix = if failed_images == 1 { "" } else { "s" };
-        notes.push(format!("{failed_images} image{suffix} failed"));
+    let image_failures = load.image_failures();
+    if image_failures.rate_limited > 0 {
+        let suffix = if image_failures.rate_limited == 1 {
+            ""
+        } else {
+            "s"
+        };
+        notes.push(format!(
+            "{} image{suffix} rate-limited",
+            image_failures.rate_limited
+        ));
+    }
+    let format_failures = image_failures
+        .unknown_format
+        .saturating_add(image_failures.unsupported_format);
+    if format_failures > 0 {
+        let suffix = if format_failures == 1 { "" } else { "s" };
+        notes.push(format!(
+            "{format_failures} image format{suffix} unsupported or unrecognized"
+        ));
+    }
+    let other_failures = image_failures
+        .total()
+        .saturating_sub(image_failures.rate_limited)
+        .saturating_sub(format_failures);
+    if other_failures > 0 {
+        let suffix = if other_failures == 1 { "" } else { "s" };
+        notes.push(format!("{other_failures} image{suffix} failed"));
     }
     if let Some(note) = layout_note(tab) {
         notes.push(note.to_string());

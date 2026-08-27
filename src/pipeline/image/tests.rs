@@ -67,11 +67,21 @@ fn animated_gif_uses_its_first_frame() {
 }
 
 #[test]
-fn malformed_and_unsupported_bytes_are_rejected() {
-    assert!(matches!(
+fn unknown_unsupported_and_malformed_images_are_distinct() {
+    assert_eq!(
         RasterImageDecoder.decode(request(b"not an image".to_vec())),
+        Err(ImageDecodeError::UnknownFormat)
+    );
+    assert_eq!(
+        RasterImageDecoder.decode(request(b"BMunsupported bitmap".to_vec())),
+        Err(ImageDecodeError::UnsupportedFormat)
+    );
+    let mut malformed_png = encoded(ImageFormat::Png, 1, 1);
+    malformed_png.truncate(24);
+    assert_eq!(
+        RasterImageDecoder.decode(request(malformed_png)),
         Err(ImageDecodeError::Invalid)
-    ));
+    );
 }
 
 #[test]
@@ -112,7 +122,10 @@ fn worker_loop_preserves_routing_and_reports_decode_failures() {
     assert_eq!((payload.tab_id, payload.generation), (4, 9));
     assert_eq!(payload.asset_id, ImageAssetId(7));
     assert_eq!(payload.revision, 3);
-    assert!(matches!(payload.result, Err(ImageDecodeError::Invalid)));
+    assert!(matches!(
+        payload.result,
+        Err(ImageDecodeError::UnknownFormat)
+    ));
 }
 
 #[test]

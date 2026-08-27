@@ -1,6 +1,7 @@
 use encoding_rs::UTF_8;
 
 use super::*;
+use crate::core::image::ImageDecodeError;
 use crate::css::{DynamicState, FocusSource, FocusedNode};
 use crate::net::FetchError;
 use crate::ui::theme::PAPER_WHITE;
@@ -446,6 +447,53 @@ fn image_fetches_require_success_and_have_an_independent_byte_budget() {
     ));
     assert_eq!(too_large.failed_images(), 1);
     assert!(!too_large.external_disabled());
+}
+
+#[test]
+fn image_failures_preserve_rate_limit_and_decode_categories() {
+    let mut page_load = load("<img src='limited.png'><img src='unknown.svg'>");
+    let commands = page_load.take_commands();
+    let limited = commands
+        .iter()
+        .find(|command| command.url.path().ends_with("limited.png"))
+        .unwrap();
+    assert!(page_load.deliver(
+        limited.resource_id,
+        Ok(FetchResponse {
+            final_url: limited.url.clone(),
+            status: 429,
+            body: b"slow down".to_vec(),
+            content_type: Some("text/plain".to_string()),
+        })
+    ));
+    let unknown = commands
+        .iter()
+        .find(|command| command.url.path().ends_with("unknown.svg"))
+        .unwrap();
+    assert!(page_load.deliver(
+        unknown.resource_id,
+        Ok(FetchResponse {
+            final_url: unknown.url.clone(),
+            status: 200,
+            body: b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+            content_type: Some("image/svg+xml".to_string()),
+        })
+    ));
+    let decode = page_load.take_image_decode_commands().pop().unwrap();
+    assert!(page_load.deliver_image_decode(
+        decode.asset_id,
+        decode.revision,
+        Err(ImageDecodeError::UnknownFormat)
+    ));
+    assert_eq!(
+        page_load.image_failures(),
+        ImageFailureSummary {
+            rate_limited: 1,
+            unknown_format: 1,
+            ..ImageFailureSummary::default()
+        }
+    );
+    assert_eq!(page_load.failed_images(), 2);
 }
 
 #[test]

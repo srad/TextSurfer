@@ -1,5 +1,7 @@
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
@@ -17,11 +19,12 @@ use textsurfer::core::event::{
 };
 use textsurfer::core::frame::{EVENTS_PER_FRAME, FrameDamage, FrameScheduler};
 use textsurfer::core::geom::{Point, Size};
-use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch};
+use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch, default_user_agent};
 use textsurfer::pipeline::dump::dump_lines;
 use textsurfer::ui::frame::FrameComposer;
 use textsurfer::ui::mouse::WHEEL_ROWS;
 use textsurfer::ui::theme::DEFAULT;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -30,6 +33,8 @@ struct Cli {
     url: Option<String>,
     #[arg(long)]
     user_agent: Option<String>,
+    #[arg(long)]
+    log_file: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = JsMode::Auto)]
     js: JsMode,
     /// Render the page to stdout and exit instead of opening an interactive frontend.
@@ -92,6 +97,7 @@ fn frontend_choice(cli: &Cli) -> io::Result<FrontendChoice> {
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
+    init_logging(cli.log_file.as_deref())?;
     if cli.js == JsMode::On {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -101,7 +107,7 @@ fn main() -> io::Result<()> {
     let fetch: Arc<dyn textsurfer::net::Fetch> = Arc::new(SchemeFetch {
         http: Arc::new(match cli.user_agent.clone() {
             Some(user_agent) => UreqFetch::with_user_agent(user_agent),
-            None => UreqFetch::new(),
+            None => UreqFetch::with_user_agent(default_user_agent()),
         }),
         file: Arc::new(FileFetch),
     });
@@ -143,6 +149,37 @@ fn main() -> io::Result<()> {
         io::stdout().execute(DisableMouseCapture)?;
         outcome
     })
+}
+
+fn init_logging(path: Option<&Path>) -> io::Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let filter = match std::env::var("RUST_LOG") {
+        Ok(value) => parse_log_filter(&value)?,
+        Err(std::env::VarError::NotPresent) => parse_log_filter("textsurfer=debug")?,
+        Err(error) => return Err(io::Error::new(io::ErrorKind::InvalidInput, error)),
+    };
+    let file = open_log_file(path)?;
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(Mutex::new(file))
+        .with_ansi(false)
+        .try_init()
+        .map_err(|error| io::Error::other(format!("cannot initialize logging: {error}")))
+}
+
+fn parse_log_filter(value: &str) -> io::Result<EnvFilter> {
+    EnvFilter::try_new(value).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid RUST_LOG: {error}"),
+        )
+    })
+}
+
+fn open_log_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new().create(true).append(true).open(path)
 }
 
 /// Start the framebuffer frontend, or explain that it was not built in.

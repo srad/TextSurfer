@@ -105,14 +105,50 @@ fn both_frontends_report_the_same_press() {
 fn cli_parses_the_start_url_and_rejects_unknown_flags() {
     let cli = Cli::try_parse_from(["textsurfer", "--url", "https://example.com"]).unwrap();
     assert_eq!(cli.url.as_deref(), Some("https://example.com"));
+    assert!(cli.log_file.is_none());
     assert_eq!(cli.js, JsMode::Auto);
     let cli =
         Cli::try_parse_from(["textsurfer", "--user-agent", "test-agent", "--js", "off"]).unwrap();
     assert_eq!(cli.user_agent.as_deref(), Some("test-agent"));
     assert_eq!(cli.js, JsMode::Off);
+    let cli = Cli::try_parse_from(["textsurfer", "--log-file", "trace.log"]).unwrap();
+    assert_eq!(
+        cli.log_file.as_deref(),
+        Some(std::path::Path::new("trace.log"))
+    );
     let cli = Cli::try_parse_from(["textsurfer", "--dump", "--rows", "31"]).unwrap();
     assert_eq!(cli.rows, 31);
     assert!(Cli::try_parse_from(["textsurfer", "--unknown"]).is_err());
+}
+
+#[test]
+fn default_user_agent_is_versioned_identifiable_and_contactable() {
+    assert_eq!(
+        default_user_agent(),
+        concat!(
+            "TextSurfer/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/srad/TextSurfer)"
+        )
+    );
+}
+
+#[test]
+fn log_filter_errors_are_reported_before_startup() {
+    let error = parse_log_filter("[").unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert!(error.to_string().starts_with("invalid RUST_LOG:"));
+}
+
+#[test]
+fn log_files_append_instead_of_erasing_an_earlier_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("textsurfer.log");
+    std::fs::write(&path, b"earlier\n").unwrap();
+    let mut file = open_log_file(&path).unwrap();
+    writeln!(file, "later").unwrap();
+    drop(file);
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "earlier\nlater\n");
 }
 
 #[test]

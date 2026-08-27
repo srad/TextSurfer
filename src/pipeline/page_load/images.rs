@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use crate::core::dom::{ElementNs, Node};
 use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeError, ImageDecodeRequest};
+use crate::net::http::diagnostic_url;
 use crate::net::{FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId};
 
 use super::discovery::attr_value;
 use super::resource_url::normalized_url;
 use super::{
-    FetchCommand, ImageEntry, ImageState, MAX_IMAGE_DECODED_BYTES, MAX_IMAGE_FETCH_BYTES,
-    MAX_IMAGE_URLS, PageLoad,
+    FetchCommand, ImageEntry, ImageFailure, ImageState, MAX_IMAGE_DECODED_BYTES,
+    MAX_IMAGE_FETCH_BYTES, MAX_IMAGE_URLS, PageLoad,
 };
 
 impl PageLoad {
@@ -25,7 +26,7 @@ impl PageLoad {
     pub(super) fn discover_document_images(&mut self, effective_base: &url::Url) {
         let document = self.document.borrow();
         let mut discovered = Vec::new();
-        let mut failed = 0usize;
+        let mut invalid_addresses = 0usize;
         let mut stack: Vec<_> = document.roots().iter().rev().copied().collect();
         while let Some(id) = stack.pop() {
             let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
@@ -40,7 +41,7 @@ impl PageLoad {
                         url.set_fragment(None);
                         discovered.push((id, url));
                     }
-                    _ => failed = failed.saturating_add(1),
+                    _ => invalid_addresses = invalid_addresses.saturating_add(1),
                 }
             }
             if name != "template" {
@@ -48,7 +49,13 @@ impl PageLoad {
             }
         }
         drop(document);
-        self.failed_images = self.failed_images.saturating_add(failed);
+        self.image_failures.invalid_address = self
+            .image_failures
+            .invalid_address
+            .saturating_add(invalid_addresses);
+        if invalid_addresses > 0 {
+            tracing::warn!(count = invalid_addresses, "image addresses rejected");
+        }
         for (node, url) in discovered {
             let key = normalized_url(&url);
             if let Some(index) = self.image_url_cache.get(&key).copied() {
@@ -56,7 +63,9 @@ impl PageLoad {
                 continue;
             }
             if self.images.len() >= MAX_IMAGE_URLS {
-                self.failed_images = self.failed_images.saturating_add(1);
+                self.image_failures.resource_limit =
+                    self.image_failures.resource_limit.saturating_add(1);
+                tracing::warn!(url = %diagnostic_url(&url), "image URL limit reached");
                 continue;
             }
             let resource_id = ResourceId(self.next_resource_id);
@@ -67,6 +76,7 @@ impl PageLoad {
             self.images.push(ImageEntry {
                 asset_id,
                 revision: 1,
+                requested: url.clone(),
                 state: ImageState::Fetching,
             });
             self.image_fetch_index.insert(resource_id, index);
@@ -88,20 +98,51 @@ impl PageLoad {
         if !matches!(self.images[index].state, ImageState::Fetching) {
             return false;
         }
-        let Ok(response) = result else {
-            self.fail_image(index);
-            return true;
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => {
+                let reason = match error {
+                    FetchError::Network(_) => "network",
+                    FetchError::HttpStatus(_) => "http_status",
+                    FetchError::UnsupportedScheme(_) => "unsupported_scheme",
+                    FetchError::BodyTooLarge { .. } => "body_too_large",
+                };
+                tracing::warn!(
+                    url = %diagnostic_url(&self.images[index].requested),
+                    reason,
+                    "image fetch failed"
+                );
+                self.fail_image(index, ImageFailure::FetchFailure);
+                return true;
+            }
         };
         let bytes = response.body.len();
-        if !response.is_success()
-            || !self.scheme_allowed(&response.final_url)
-            || bytes > MAX_BODY_BYTES
+        if !response.is_success() {
+            let reason = if response.status == 429 {
+                ImageFailure::RateLimited
+            } else {
+                ImageFailure::FetchFailure
+            };
+            tracing::warn!(
+                url = %diagnostic_url(&response.final_url),
+                status = response.status,
+                content_type = ?response.content_type,
+                "image response rejected"
+            );
+            self.fail_image(index, reason);
+            return true;
+        }
+        if !self.scheme_allowed(&response.final_url) {
+            self.fail_image(index, ImageFailure::InvalidAddress);
+            return true;
+        }
+        if bytes > MAX_BODY_BYTES
             || self
                 .image_raw_bytes
                 .checked_add(bytes)
                 .is_none_or(|total| total > MAX_IMAGE_FETCH_BYTES)
         {
-            self.fail_image(index);
+            self.fail_image(index, ImageFailure::ResourceLimit);
             return true;
         }
         self.image_raw_bytes += bytes;
@@ -131,9 +172,19 @@ impl PageLoad {
         if revision != self.images[index].revision {
             return false;
         }
-        let Ok(image) = result else {
-            self.fail_image(index);
-            return true;
+        let image = match result {
+            Ok(image) => image,
+            Err(error) => {
+                let reason = match error {
+                    ImageDecodeError::UnknownFormat => ImageFailure::UnknownFormat,
+                    ImageDecodeError::UnsupportedFormat => ImageFailure::UnsupportedFormat,
+                    ImageDecodeError::Invalid => ImageFailure::InvalidData,
+                    ImageDecodeError::Limit => ImageFailure::ResourceLimit,
+                    ImageDecodeError::Unavailable => ImageFailure::Unavailable,
+                };
+                self.fail_image(index, reason);
+                return true;
+            }
         };
         if image.asset_id != asset_id || image.revision != revision {
             return false;
@@ -146,7 +197,7 @@ impl PageLoad {
                 .checked_add(bytes)
                 .is_none_or(|total| total > MAX_IMAGE_DECODED_BYTES)
         {
-            self.fail_image(index);
+            self.fail_image(index, ImageFailure::ResourceLimit);
             return true;
         }
         self.image_decoded_bytes += bytes;
@@ -159,7 +210,7 @@ impl PageLoad {
         let mut changed = false;
         for index in 0..self.images.len() {
             if matches!(self.images[index].state, ImageState::Decoding) {
-                self.fail_image(index);
+                self.fail_image(index, ImageFailure::Unavailable);
                 changed = true;
             }
         }
@@ -170,15 +221,33 @@ impl PageLoad {
         let mut changed = false;
         for index in 0..self.images.len() {
             if matches!(self.images[index].state, ImageState::Fetching) {
-                self.fail_image(index);
+                self.fail_image(index, ImageFailure::Unavailable);
                 changed = true;
             }
         }
         changed
     }
 
-    fn fail_image(&mut self, index: usize) {
+    fn fail_image(&mut self, index: usize, reason: ImageFailure) {
+        if matches!(self.images[index].state, ImageState::Failed) {
+            return;
+        }
         self.images[index].state = ImageState::Failed;
-        self.failed_images = self.failed_images.saturating_add(1);
+        let count = match reason {
+            ImageFailure::InvalidAddress => &mut self.image_failures.invalid_address,
+            ImageFailure::RateLimited => &mut self.image_failures.rate_limited,
+            ImageFailure::FetchFailure => &mut self.image_failures.fetch_failure,
+            ImageFailure::UnknownFormat => &mut self.image_failures.unknown_format,
+            ImageFailure::UnsupportedFormat => &mut self.image_failures.unsupported_format,
+            ImageFailure::InvalidData => &mut self.image_failures.invalid_data,
+            ImageFailure::ResourceLimit => &mut self.image_failures.resource_limit,
+            ImageFailure::Unavailable => &mut self.image_failures.unavailable,
+        };
+        *count = count.saturating_add(1);
+        tracing::warn!(
+            url = %diagnostic_url(&self.images[index].requested),
+            reason = ?reason,
+            "image failed"
+        );
     }
 }

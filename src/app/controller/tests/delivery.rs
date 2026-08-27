@@ -62,6 +62,65 @@ fn image_fetches_route_through_the_injected_decoder_by_tab_and_generation() {
     );
 }
 
+#[test]
+fn image_status_separates_rate_limits_from_unknown_formats() {
+    let net = Arc::new(FakeNet::default());
+    let images = Arc::new(FakeImages::default());
+    let mut app = App::with_net_metrics_and_images(
+        net.clone(),
+        crate::core::style::RenderMetrics::TERMINAL,
+        images.clone(),
+    );
+    app.submit_url("https://example.com/page");
+    let document = net.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/page").unwrap(),
+            status: 200,
+            body: b"<img src=limited.png><img src=vector.svg>".to_vec(),
+            content_type: Some("text/html".to_string()),
+        }),
+        ..document
+    }));
+    let pending = std::mem::take(&mut *net.pending.lock().unwrap());
+    for payload in pending {
+        let url = payload.result.as_ref().unwrap().final_url.clone();
+        if url.path().ends_with("limited.png") {
+            assert!(app.deliver_fetch(FetchPayload {
+                result: Ok(FetchResponse {
+                    final_url: url,
+                    status: 429,
+                    body: b"slow down".to_vec(),
+                    content_type: Some("text/plain".to_string()),
+                }),
+                ..payload
+            }));
+        } else {
+            assert!(app.deliver_fetch(FetchPayload {
+                result: Ok(FetchResponse {
+                    final_url: url,
+                    status: 200,
+                    body: b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+                    content_type: Some("image/svg+xml".to_string()),
+                }),
+                ..payload
+            }));
+        }
+    }
+    let job = images.submitted.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_image_decode(ImageDecodePayload {
+        tab_id: job.tab_id,
+        generation: job.generation,
+        asset_id: job.request.asset_id,
+        revision: job.request.revision,
+        result: Err(crate::core::image::ImageDecodeError::UnknownFormat),
+    }));
+    assert_eq!(
+        app.message(),
+        "loaded https://example.com/page (1 image rate-limited, 1 image format unsupported or unrecognized)"
+    );
+}
+
 fn scrolled_page_waiting_for_late_stylesheet() -> (App, FetchPayload) {
     let fake = Arc::new(FakeNet::default());
     let mut app = App::with_net(fake.clone());

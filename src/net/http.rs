@@ -5,7 +5,24 @@ use url::Url;
 
 use super::fetch::{Fetch, FetchError, FetchRequest, FetchResponse, MAX_BODY_BYTES};
 
-const USER_AGENT: &str = concat!("textsurfer/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!(
+    "TextSurfer/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/srad/TextSurfer)"
+);
+
+pub fn default_user_agent() -> &'static str {
+    USER_AGENT
+}
+
+pub(crate) fn diagnostic_url(url: &Url) -> String {
+    let mut redacted = url.clone();
+    let _ = redacted.set_username("");
+    let _ = redacted.set_password(None);
+    redacted.set_query(None);
+    redacted.set_fragment(None);
+    redacted.to_string()
+}
 
 pub struct UreqFetch {
     agent: Agent,
@@ -39,15 +56,20 @@ impl Default for UreqFetch {
 
 impl Fetch for UreqFetch {
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
+        tracing::debug!(url = %diagnostic_url(&request.url), "http request started");
         let response = match self.agent.get(request.url.as_str()).call() {
             Ok(response) => response,
             // Unreachable while `http_status_as_error` is off, and kept deliberately:
             // if that config is ever changed back, a status must not become a network
             // error string.
             Err(ureq::Error::StatusCode(status)) => {
+                tracing::warn!(url = %diagnostic_url(&request.url), status, "http request rejected");
                 return Err(FetchError::HttpStatus(status));
             }
-            Err(error) => return Err(FetchError::Network(error.to_string())),
+            Err(error) => {
+                tracing::warn!(url = %diagnostic_url(&request.url), reason = "transport", "http request failed");
+                return Err(FetchError::Network(error.to_string()));
+            }
         };
         let status = response.status().as_u16();
         let final_url = response
@@ -62,17 +84,38 @@ impl Fetch for UreqFetch {
             .get("content-type")
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         let body = response
             .into_body()
             .into_with_config()
             .limit(MAX_BODY_BYTES as u64)
             .read_to_vec()
-            .map_err(|error| match error {
-                ureq::Error::BodyExceedsLimit(_) => FetchError::BodyTooLarge {
-                    limit: MAX_BODY_BYTES,
-                },
-                error => FetchError::Network(format!("body read: {error}")),
+            .map_err(|error| {
+                match error {
+                    ureq::Error::BodyExceedsLimit(_) => {
+                        tracing::warn!(url = %diagnostic_url(&final_url), reason = "body_too_large", limit = MAX_BODY_BYTES, "http response body failed");
+                        FetchError::BodyTooLarge {
+                            limit: MAX_BODY_BYTES,
+                        }
+                    }
+                    error => {
+                        tracing::warn!(url = %diagnostic_url(&final_url), reason = "body_read", "http response body failed");
+                        FetchError::Network(format!("body read: {error}"))
+                    }
+                }
             })?;
+        tracing::debug!(
+            url = %diagnostic_url(&final_url),
+            status,
+            content_type = ?content_type,
+            bytes = body.len(),
+            retry_after = ?retry_after,
+            "http request completed"
+        );
         Ok(FetchResponse {
             final_url,
             status,
@@ -169,6 +212,16 @@ mod tests {
             Err(FetchError::BodyTooLarge {
                 limit: MAX_BODY_BYTES
             })
+        );
+    }
+
+    #[test]
+    fn diagnostic_urls_drop_secrets_but_keep_the_resource_path() {
+        let url = Url::parse("https://user:secret@example.com/private/image.png?token=secret#part")
+            .unwrap();
+        assert_eq!(
+            diagnostic_url(&url),
+            "https://example.com/private/image.png"
         );
     }
 }

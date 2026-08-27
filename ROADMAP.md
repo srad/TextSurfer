@@ -48,6 +48,8 @@ questions we were answering ad hoc.
 | [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer | Confirms the architecture; no dependency |
 | [image](https://crates.io/crates/image) 0.25.10 | Signature-based raster decoding with explicit format features and decoder limits | The shared decoder for PNG, JPEG, WebP and first-frame GIF, default features off, TextSurfer-owned budgets |
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
+| [resvg](https://crates.io/crates/resvg) 0.48.1 | Mature SVG parsing and bounded raster output without a browser DOM | Adopt next for static SVG images behind the existing decode worker and page budgets; no custom SVG parser |
+| [tracing](https://crates.io/crates/tracing) 0.1.44 + [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3.23 | Structured, filterable diagnostics with an established subscriber ecosystem | Opt-in append-only file diagnostics; no default terminal output and no response bodies, credentials, queries or fragments |
 | Every browser since Firefox 3 | `:visited` must never be observable to page styling | `:visited` parses and never matches |
 
 ## Status legend
@@ -75,15 +77,15 @@ signed off.
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
 | M5 — Boa | Boa 0.21.1 behind the trait; host bindings subset; job pump; test262 slice | (open) |
-| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (smoke pending) · floats ✅ · perf | (in progress) |
+| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (SVG + smoke pending) · floats ✅ · perf | (in progress) |
 
 Cross-cutting: test infrastructure (in progress — static WPT backfill, corpus error-count and
 astral attribute-order gaps) · gates (done, local only) · coverage floor (open — optional local,
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-27): **878 lib · 13 binary · 6 fetch-pipeline · 14
-corpus · 48 golden · 3 atlas** with the default VGA frontend, **775 lib · 12 binary · 2 atlas**
+Test counts at the last green run (2026-08-27): **888 lib · 16 binary · 6 fetch-pipeline · 14
+corpus · 48 golden · 3 atlas** with the default VGA frontend, **785 lib · 15 binary · 2 atlas**
 with `--no-default-features`; the WPT target adds 6 passing tests (5 without `vga`), plus two
 deliberately ignored entries (the child worker and the VGA reference generator).
 
@@ -109,11 +111,13 @@ before any item is marked `(done)`.
 ## Session handoff
 
 1. Read this status board, then recent `git log` entries for historical context.
-2. Smoke M6 images in both frontends; return to the remaining M2 robustness work afterward.
-3. Run the gates before and after; never mark `(done)` with red gates.
-4. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+2. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
+3. Resume the practical M2 path: unify the keymap, add keyboard link navigation, then basic form
+   editing and submission.
+4. Run the gates before and after; never mark `(done)` with red gates.
+5. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-5. Live repo: no commits without explicit user confirmation.
+6. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -202,6 +206,12 @@ before any item is marked `(done)`.
 - Boa as the first real JS engine (`(rejected)`: rquickjs — C toolchain / unsafe FFI).
 - `ureq` (blocking, rustls native roots) behind `Fetch`; four fixed workers over crossbeam channels,
   superseded jobs cancelled per tab, 10 MiB shared body limit. `mediatype` parses response metadata.
+  The default user agent is `TextSurfer/<version> (+https://github.com/srad/TextSurfer)`;
+  `--user-agent` remains an exact override. HTTP 429 is reported without automatic retries.
+- **Diagnostics are opt-in and file-only.** `--log-file` appends structured `tracing` events under
+  `RUST_LOG` (default `textsurfer=debug`) for fetch, queue, decode and stale-delivery decisions.
+  URLs retain origin and path but drop credentials, query and fragment; bodies and cookies are never
+  logged.
 - **Per-load pivot invariant:** any navigation ⇒ `generation++`, fresh `Document` + fresh
   `JsEngine`, scroll reset to top, stale/generation-tagged fetch results dropped.
 - JS host mutation funnel: all DOM changes through a single `MutateOp` enum ⇒ one invalidation path.
@@ -386,14 +396,18 @@ repaint layer remain unimplemented.
 Started from the robustness end rather than the keyboard end, because the failure paths were what
 the browser did worst. Render robustness, the non-2xx body, the load-status line, declarative
 refresh, the designed start page, page screenshots and linear-time DOM child construction are done;
-the keyboard and forms work resumes once images close.
+the keyboard and forms work resumes once SVG images close. Practical page operation takes priority:
+keymap unification, keyboard link navigation, then basic form editing and submission. Help, in-page
+search, history caching and other secondary polish follow that usable browsing path.
 
-- [ ] **Keymap unification** (extends the M0 keymap tests, same file): `Ctrl+L` (+ existing `a`)
+- [ ] **Keymap unification** *(next after SVG; prerequisite to keyboard links)* (extends the M0
+      keymap tests, same file): `Ctrl+L` (+ existing `a`)
       focuses the address bar so `/` is freed; `/` becomes in-page search; `Tab` in the address bar
       moves focus to content; new `FocusTabs` action (`F6`).
-- [ ] **`?` help overlay** rendered from the keymap definition as the single source of truth,
-      snapshot-tested.
-- [ ] **Keyboard link navigation** over the M1-B link list: Tab/Shift+Tab + Enter, focused link
+- [ ] **`?` help overlay** *(after forms)* rendered from the keymap definition as the single source
+      of truth, snapshot-tested.
+- [ ] **Keyboard link navigation** *(after keymap unification)* over the M1-B link list:
+      Tab/Shift+Tab + Enter, focused link
       highlighted, repaint only on target change (one invalidation path, shared with M3 hover),
       per-tab isolation; plus **link marks/hints** (lynx-style numbering) as the discoverable form.
 - [ ] **TabManager completion:** page titles from `document.title` with host/URL fallback; in-flight
@@ -414,7 +428,8 @@ the keyboard and forms work resumes once images close.
 - [ ] **Back/forward without refetching.** A small per-tab document cache keyed by history entry, so
       Back/Forward restore instead of re-issuing a request; the per-load pivot still applies to
       fresh navigations.
-- [ ] **Basic forms** *(in progress — controls render and match selectors; nothing is operable)*.
+- [ ] **Basic forms** *(after keyboard links; controls render and match selectors; nothing is
+      operable)*.
       Target: text/search/hidden/submit, textarea, select, checkbox, radio; GET and
       `application/x-www-form-urlencoded` POST via `url::form_urlencoded`; unsupported
       methods/encodings render a controlled error.
@@ -602,10 +617,10 @@ manual mouse walkthrough remain pending.
       inside auto-repeat, where Taffy's fixed-component contract cannot represent them.
       *Explicit limits:* `subgrid`, masonry, RTL/writing modes, Grid absolute positioning, aspect
       ratio, `z-index`.
-- [ ] **Images** *(in progress — automated work green; human VGA and terminal smoke pending)*. One
+- [ ] **Images** *(in progress — raster work green; SVG and human VGA/terminal smoke pending)*. One
       delivery across the shared pipeline and both frontends. Static HTML `<img src>` is the first
-      boundary: SVG, animation, `srcset`/`picture`, CSS images, `object-fit`, lazy loading, `data:`
-      URLs and cross-page caching remain deferred.
+      boundary. Static SVG is the final promoted format step; animation, `srcset`/`picture`, CSS
+      images, `object-fit`, lazy loading, `data:` URLs and cross-page caching remain deferred.
       - [x] **Shared loading and decoding.** `image` 0.25.10 pinned with default features off and
         only PNG, JPEG, WebP and GIF enabled (GIF and animated WebP expose the first frame only);
         `ratatui-image` 11.0.6 pinned as a terminal adapter with only `crossterm` enabled. `PageLoad`
@@ -614,7 +629,9 @@ manual mouse walkthrough remain pending.
         extend the stylesheet blocking window. An `ImageDecoder` contract returns immutable RGBA
         assets with stable IDs, intrinsic dimensions and revisions; signature and enabled decoder
         support decide the format, not an extension or MIME label. Deliveries in one tick coalesce
-        into one render.
+        into one render. Failures retain separate rate-limit, transport, address, unknown-format,
+        unsupported-format, corrupt-data, resource-limit and unavailable counts; the status line
+        calls out rate limiting and format support instead of collapsing every cause into one total.
         One decode worker is injected by the composition root; the terminal adapter owns one bounded
         protocol-preparation worker while VGA samples decoded pixels directly. Queues coalesce by
         work key, hold at most 128 distinct jobs, cancel queued work on navigation, tag results with
@@ -648,6 +665,12 @@ manual mouse walkthrough remain pending.
         A protocol carries its whole picture in one cell's escape and marks the rest
         `CellDiffOption::Skip`; because `FrameComposer` replaces ratatui's diff with its own damage
         tracking, it owes that rule too and must never hand a skipped cell to the backend.
+      - [ ] **Static SVG rasterization** *(next).* Use `resvg` 0.48.1 in the existing decode worker;
+        SVG parsing stays library-owned and returns the same immutable RGBA asset contract as raster
+        formats. Preserve raw-byte, axis, pixel, decoded-byte and per-page budgets; reject malformed
+        or oversized SVG without panic; never fetch external SVG resources or scan system fonts.
+        Focused fixtures cover a valid path-only SVG, malformed and over-budget inputs, external
+        references remaining inert, and the five representative Wikipedia assets.
       - **Human Wikipedia image smoke in both VGA and terminal is the final acceptance gate.**
 - [x] **Floats** — Taffy 0.14.0 `float_layout` owns CSS 2 physical placement, clearance and
       shrink-to-fit sizing; source-ordered text wraps through cell-rounded bands, including generated

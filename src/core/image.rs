@@ -55,6 +55,8 @@ impl ImageResources {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageDecodeError {
+    UnknownFormat,
+    UnsupportedFormat,
     Invalid,
     Limit,
     Unavailable,

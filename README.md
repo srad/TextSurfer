@@ -41,6 +41,9 @@ Ready                              https://example.com
 - HTTP(S) and `file://` loading through a fixed 4-worker pool (ureq, OS-native certificate roots)
   with timeouts, cancellation and a 10 MiB response limit. Subresources are same-scheme, so a remote
   page cannot read local files through a `<link>`
+- HTTP requests identify the released TextSurfer version and project URL by default; `--user-agent`
+  remains an exact override. Opt-in structured file diagnostics separate rate limits, transport
+  failures, unsupported formats and corrupt image data without writing to the terminal
 - Full HTML5 parsing via html5ever into an indextree-backed DOM (`<base href>`, quirks mode, foreign
   content, adoption agency, foster parenting, detached template fragments)
 - WHATWG encoding detection (BOM → header → `<meta charset>` prescan → UTF-8) and media-type routing:
@@ -134,6 +137,7 @@ $ cargo build --release
 $ cargo run --release                                  # VGA window and start page
 $ cargo run --release -- --terminal                    # terminal compatibility frontend
 $ cargo run -- --url https://example.com               # VGA window at a URL
+$ cargo run -- --log-file textsurfer.log --url https://example.com
 $ cargo run -- --user-agent TextSurferDev/1 --js off
 $ cargo run -- --dump --cols 60 --rows 24 --url https://example.com   # render to stdout
 $ cargo run --release -- --vga-scale 2                 # 2x pixels, for HiDPI
@@ -141,6 +145,11 @@ $ cargo run --release -- --vga-scale 2                 # 2x pixels, for HiDPI
 
 Type `/` to focus the address bar, enter a URL or search terms, press `Enter`. TextSurfer falls back
 to DuckDuckGo's lite search for anything that isn't a URL.
+
+Logging is disabled unless `--log-file` is supplied. The file is appended across runs and defaults
+to `textsurfer=debug`; set `RUST_LOG` to another tracing filter when needed. Diagnostic URLs omit
+credentials, query strings and fragments, but still contain hosts and paths, so inspect a log before
+sharing it.
 
 ## Key bindings
 
@@ -234,8 +243,9 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: the human image smoke in VGA and terminal, then keyboard link navigation, form editing and
-submission, in-page search, and the remaining M6 performance gate.
+Next up: static SVG images and the human image smoke in VGA and terminal, then keyboard link
+navigation and basic form editing/submission so real sites become practically operable. In-page
+search and the remaining M6 performance gate follow that path.
 
 ## Built on great libraries
 

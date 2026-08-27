@@ -260,7 +260,8 @@ impl ImageDecoder for RasterImageDecoder {
             .map_err(|_| ImageDecodeError::Invalid)?;
         match reader.format() {
             Some(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif) => {}
-            _ => return Err(ImageDecodeError::Invalid),
+            Some(_) => return Err(ImageDecodeError::UnsupportedFormat),
+            None => return Err(ImageDecodeError::UnknownFormat),
         }
         let mut limits = Limits::default();
         limits.max_image_width = Some(MAX_IMAGE_AXIS);
@@ -277,13 +278,21 @@ impl ImageDecoder for RasterImageDecoder {
         if u64::try_from(rgba.len()).map_or(true, |len| len > MAX_IMAGE_RGBA_BYTES) {
             return Err(ImageDecodeError::Limit);
         }
-        Ok(DecodedImage {
+        let image = DecodedImage {
             asset_id: request.asset_id,
             revision: request.revision,
             width,
             height,
             rgba: Arc::from(rgba),
-        })
+        };
+        tracing::debug!(
+            asset_id = image.asset_id.0,
+            revision = image.revision,
+            width = image.width,
+            height = image.height,
+            "image decoded"
+        );
+        Ok(image)
     }
 }
 

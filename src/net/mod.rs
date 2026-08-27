@@ -10,5 +10,5 @@ pub use fetch::{
     ResourceId, SchemeFetch, Submitted,
 };
 pub use file::FileFetch;
-pub use http::UreqFetch;
+pub use http::{UreqFetch, default_user_agent};
 pub use pool::FetchPool;
