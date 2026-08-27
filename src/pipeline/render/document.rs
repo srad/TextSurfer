@@ -1,4 +1,5 @@
 use crate::core::dom::{Document, SharedDocument};
+use crate::core::form::FormState;
 use crate::core::geom::Size;
 use crate::core::style::{Palette, RenderContext, RenderMetrics, StyleTree, TextRendering};
 use crate::css::{BasicCascade, Cascade, ColorScheme, MediaContext, StyleSheet};
@@ -72,12 +73,43 @@ pub fn render_document(
     palette: Palette,
     parse_errors: usize,
 ) -> RenderedPage {
+    render_document_with_images(
+        document,
+        sheets,
+        media,
+        palette,
+        parse_errors,
+        &crate::core::image::ImageResources::default(),
+    )
+}
+
+pub(crate) fn render_document_with_images(
+    document: SharedDocument,
+    sheets: &[StyleSheet],
+    media: MediaContext,
+    palette: Palette,
+    parse_errors: usize,
+    images: &crate::core::image::ImageResources,
+) -> RenderedPage {
     let css_warnings = sheets
         .iter()
         .map(|sheet| sheet.diagnostics.total())
         .sum::<usize>();
     let styles = BasicCascade.apply(sheets, &document.borrow(), media);
-    let painted = paint_document(&document.borrow(), &styles, media.viewport, palette);
+    let mut painted = BasicPainter.paint(
+        &TaffyLayoutEngine.layout_with_images(
+            &document.borrow(),
+            &styles,
+            media.viewport,
+            FormState::empty(),
+            images,
+            media.cell_metric,
+        ),
+        palette,
+    );
+    for (_, image) in images.iter() {
+        painted.image_assets.insert(image.asset_id, image.clone());
+    }
     RenderedPage {
         document,
         styles,

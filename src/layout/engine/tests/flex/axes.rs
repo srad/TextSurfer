@@ -297,6 +297,8 @@ fn taffy_alignment_mapping_preserves_safety_and_physical_fallbacks() {
                 document: &document,
                 styles: &styles,
                 forms: crate::core::form::FormState::empty(),
+                images: None,
+                cell_metric: crate::core::style::CellMetric::DEFAULT,
             },
             20,
         );

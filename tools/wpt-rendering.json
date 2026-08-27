@@ -19,6 +19,21 @@
       "link_hover": [139, 26, 26]
     }
   },
+  "vga_profile": {
+    "id": "vga-pixel-v1",
+    "columns": 100,
+    "rows": 38,
+    "metrics": "vga",
+    "appearance": "light",
+    "theme": "paper-white",
+    "cell": { "column_px": 8, "row_px": 16, "root_font_px": 16 },
+    "palette": {
+      "text": [16, 16, 16],
+      "background": [232, 228, 216],
+      "link": [0, 71, 171],
+      "link_hover": [139, 26, 26]
+    }
+  },
   "cases": [
     {
       "path": "css/css-ui/box-sizing-001.html",
@@ -237,6 +252,105 @@
       "capabilities": ["javascript", "testharness", "get-computed-style"],
       "references": [],
       "resources": []
+    },
+    {
+      "path": "css/css-sizing/box-sizing-replaced-001.xht",
+      "profile": "vga-pixel-v1",
+      "kind": "reftest",
+      "status": "xfail",
+      "reason": "min/max lengths are computed in whole cells, so a max-height of 85px becomes five 16px rows and the width derived from it is 80px where the reference's authored 75px is nine 8px columns",
+      "capabilities": ["static-html", "box-sizing", "replaced-intrinsic-sizing", "raster-images"],
+      "references": [
+        { "relation": "match", "path": "css/css-sizing/box-sizing-replaced-001-ref.xht" }
+      ],
+      "resources": [
+        "css/css-sizing/support/replaced-min-max.png",
+        "css/css-sizing/support/replaced-min-max-1.png",
+        "css/css-sizing/support/replaced-min-max-2.png",
+        "css/css-sizing/support/replaced-min-max-3.png",
+        "css/css-sizing/support/replaced-min-max-4.png",
+        "css/css-sizing/support/replaced-min-max-5.png",
+        "css/css-sizing/support/replaced-min-max-6.png",
+        "css/css-sizing/support/replaced-min-max-7.png",
+        "css/css-sizing/support/replaced-min-max-8.png",
+        "css/css-sizing/support/replaced-min-max-9.png",
+        "css/css-sizing/support/replaced-min-max-10.png",
+        "css/css-sizing/support/replaced-min-max-11.png",
+        "css/css-sizing/support/replaced-min-max-12.png",
+        "css/css-sizing/support/replaced-min-max-13.png",
+        "css/css-sizing/support/replaced-min-max-14.png",
+        "css/css-sizing/support/replaced-min-max-15.png",
+        "css/css-sizing/support/replaced-min-max-16.png",
+        "css/css-sizing/support/replaced-min-max-17.png",
+        "css/css-sizing/support/replaced-min-max-18.png",
+        "css/css-sizing/support/replaced-min-max-19.png"
+      ]
+    },
+    {
+      "path": "css/css-sizing/box-sizing-replaced-002.xht",
+      "profile": "vga-pixel-v1",
+      "kind": "reftest",
+      "status": "xfail",
+      "reason": "min/max lengths are computed in whole cells, so a max-height of 85px becomes five 16px rows and the width derived from it is 80px where the reference's authored 75px is nine 8px columns",
+      "capabilities": ["static-html", "box-sizing", "replaced-intrinsic-sizing", "raster-images"],
+      "references": [
+        { "relation": "match", "path": "css/css-sizing/box-sizing-replaced-002-ref.xht" }
+      ],
+      "resources": [
+        "css/css-sizing/support/replaced-min-max.png",
+        "css/css-sizing/support/replaced-min-max-1.png",
+        "css/css-sizing/support/replaced-min-max-2.png",
+        "css/css-sizing/support/replaced-min-max-3.png",
+        "css/css-sizing/support/replaced-min-max-4.png",
+        "css/css-sizing/support/replaced-min-max-5.png",
+        "css/css-sizing/support/replaced-min-max-6.png",
+        "css/css-sizing/support/replaced-min-max-7.png",
+        "css/css-sizing/support/replaced-min-max-8.png",
+        "css/css-sizing/support/replaced-min-max-9.png",
+        "css/css-sizing/support/replaced-min-max-10.png",
+        "css/css-sizing/support/replaced-min-max-11.png",
+        "css/css-sizing/support/replaced-min-max-12.png",
+        "css/css-sizing/support/replaced-min-max-13.png",
+        "css/css-sizing/support/replaced-min-max-14.png",
+        "css/css-sizing/support/replaced-min-max-15.png",
+        "css/css-sizing/support/replaced-min-max-16.png",
+        "css/css-sizing/support/replaced-min-max-17.png",
+        "css/css-sizing/support/replaced-min-max-18.png",
+        "css/css-sizing/support/replaced-min-max-19.png"
+      ]
+    },
+    {
+      "path": "css/css-sizing/box-sizing-replaced-003.xht",
+      "profile": "vga-pixel-v1",
+      "kind": "reftest",
+      "status": "xfail",
+      "reason": "min/max lengths are computed in whole cells, so a max-height of 85px becomes five 16px rows and the width derived from it is 80px where the reference's authored 75px is nine 8px columns",
+      "capabilities": ["static-html", "box-sizing", "replaced-intrinsic-sizing", "raster-images"],
+      "references": [
+        { "relation": "match", "path": "css/css-sizing/box-sizing-replaced-003-ref.xht" }
+      ],
+      "resources": [
+        "css/css-sizing/support/replaced-min-max.png",
+        "css/css-sizing/support/replaced-min-max-1.png",
+        "css/css-sizing/support/replaced-min-max-2.png",
+        "css/css-sizing/support/replaced-min-max-3.png",
+        "css/css-sizing/support/replaced-min-max-4.png",
+        "css/css-sizing/support/replaced-min-max-5.png",
+        "css/css-sizing/support/replaced-min-max-6.png",
+        "css/css-sizing/support/replaced-min-max-7.png",
+        "css/css-sizing/support/replaced-min-max-8.png",
+        "css/css-sizing/support/replaced-min-max-9.png",
+        "css/css-sizing/support/replaced-min-max-10.png",
+        "css/css-sizing/support/replaced-min-max-11.png",
+        "css/css-sizing/support/replaced-min-max-12.png",
+        "css/css-sizing/support/replaced-min-max-13.png",
+        "css/css-sizing/support/replaced-min-max-14.png",
+        "css/css-sizing/support/replaced-min-max-15.png",
+        "css/css-sizing/support/replaced-min-max-16.png",
+        "css/css-sizing/support/replaced-min-max-17.png",
+        "css/css-sizing/support/replaced-min-max-18.png",
+        "css/css-sizing/support/replaced-min-max-19.png"
+      ]
     },
     {
       "path": "css/css-sizing/textarea-large-padding-crash.html",

@@ -216,6 +216,7 @@ fn terminal_idle_and_quit_cycles_poll_step_and_draw_only_dirty_states() {
             steps += 1;
             Duration::from_millis(steps * 50)
         },
+        None,
         |_, _| {
             draws += 1;
             Ok(())
@@ -243,7 +244,7 @@ fn terminal_sustained_mouse_queue_is_one_coalesced_frame_transaction() {
     let mut events = ScriptedEvents::new(script);
     let mut app = App::new();
     let mut draws = 0;
-    run_with(&mut events, &mut app, Duration::default, |_, _| {
+    run_with(&mut events, &mut app, Duration::default, None, |_, _| {
         draws += 1;
         Ok(())
     })
@@ -264,7 +265,7 @@ fn terminal_duplicate_resize_queue_does_not_feed_back_into_draws() {
     let mut events = ScriptedEvents::new(script);
     let mut app = App::new();
     let mut draws = 0;
-    run_with(&mut events, &mut app, Duration::default, |_, _| {
+    run_with(&mut events, &mut app, Duration::default, None, |_, _| {
         draws += 1;
         Ok(())
     })
@@ -276,18 +277,18 @@ fn terminal_duplicate_resize_queue_does_not_feed_back_into_draws() {
 fn terminal_poll_read_and_draw_errors_exit_the_loop() {
     let mut poll = ScriptedEvents::new([ScriptItem::PollError]);
     let mut app = App::new();
-    assert!(run_with(&mut poll, &mut app, Duration::default, |_, _| Ok(())).is_err());
+    assert!(run_with(&mut poll, &mut app, Duration::default, None, |_, _| Ok(())).is_err());
 
     let mut read = ScriptedEvents::new([ScriptItem::ReadError]);
     let mut app = App::new();
-    assert!(run_with(&mut read, &mut app, Duration::default, |_, _| Ok(())).is_err());
+    assert!(run_with(&mut read, &mut app, Duration::default, None, |_, _| Ok(())).is_err());
 
     let mut draw = ScriptedEvents::new([ScriptItem::Idle]);
     let mut app = App::new();
     assert!(
-        run_with(&mut draw, &mut app, Duration::default, |_, _| Err(
+        run_with(&mut draw, &mut app, Duration::default, None, |_, _| Err(
             io::Error::other("draw failed")
-        ),)
+        ))
         .is_err()
     );
 }

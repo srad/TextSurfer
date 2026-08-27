@@ -19,6 +19,50 @@ fn plain_box(node: NodeId, rect: LayoutRect, depth: usize) -> LayoutBox {
 }
 
 #[test]
+fn image_and_scaled_text_overlays_follow_document_paint_order() {
+    let mut document = Document::new();
+    let image_node = document.insert_element(None, "img", ElementNs::Html, vec![]);
+    let text_node = document.insert_element(None, "span", ElementNs::Html, vec![]);
+    let rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 2,
+        height: 2,
+    };
+    let tree = BoxTree {
+        width: 2,
+        height: 2,
+        fragments: vec![TextFragment {
+            node: text_node,
+            col: 0,
+            row: 0,
+            text: "X".to_string(),
+            depth: 1,
+            style: CellStyle {
+                scale: 2,
+                ..Default::default()
+            },
+        }],
+        images: vec![crate::layout::ImagePlacement {
+            node: image_node,
+            asset_id: crate::core::image::ImageAssetId(1),
+            revision: 1,
+            rect,
+            clip: rect,
+            depth: 1,
+        }],
+        paint_order: HashMap::from([(image_node, 0), (text_node, 1)]),
+        ..Default::default()
+    };
+    let painted = painted(&tree);
+    assert_eq!(
+        painted.overlays,
+        vec![PaintOverlay::Image(0), PaintOverlay::ScaledText(0)]
+    );
+    assert_eq!(painted.hit_test(0, 0), Some(text_node));
+}
+
+#[test]
 fn paints_wide_graphemes_without_exceeding_the_cell_width() {
     let mut document = Document::new();
     let node = document.insert_element(None, "p", ElementNs::Html, vec![]);

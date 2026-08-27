@@ -201,6 +201,8 @@ fn build_flow_tree_from(
         document,
         styles,
         forms,
+        images,
+        cell_metric,
     } = input;
     let mut flow = vec![FlowBox::new(
         None,
@@ -453,8 +455,14 @@ fn build_flow_tree_from(
                                 replaced: replaced_box(
                                     document,
                                     node,
-                                    forms,
                                     style.border.is_visible(),
+                                    crate::layout::replaced::ReplacedInput {
+                                        forms,
+                                        image: images.and_then(|images| images.get(node)),
+                                        style,
+                                        metric: cell_metric,
+                                        width_basis: Some(viewport_width),
+                                    },
                                 )
                                 .filter(|replaced| !replaced.wraps)
                                 .map(Rc::new),
@@ -468,7 +476,17 @@ fn build_flow_tree_from(
                             // wraps inside the box like any other. So it goes in an anonymous
                             // child, which is the one shape allowed to carry `inline`, rather
                             // than being generated to the box's width and clipped.
-                            if let Some(replaced) = replaced_content(document, node, forms) {
+                            if let Some(replaced) = replaced_content(
+                                document,
+                                node,
+                                crate::layout::replaced::ReplacedInput {
+                                    forms,
+                                    image: images.and_then(|images| images.get(node)),
+                                    style,
+                                    metric: cell_metric,
+                                    width_basis: Some(viewport_width),
+                                },
+                            ) {
                                 let anonymous = flow.len();
                                 flow.push(FlowBox {
                                     inline: vec![InlinePiece {
@@ -516,7 +534,17 @@ fn build_flow_tree_from(
                                 hidden: context.computed.visibility.is_hidden(),
                                 atom: None,
                             });
-                        } else if let Some(replaced) = replaced_content(document, node, forms) {
+                        } else if let Some(replaced) = replaced_content(
+                            document,
+                            node,
+                            crate::layout::replaced::ReplacedInput {
+                                forms,
+                                image: images.and_then(|images| images.get(node)),
+                                style,
+                                metric: cell_metric,
+                                width_basis: Some(viewport_width),
+                            },
+                        ) {
                             // Inline-level replaced content: an `<img>`, or a control the author
                             // left at its UA `display: inline`. It renders at its intrinsic size,
                             // because an inline box has no border or padding to fill. This arm has
@@ -1071,5 +1099,21 @@ fn append_atomic_layout(
         };
         fragment.depth = fragment.depth.saturating_add(depth);
         tree.fragments.push(fragment);
+    }
+    for image in &nested.images {
+        let Some(rect) = crate::layout::clip::ClipRegion::translate_rect(image.rect, col, row)
+        else {
+            continue;
+        };
+        let Some(clip) = crate::layout::clip::ClipRegion::translate_rect(image.clip, col, row)
+        else {
+            continue;
+        };
+        tree.images.push(crate::layout::ImagePlacement {
+            rect,
+            clip,
+            depth: image.depth.saturating_add(depth),
+            ..*image
+        });
     }
 }

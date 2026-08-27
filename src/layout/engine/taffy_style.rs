@@ -165,7 +165,12 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             // Our metric quantises the border, not CSS; honouring the number would be faithful to
             // it and not to the intent. Taffy resolves min over max (`maybe_clamp` is
             // `base.min(max).max(min)`), which is what CSS requires, so a min is all it takes.
-            height: match intrinsic.map(|size| size.1) {
+            height: match flow
+                .replaced
+                .as_ref()
+                .filter(|replaced| replaced.control)
+                .and(intrinsic.map(|size| size.1))
+            {
                 Some(rows) => {
                     // A percentage or `calc()` author minimum cannot be compared here, so the
                     // intrinsic wins outright in that case; only a definite one competes.

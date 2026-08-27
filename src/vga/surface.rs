@@ -14,7 +14,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::core::geom::Size;
 use crate::core::style::{Palette, Rgb};
 use crate::layout::LayoutRect;
-use crate::paint::{ScaledTextRun, resolve_cell_style};
+use crate::paint::{DisplayList, PaintOverlay, PaintedImage, ScaledTextRun, resolve_cell_style};
 use crate::ui::theme::rgb_of;
 
 use super::font::{CELL_H, CELL_W, GlyphWidth, glyph};
@@ -508,6 +508,153 @@ impl Surface {
         if let Some((col, row)) = self.cursor {
             self.paint_cell(col, row);
         }
+    }
+
+    pub fn draw_overlays(
+        &mut self,
+        painted: &DisplayList,
+        origin: (u16, u16),
+        scroll: usize,
+        clip: LayoutRect,
+        occlusions: &[LayoutRect],
+        palette: Palette,
+    ) {
+        for overlay in &painted.overlays {
+            match *overlay {
+                PaintOverlay::ScaledText(index) => {
+                    if let Some(run) = painted.scaled_text.get(index) {
+                        self.draw_scaled_text(
+                            std::slice::from_ref(run),
+                            origin,
+                            scroll,
+                            clip,
+                            occlusions,
+                            palette,
+                        );
+                    }
+                }
+                PaintOverlay::Image(index) => {
+                    let Some(placement) = painted.images.get(index) else {
+                        continue;
+                    };
+                    let Some(image) = painted.image_assets.get(&placement.asset_id) else {
+                        continue;
+                    };
+                    if image.revision == placement.revision {
+                        self.draw_image(placement, image, origin, scroll, clip, occlusions);
+                    }
+                }
+            }
+        }
+        if let Some((col, row)) = self.cursor {
+            self.paint_cell(col, row);
+        }
+    }
+
+    fn draw_image(
+        &mut self,
+        placement: &PaintedImage,
+        image: &crate::core::image::DecodedImage,
+        origin: (u16, u16),
+        scroll: usize,
+        content_clip: LayoutRect,
+        occlusions: &[LayoutRect],
+    ) {
+        if placement.rect.width == 0 || placement.rect.height == 0 {
+            return;
+        }
+        let screen_left = usize::from(origin.0).saturating_add(placement.rect.col);
+        let screen_top =
+            usize::from(origin.1) as isize + placement.rect.row as isize - scroll as isize;
+        let clipped_left = usize::from(origin.0).saturating_add(placement.clip.col);
+        let clipped_top =
+            usize::from(origin.1) as isize + placement.clip.row as isize - scroll as isize;
+        let left = screen_left.max(clipped_left).max(content_clip.col);
+        let top = screen_top.max(clipped_top).max(content_clip.row as isize);
+        let right = screen_left
+            .saturating_add(placement.rect.width)
+            .min(clipped_left.saturating_add(placement.clip.width))
+            .min(content_clip.col.saturating_add(content_clip.width));
+        let bottom = screen_top
+            .saturating_add(placement.rect.height as isize)
+            .min(clipped_top.saturating_add(placement.clip.height as isize))
+            .min(content_clip.row.saturating_add(content_clip.height) as isize);
+        if left >= right || top >= bottom || top < 0 {
+            return;
+        }
+        let cell_w = CELL_W.saturating_mul(self.scale);
+        let cell_h = CELL_H.saturating_mul(self.scale);
+        let destination_width = placement.rect.width.saturating_mul(cell_w).max(1);
+        let destination_height = placement.rect.height.saturating_mul(cell_h).max(1);
+        let surface_width = self.pixel_size().0;
+        for cell_row in top as usize..bottom as usize {
+            for cell_col in left..right {
+                let cell_rect = LayoutRect {
+                    col: cell_col,
+                    row: cell_row,
+                    width: 1,
+                    height: 1,
+                };
+                if occlusions
+                    .iter()
+                    .any(|occlusion| intersects(*occlusion, cell_rect))
+                {
+                    continue;
+                }
+                if let (Ok(col), Ok(row)) = (u16::try_from(cell_col), u16::try_from(cell_row)) {
+                    self.overlay_cells.push((col, row));
+                }
+                let local_cell_x = cell_col.saturating_sub(screen_left);
+                let local_cell_y = (cell_row as isize - screen_top) as usize;
+                for pixel_y in 0..cell_h {
+                    let destination_y = local_cell_y.saturating_mul(cell_h).saturating_add(pixel_y);
+                    let source_y = destination_y
+                        .saturating_mul(image.height as usize)
+                        .checked_div(destination_height)
+                        .unwrap_or(0)
+                        .min(image.height.saturating_sub(1) as usize);
+                    let output_y = cell_row.saturating_mul(cell_h).saturating_add(pixel_y);
+                    for pixel_x in 0..cell_w {
+                        let destination_x =
+                            local_cell_x.saturating_mul(cell_w).saturating_add(pixel_x);
+                        let source_x = destination_x
+                            .saturating_mul(image.width as usize)
+                            .checked_div(destination_width)
+                            .unwrap_or(0)
+                            .min(image.width.saturating_sub(1) as usize);
+                        let source = source_y
+                            .saturating_mul(image.width as usize)
+                            .saturating_add(source_x)
+                            .saturating_mul(4);
+                        let output_x = cell_col.saturating_mul(cell_w).saturating_add(pixel_x);
+                        let output = output_y
+                            .saturating_mul(surface_width)
+                            .saturating_add(output_x);
+                        let (Some(pixel), Some(target)) = (
+                            image.rgba.get(source..source.saturating_add(4)),
+                            self.pixels.get_mut(output),
+                        ) else {
+                            continue;
+                        };
+                        let alpha = u32::from(pixel[3]);
+                        let old = *target;
+                        let blend = |source: u8, shift: u32| {
+                            let destination = (old >> shift) & 0xff;
+                            (u32::from(source) * alpha + destination * (255 - alpha) + 127) / 255
+                        };
+                        *target = (blend(pixel[0], 16) << 16)
+                            | (blend(pixel[1], 8) << 8)
+                            | blend(pixel[2], 0);
+                    }
+                }
+            }
+        }
+        self.mark_damage(
+            left.saturating_mul(cell_w),
+            (top as usize).saturating_mul(cell_h),
+            right.saturating_sub(left).saturating_mul(cell_w),
+            (bottom - top) as usize * cell_h,
+        );
     }
 
     /// Blit one magnified glyph at a signed pixel origin, clipped to `clip`.

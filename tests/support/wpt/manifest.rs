@@ -16,6 +16,7 @@ pub struct Manifest {
     pub schema: u8,
     pub upstream: Upstream,
     pub profile: Profile,
+    pub vga_profile: Profile,
     pub cases: Vec<Case>,
 }
 
@@ -60,12 +61,23 @@ pub struct PaletteProfile {
 #[serde(deny_unknown_fields)]
 pub struct Case {
     pub path: String,
+    #[serde(default)]
+    pub profile: OracleProfile,
     pub kind: CaseKind,
     pub status: ExpectedStatus,
     pub reason: Option<String>,
     pub capabilities: Vec<String>,
     pub references: Vec<Reference>,
     pub resources: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+pub enum OracleProfile {
+    #[default]
+    #[serde(rename = "terminal-cell-v1")]
+    TerminalCellV1,
+    #[serde(rename = "vga-pixel-v1")]
+    VgaPixelV1,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -153,6 +165,22 @@ impl Manifest {
             || self.profile.palette.link_hover != [139, 26, 26]
         {
             return Err("terminal-cell-v1 profile drifted".to_string());
+        }
+        if self.vga_profile.id != "vga-pixel-v1"
+            || self.vga_profile.columns != 100
+            || self.vga_profile.rows != 38
+            || self.vga_profile.metrics != "vga"
+            || self.vga_profile.appearance != "light"
+            || self.vga_profile.theme != "paper-white"
+            || self.vga_profile.cell.column_px != 8
+            || self.vga_profile.cell.row_px != 16
+            || self.vga_profile.cell.root_font_px != 16
+            || self.vga_profile.palette.text != [16, 16, 16]
+            || self.vga_profile.palette.background != [232, 228, 216]
+            || self.vga_profile.palette.link != [0, 71, 171]
+            || self.vga_profile.palette.link_hover != [139, 26, 26]
+        {
+            return Err("vga-pixel-v1 profile drifted".to_string());
         }
         let mut paths = HashSet::new();
         for case in &self.cases {
@@ -258,11 +286,11 @@ impl Manifest {
         Ok(())
     }
 
-    pub fn runnable_cases(&self) -> Vec<&Case> {
+    pub fn runnable_cases(&self, profile: OracleProfile) -> Vec<&Case> {
         let mut cases: Vec<_> = self
             .cases
             .iter()
-            .filter(|case| case.status != ExpectedStatus::Skip)
+            .filter(|case| case.status != ExpectedStatus::Skip && case.profile == profile)
             .collect();
         cases.sort_by(|left, right| left.path.cmp(&right.path));
         cases
@@ -274,7 +302,11 @@ impl Manifest {
 
     pub fn vendored_files(&self) -> BTreeSet<String> {
         let mut files = BTreeSet::from(["LICENSE.md".to_string()]);
-        for case in self.runnable_cases() {
+        for case in self
+            .cases
+            .iter()
+            .filter(|case| case.status != ExpectedStatus::Skip)
+        {
             files.insert(case.path.clone());
             files.extend(
                 case.references

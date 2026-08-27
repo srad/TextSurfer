@@ -319,6 +319,40 @@ fn a_bordered_control_keeps_a_content_row_when_max_height_would_crush_it() {
 }
 
 #[test]
+fn wikipedia_flex_search_keeps_the_field_prompt_and_button_label() {
+    let source = "<form style='display:flex;border:1px solid;width:70ch'>
+        <div style='flex-grow:1;margin:-1px'>
+        <input type=search placeholder='Search Wikipedia'
+        style='display:block;box-sizing:border-box;min-height:32px;max-height:2rem;
+        width:100%;margin:0;border:1px solid;padding:4px 8px;overflow:hidden'></div>
+        <button style='min-height:32px;margin:-1px;border:1px solid;padding:4px 12px;
+        overflow:hidden'>Search</button></form>";
+    let tree = laid_out(source, 160);
+    let prompt = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.text.contains("Search Wikipedia"))
+        .expect("the search field keeps a content row for its prompt");
+    let button = tree
+        .fragments
+        .iter()
+        .find(|fragment| fragment.text.trim() == "Search")
+        .unwrap_or_else(|| {
+            panic!(
+                "the search button keeps a content row for its label: {:?}",
+                tree.fragments
+                    .iter()
+                    .map(|fragment| (&fragment.text, fragment.col, fragment.row))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert!(prompt.style.dim);
+    assert!(!button.style.dim);
+    assert_eq!(prompt.row, button.row);
+    assert!(prompt.col < button.col);
+}
+
+#[test]
 fn a_css_widened_field_fills_its_content_box() {
     let rows = grid(
         "<input value=hi size=2 style='display:block;border:1px solid;width:12ch'>",

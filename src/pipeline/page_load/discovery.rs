@@ -125,7 +125,7 @@ impl PageLoad {
 
     /// A page may only pull subresources from its own scheme. Without this an `http(s)` document
     /// could name `file:///…` in a `<link>` and have the browser read local files for it.
-    fn scheme_allowed(&self, url: &Url) -> bool {
+    pub(super) fn scheme_allowed(&self, url: &Url) -> bool {
         match self.document_url.scheme() {
             "http" | "https" => matches!(url.scheme(), "http" | "https"),
             scheme => url.scheme() == scheme,
@@ -190,7 +190,7 @@ impl PageLoad {
     }
 }
 
-fn attr_value<'a>(attrs: &'a [Attr], name: &str) -> Option<&'a str> {
+pub(super) fn attr_value<'a>(attrs: &'a [Attr], name: &str) -> Option<&'a str> {
     attrs
         .iter()
         .find(|attr| attr.ns == AttrNs::None && attr.name.eq_ignore_ascii_case(name))

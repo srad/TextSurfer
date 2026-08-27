@@ -82,6 +82,7 @@ impl App {
             Route::StartPage => {
                 let tab = &self.tabs.tabs()[index];
                 self.net.cancel(tab.id, tab.generation);
+                self.images.cancel(tab.id, tab.generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
                 let page = start_page_for(content_viewport(self.geometry));
@@ -92,6 +93,7 @@ impl App {
             Route::Fetch => {
                 let tab = &self.tabs.tabs()[index];
                 self.net.cancel(tab.id, tab.generation);
+                self.images.cancel(tab.id, tab.generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
                 self.repoint(index, &fixed, generation, content_for(&fixed));

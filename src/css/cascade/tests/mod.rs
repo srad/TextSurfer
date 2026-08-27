@@ -50,6 +50,20 @@ fn presentational_hints_are_zero_specificity_author_declarations() {
 }
 
 #[test]
+fn inline_replaced_elements_keep_sizing_while_inline_flow_drops_it() {
+    let mut document = Document::new();
+    let root = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let image = document.insert_element(Some(root), "img", ElementNs::Html, vec![]);
+    let span = document.insert_element(Some(root), "span", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse("img, span { display:inline; width:32px; height:32px }");
+    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    assert_eq!(styles.get(image).width, CssSize::Cells(4));
+    assert_eq!(styles.get(image).height, CssSize::Cells(2));
+    assert_eq!(styles.get(span).width, CssSize::Auto);
+    assert_eq!(styles.get(span).height, CssSize::Auto);
+}
+
+#[test]
 fn legacy_table_attributes_map_through_the_css_value_model() {
     let mut document = Document::new();
     let table = document.insert_element(

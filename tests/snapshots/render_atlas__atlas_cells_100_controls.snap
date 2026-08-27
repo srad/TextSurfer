@@ -1,0 +1,29 @@
+---
+source: tests/render_atlas.rs
+expression: "styled_panel(&page.painted, cols, start, end)"
+---
+│ATLAS:controls                                                                                      │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..15 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
+  15..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│Controls[text  ][******][prompt  ][X]( )[Send][Reset][color?][Button][two ▾]                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  9..77 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=REVERSED
+  77..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│area                                                                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=REVERSED
+  9..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=REVERSED
+  9..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

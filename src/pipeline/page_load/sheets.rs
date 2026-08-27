@@ -1,6 +1,6 @@
 use crate::css::{CssRule, MediaQueryList, MediaRule, StateDeps, StyleSheet};
 
-use super::super::render::{RenderedPage, render_document};
+use super::super::render::{RenderedPage, render_document_with_images};
 use super::{PageLoad, RootSource};
 
 impl PageLoad {
@@ -9,12 +9,14 @@ impl PageLoad {
         self.state_deps = sheets.iter().fold(StateDeps::default(), |deps, sheet| {
             deps.union(sheet.state_deps)
         });
-        render_document(
+        let images = self.image_resources();
+        render_document_with_images(
             self.document.clone(),
             &sheets,
             self.media,
             self.palette,
             self.parse_errors,
+            &images,
         )
     }
 

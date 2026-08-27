@@ -3,9 +3,10 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
+use crate::core::image::{DecodedImage, ImageAssetId};
 use crate::core::style::{CellStyle, Palette, Rgb, Rgba};
 use crate::layout::LayoutRect;
-use crate::paint::ScaledTextRun;
+use crate::paint::{DisplayList, PaintOverlay, PaintedImage, ScaledTextRun};
 
 use crate::vga::font::{CELL_H, CELL_W, CP437_TO_UNICODE, GlyphWidth, glyph};
 use crate::vga::{Surface, SurfaceConfig};
@@ -584,4 +585,64 @@ fn scaled_overlay_obeys_occlusion_and_repaints_the_cursor_last() {
             assert_eq!(pixel_at(&surface, x, y), packed(FG));
         }
     }
+}
+
+#[test]
+fn image_overlays_scale_scroll_clip_restore_and_leave_the_cursor_on_top() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "img", ElementNs::Html, vec![]);
+    let asset_id = ImageAssetId(1);
+    let placement = PaintedImage {
+        node,
+        asset_id,
+        revision: 1,
+        rect: LayoutRect {
+            col: 0,
+            row: 1,
+            width: 2,
+            height: 1,
+        },
+        clip: LayoutRect {
+            col: 0,
+            row: 1,
+            width: 2,
+            height: 1,
+        },
+        depth: 0,
+    };
+    let mut painted = DisplayList {
+        images: vec![placement],
+        overlays: vec![PaintOverlay::Image(0)],
+        ..Default::default()
+    };
+    painted.image_assets.insert(
+        asset_id,
+        DecodedImage {
+            asset_id,
+            revision: 1,
+            width: 1,
+            height: 1,
+            rgba: std::sync::Arc::from([255, 0, 0, 255]),
+        },
+    );
+    let mut surface = Surface::new(config(3, 2, 1));
+    surface.set_cursor(Some((0, 0)));
+    surface.draw_overlays(
+        &painted,
+        (0, 0),
+        1,
+        clip(3, 2),
+        &[LayoutRect {
+            col: 1,
+            row: 0,
+            width: 1,
+            height: 1,
+        }],
+        test_palette(),
+    );
+    assert_eq!(pixel_at(&surface, 0, 0), packed(FG));
+    assert_eq!(pixel_at(&surface, CELL_W, 0), packed(BG));
+    surface.set_cursor(None);
+    surface.clear_scaled_overlay();
+    assert!(surface.pixels().iter().all(|pixel| *pixel == packed(BG)));
 }

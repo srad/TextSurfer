@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <title>HIDDEN TITLE</title>
+  <meta name="hidden" content="HIDDEN META">
+  <style>
+    body { margin: 0; color: #e0e0e0; background: #000080 }
+    .marker { display: block; margin: 0; color: #ffff00; background: #000040; font-weight: bold }
+    .case { display: block; margin: 0 0 1rem 0 }
+    .swatch { color: #00ffff; background: #400040; border: 1px solid #ffffff; padding: 0 1ch }
+    .contents { display: contents }
+    .gone { display: none }
+    .flex { display: flex; width: 28ch; gap: 1ch; border: 1px solid }
+    .grid { display: grid; width: 28ch; grid-template-columns: 1fr 2fr; gap: 1ch; border: 1px solid }
+    .wide-search { display: none }
+    @media (min-width: 960px) {
+      .wide-search { display: flex; border: 1px solid; width: 70ch }
+    }
+  </style>
+</head>
+<body>
+  <div class="marker" data-atlas-case="ua-flow">ATLAS:ua-flow</div>
+  <section class="case"><header>Header</header><main><article><h1>Heading one</h1><h2>Heading two</h2><p>Paragraph<br>next line</p><blockquote>Quote</blockquote><pre>pre  space</pre><hr><figure>Figure<figcaption>Caption</figcaption></figure></article></main><footer>Footer</footer><span class="gone">HIDDEN BODY</span></section>
+
+  <div class="marker" data-atlas-case="inline-state">ATLAS:inline-state</div>
+  <div class="case"><a href="/atlas-link">link</a> <b>bold</b> <strong>strong</strong> <u>under</u> <ins>insert</ins> <s>strike</s> <del>delete</del> <span class="swatch">styled</span> Wide: ä 中 😀</div>
+
+  <div class="marker" data-atlas-case="lists">ATLAS:lists</div>
+  <div class="case"><ul><li>disc<ul><li>circle<ul><li>square</li></ul></li></ul></li></ul><ol type="A" start="3"><li>three</li><li value="7">seven</li></ol><menu><li>menu</li></menu><dl><dt>term</dt><dd>definition</dd></dl></div>
+
+  <div class="marker" data-atlas-case="tables">ATLAS:tables</div>
+  <div class="case"><table border="1" cellspacing="1" cellpadding="1" rules="all"><caption>Table caption</caption><colgroup><col width="8"><col></colgroup><thead><tr><th>Head A</th><th>Head B</th></tr></thead><tbody><tr><td rowspan="2">rowspan</td><td>cell</td></tr><tr><td><table><tr><td>nested</td></tr></table></td></tr><tr><td colspan="2">colspan</td></tr></tbody><tfoot><tr><td>foot</td><td>end</td></tr></tfoot></table></div>
+
+  <div class="marker" data-atlas-case="controls">ATLAS:controls</div>
+  <form class="case"><fieldset><legend>Controls</legend><input type="text" value="text" size="6"><input type="password" value="secret" size="6"><input type="search" placeholder="prompt" size="8"><input type="checkbox" checked><input type="radio"><input type="submit" value="Send"><input type="reset"><input type="color"><button>Button</button><select><optgroup label="group"><option>one</option><option selected>two</option></optgroup></select><textarea cols="8" rows="2">area</textarea><input type="hidden" value="HIDDEN CONTROL"><datalist><option>HIDDEN OPTION</option></datalist></fieldset></form>
+
+  <div class="marker" data-atlas-case="search-flex">ATLAS:search-flex</div>
+  <form class="case wide-search"><div style="flex-grow:1;margin:-1px"><div style="position:relative"><input type="search" placeholder="Search Wikipedia" style="display:block;box-sizing:border-box;min-height:32px;max-height:2rem;width:100%;margin:0;border:1px solid;padding:4px 8px;overflow:hidden"></div></div><button style="min-height:32px;margin:-1px;border:1px solid;padding:4px 12px;overflow:hidden">Search</button></form>
+
+  <div class="marker" data-atlas-case="box-layout">ATLAS:box-layout</div>
+  <div class="case" style="width:30ch;border:1px solid;padding:1rem;margin:1rem"><span>content box</span><span class="contents"><b> contents child </b></span><span style="display:inline-block;width:8ch;border:1px solid">inline box</span><div style="box-sizing:border-box;width:min(100%,24ch);min-height:2rem;background:#004000">min/max box</div></div>
+
+  <div class="marker" data-atlas-case="flex-grid">ATLAS:flex-grid</div>
+  <div class="case"><div class="flex"><span style="flex:1">flex one</span><span style="flex:2">flex two wraps</span><button>Go</button></div><div class="grid"><span>grid A</span><span>grid B</span><span style="grid-column:1 / span 2">grid span</span></div></div>
+
+  <div class="marker" data-atlas-case="images">ATLAS:images</div>
+  <div class="case"><p><img alt="fallback"> <a href="/image-link"><img src="atlas.png" alt="linked" style="width:4ch;height:32px"></a></p><img src="atlas.png" alt="block" style="display:block;width:8ch;height:auto;border:1px solid"><table><tr><td><img src="atlas.png" alt="table" style="width:4ch"></td></tr></table><div class="flex"><img src="atlas.png" alt="flex" style="width:4ch"><span>beside</span></div><div class="grid"><img src="atlas.png" alt="grid" style="width:4ch"><span>beside</span></div></div>
+
+  <div class="marker" data-atlas-case="presentational">ATLAS:presentational</div>
+  <div class="case" align="center" bgcolor="#202020"><center>center</center><font color="#00ff00">legacy colour</font><table border="2" frame="box" rules="rows" width="60%" bgcolor="#400000"><caption align="bottom">bottom caption</caption><tr valign="bottom"><td align="right" bgcolor="#004000">legacy cell</td></tr></table></div>
+</body>
+</html>

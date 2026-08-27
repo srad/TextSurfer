@@ -29,6 +29,12 @@ fn terminal_cell_conformance() {
     wpt::assert_corpus_conformance();
 }
 
+#[cfg(feature = "vga")]
+#[test]
+fn vga_pixel_conformance() {
+    wpt::assert_vga_pixel_conformance();
+}
+
 #[test]
 #[ignore]
 fn wpt_case_worker() {

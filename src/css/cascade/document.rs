@@ -144,7 +144,7 @@ pub(super) fn cascade_document(
         }
         style.overflow = style.overflow.computed();
         style.display = computed_display(document, &tree, id, style.display, style.position);
-        if style.display.is_inline_flow()
+        if style.display.is_inline_flow() && !is_replaced_element(document, id)
             || matches!(
                 style.display,
                 Display::TABLE_HEADER_GROUP
@@ -238,6 +238,15 @@ pub(super) fn cascade_document(
     }
     tree.set_store(store);
     tree
+}
+
+fn is_replaced_element(document: &Document, id: NodeId) -> bool {
+    matches!(
+        document.node(id),
+        Some(crate::core::dom::Node::Element { name, ns, .. })
+            if *ns == crate::core::dom::ElementNs::Html
+                && matches!(name.as_str(), "img" | "input" | "button" | "select" | "textarea")
+    )
 }
 
 struct PendingMarker {

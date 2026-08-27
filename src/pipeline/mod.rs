@@ -1,4 +1,5 @@
 pub mod dump;
+pub mod image;
 pub mod page_load;
 pub mod render;
 

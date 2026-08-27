@@ -1,0 +1,36 @@
+---
+source: tests/render_atlas.rs
+expression: "styled_panel(&page.painted, cols, start, end)"
+---
+│ATLAS:inline-state                                                                                                                                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..19 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
+  19..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│link bold strong under insert strike delete  styled  Wide: ä 中  😀                                                                                               │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..5 fg=Rgb(51, 108, 188) bg=Rgb(0, 0, 128) mod=UNDERLINED
+  5..6 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  6..10 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
+  10..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..17 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
+  17..18 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  18..23 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=UNDERLINED
+  23..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  24..30 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=UNDERLINED
+  30..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..37 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=CROSSED_OUT
+  37..38 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  38..44 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=CROSSED_OUT
+  44..46 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  46..52 fg=Rgb(0, 255, 255) bg=Rgb(64, 0, 64) mod=NONE
+  52..63 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  63..64 fg=Reset bg=Reset mod=NONE
+  64..66 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  66..67 fg=Reset bg=Reset mod=NONE
+  67..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                                                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

@@ -318,11 +318,14 @@ impl VgaApp {
         let content_changed = damage.content.full
             || damage.content.scroll_rows != 0
             || damage.content.repaint != RowDamage::None;
-        let reset_overlay = damage.content.full || damage.content.repaint != RowDamage::None;
         let view = self.app.chrome_view();
         let size = self.backend.surface().size();
         let area = ratatui::layout::Rect::new(0, 0, size.cols, size.rows);
-        let scaled = view.content.painted.scaled_text.clone();
+        let painted = view.content.painted.clone();
+        let reset_overlay = damage.content.full
+            || damage.content.repaint != RowDamage::None
+            || (damage.content.scroll_rows != 0 && !painted.images.is_empty());
+        let scaled = painted.scaled_text.clone();
         let scroll = view.content.scroll;
         let content = chrome::content_rect(&view, area);
         let occlusions = chrome::occlusion_rects(&view, area)
@@ -355,14 +358,25 @@ impl VgaApp {
             scaled
         };
         if content_changed && let Some(content) = content {
-            self.backend.draw_scaled_text(
-                &scaled,
-                (content.x, content.y),
-                scroll,
-                layout_rect(content),
-                &occlusions,
-                self.app.theme().palette(),
-            );
+            if painted.images.is_empty() {
+                self.backend.draw_scaled_text(
+                    &scaled,
+                    (content.x, content.y),
+                    scroll,
+                    layout_rect(content),
+                    &occlusions,
+                    self.app.theme().palette(),
+                );
+            } else {
+                self.backend.draw_overlays(
+                    &painted,
+                    (content.x, content.y),
+                    scroll,
+                    layout_rect(content),
+                    &occlusions,
+                    self.app.theme().palette(),
+                );
+            }
         }
         self.present()
     }

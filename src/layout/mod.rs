@@ -5,8 +5,8 @@ mod table;
 mod text_flow;
 
 pub use engine::{
-    BackgroundFill, BorderStroke, BoxTree, LayoutBox, LayoutEngine, LayoutLimits, LayoutRect,
-    LinkBox, TaffyLayoutEngine, TextFragment,
+    BackgroundFill, BorderStroke, BoxTree, ImagePlacement, LayoutBox, LayoutEngine, LayoutLimits,
+    LayoutRect, LinkBox, TaffyLayoutEngine, TextFragment,
 };
 
 use crate::core::dom::Document;
@@ -24,4 +24,6 @@ pub(crate) struct LayoutInput<'a> {
     pub(crate) document: &'a Document,
     pub(crate) styles: &'a StyleTree,
     pub(crate) forms: &'a FormState,
+    pub(crate) images: Option<&'a crate::core::image::ImageResources>,
+    pub(crate) cell_metric: crate::core::style::CellMetric,
 }

@@ -12,6 +12,8 @@ fn test_input<'a>(document: &'a Document, styles: &'a StyleTree) -> LayoutInput<
         document,
         styles,
         forms: FormState::empty(),
+        images: None,
+        cell_metric: crate::core::style::CellMetric::DEFAULT,
     }
 }
 

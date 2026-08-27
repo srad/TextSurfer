@@ -26,6 +26,7 @@ impl App {
             return;
         };
         self.net.cancel(closing.id, closing.generation);
+        self.images.cancel(closing.id, closing.generation);
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         let geometry = self.geometry;

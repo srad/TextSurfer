@@ -43,6 +43,18 @@ pub(super) fn assign_link_rects(document: &Document, tree: &mut BoxTree) {
             _ => rects[index].push(rect),
         }
     }
+    for image in &tree.images {
+        let Some(index) = *resolved
+            .entry(image.node)
+            .or_insert_with(|| nearest_link(document, image.node, &owners))
+        else {
+            continue;
+        };
+        rects[index].push(image.clip);
+        if !hit_nodes[index].contains(&image.node) {
+            hit_nodes[index].push(image.node);
+        }
+    }
     for (index, link) in tree.links.iter_mut().enumerate() {
         link.rects = std::mem::take(&mut rects[index]);
         link.hit_nodes = std::mem::take(&mut hit_nodes[index]);

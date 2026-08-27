@@ -21,7 +21,7 @@ use winit::dpi::PhysicalPosition;
 use crate::core::geom::{Point, Size};
 use crate::core::style::Palette;
 use crate::layout::LayoutRect;
-use crate::paint::ScaledTextRun;
+use crate::paint::{DisplayList, ScaledTextRun};
 
 use super::font::{CELL_H, CELL_W};
 use super::surface::{Surface, SurfaceConfig};
@@ -73,6 +73,19 @@ impl VgaBackend {
     ) {
         self.surface
             .draw_scaled_text(runs, origin, scroll, clip, occlusions, palette);
+    }
+
+    pub fn draw_overlays(
+        &mut self,
+        painted: &DisplayList,
+        origin: (u16, u16),
+        scroll: usize,
+        clip: LayoutRect,
+        occlusions: &[LayoutRect],
+        palette: Palette,
+    ) {
+        self.surface
+            .draw_overlays(painted, origin, scroll, clip, occlusions, palette);
     }
 
     /// Push the tracked cursor state onto the surface.

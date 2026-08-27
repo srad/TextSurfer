@@ -17,6 +17,9 @@ use crate::core::focus::Focus;
 use crate::core::geom::Size;
 use crate::net::{FetchError, FetchPayload, FetchPoll, FetchResponse, ResourceId, Submitted};
 use crate::paint::DisplayList;
+use crate::pipeline::image::{
+    ImageDecodeJob, ImageDecodePayload, ImageDecodePoll, ImageDecodeQueue, ImageSubmitted,
+};
 use crate::pipeline::page_load::STYLESHEET_DEADLINE;
 use crate::ui::keymap::Action;
 
@@ -93,6 +96,34 @@ impl Navigate for FakeNet {
             .pop()
             .map_or(FetchPoll::Empty, FetchPoll::Ready)
     }
+}
+
+#[derive(Default)]
+pub(super) struct FakeImages {
+    pub(super) submitted: Mutex<Vec<ImageDecodeJob>>,
+    pub(super) pending: Mutex<Vec<ImageDecodePayload>>,
+    pub(super) canceled: Mutex<Vec<(u64, u64)>>,
+}
+
+impl ImageDecodeQueue for FakeImages {
+    fn submit(&self, job: ImageDecodeJob) -> ImageSubmitted {
+        self.submitted.lock().unwrap().push(job);
+        ImageSubmitted::Queued
+    }
+
+    fn poll(&self) -> ImageDecodePoll {
+        self.pending
+            .lock()
+            .unwrap()
+            .pop()
+            .map_or(ImageDecodePoll::Empty, ImageDecodePoll::Ready)
+    }
+
+    fn cancel(&self, tab_id: u64, generation: u64) {
+        self.canceled.lock().unwrap().push((tab_id, generation));
+    }
+
+    fn shutdown(&self) {}
 }
 
 pub(super) fn ctrl(mut event: KeyEvent) -> KeyEvent {

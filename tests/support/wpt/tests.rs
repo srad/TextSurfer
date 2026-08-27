@@ -11,16 +11,20 @@ use textsurfer::paint::{DisplayList, PaintedRow, PaintedSpan};
 use textsurfer::ui::PAPER_WHITE;
 
 use super::manifest::{
-    CaseKind, CaseOutcome, ExpectedStatus, Manifest, Relation, corpus_root, discover_metadata,
-    manifest_path,
+    CaseKind, CaseOutcome, ExpectedStatus, Manifest, OracleProfile, Relation, corpus_root,
+    discover_metadata, manifest_path,
 };
 use super::render::visually_equal;
 use super::supervisor::{supervise, supervise_case};
 
 pub fn assert_manifest_contracts() {
     let manifest = Manifest::load().unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(manifest.cases.len(), 27);
-    assert_eq!(manifest.runnable_cases().len(), 5);
+    assert_eq!(manifest.cases.len(), 30);
+    assert_eq!(
+        manifest.runnable_cases(OracleProfile::TerminalCellV1).len(),
+        5
+    );
+    assert_eq!(manifest.runnable_cases(OracleProfile::VgaPixelV1).len(), 3);
     assert_eq!(
         manifest
             .cases
@@ -37,6 +41,17 @@ pub fn assert_manifest_contracts() {
                 && case.path.ends_with(".html"))
             .count(),
         24
+    );
+    assert_eq!(
+        manifest
+            .cases
+            .iter()
+            .filter(
+                |case| case.path.starts_with("css/css-sizing/box-sizing-replaced-")
+                    && case.path.ends_with(".xht")
+            )
+            .count(),
+        3
     );
     assert_eq!(PAPER_WHITE.palette().text, Rgb::new(16, 16, 16));
     assert_eq!(PAPER_WHITE.palette().background, Rgb::new(232, 228, 216));
@@ -114,7 +129,7 @@ pub fn assert_corpus_integrity() {
     let license = fs::read_to_string(corpus_root().join("LICENSE.md")).expect("WPT license");
     assert!(license.contains("Redistribution and use in source and binary forms"));
     for file in manifest.vendored_files() {
-        if !file.ends_with(".html") {
+        if !file.ends_with(".html") && !file.ends_with(".xht") {
             continue;
         }
         let source = fs::read_to_string(corpus_root().join(&file))
@@ -170,6 +185,26 @@ pub fn assert_supervisor_contracts() {
 }
 
 pub fn assert_corpus_conformance() {
+    assert_profile_conformance(
+        OracleProfile::TerminalCellV1,
+        "terminal-cell",
+        (27, 5, 5, 0, 22),
+    );
+}
+
+#[cfg(feature = "vga")]
+pub fn assert_vga_pixel_conformance() {
+    // Every admitted case is an expected failure, which is the tripwire this profile is for: the
+    // pixels are compared exactly, and the day cell-quantised replaced sizing stops drifting from
+    // the reference these turn into `unexpected` passes rather than passing silently.
+    assert_profile_conformance(OracleProfile::VgaPixelV1, "vga-pixel", (3, 3, 0, 3, 0));
+}
+
+fn assert_profile_conformance(
+    profile: OracleProfile,
+    label: &str,
+    expected: (usize, usize, usize, usize, usize),
+) {
     let manifest = Manifest::load().unwrap_or_else(|error| panic!("{error}"));
     let mut passed = 0usize;
     let mut xfailed = 0usize;
@@ -178,7 +213,7 @@ pub fn assert_corpus_conformance() {
     let mut timeouts = 0usize;
     let mut harness_errors = 0usize;
     let mut failures = Vec::new();
-    for case in manifest.runnable_cases() {
+    for case in manifest.runnable_cases(profile) {
         let outcome = supervise_case(&case.path);
         match (&case.status, &outcome) {
             (ExpectedStatus::Run, CaseOutcome::Pass) => passed += 1,
@@ -203,25 +238,26 @@ pub fn assert_corpus_conformance() {
             (ExpectedStatus::Skip, _) => unreachable!("skips are not runnable"),
         }
     }
-    let audited = manifest.cases.len();
-    let eligible = manifest.runnable_cases().len();
+    let audited = manifest
+        .cases
+        .iter()
+        .filter(|case| case.profile == profile)
+        .count();
+    let eligible = manifest.runnable_cases(profile).len();
     let skipped = manifest
         .cases
         .iter()
-        .filter(|case| case.status == ExpectedStatus::Skip)
+        .filter(|case| case.profile == profile && case.status == ExpectedStatus::Skip)
         .count();
     eprintln!(
-        "WPT terminal-cell slice: audited={audited} eligible={eligible} run={eligible} pass={passed} xfail={xfailed} skip={skipped} unexpected={unexpected} crash={crashes} timeout={timeouts} harness={harness_errors}"
-    );
-    assert_eq!(
-        (audited, eligible, passed, xfailed, skipped),
-        (27, 5, 5, 0, 22)
+        "WPT {label} slice: audited={audited} eligible={eligible} run={eligible} pass={passed} xfail={xfailed} skip={skipped} unexpected={unexpected} crash={crashes} timeout={timeouts} harness={harness_errors}"
     );
     assert!(
         failures.is_empty(),
-        "WPT terminal-cell failures:\n{}",
+        "WPT {label} failures:\n{}",
         failures.join("\n")
     );
+    assert_eq!((audited, eligible, passed, xfailed, skipped), expected);
 }
 
 fn assert_manifest_error(value: Value, expected: &str) {

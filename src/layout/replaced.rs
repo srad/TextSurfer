@@ -18,7 +18,10 @@ use crate::core::form::{
     ControlKind, FormState, checkedness, control_kind, descendant_text, display_text, field_rows,
     field_width, options, selected_index,
 };
-use crate::core::style::TextAlign;
+use crate::core::image::DecodedImage;
+use crate::core::style::{
+    BorderSide, BoxSizing, CellMetric, ComputedStyle, CssMaxSize, CssPadding, CssSize, TextAlign,
+};
 
 /// How a stand-in occupies the width it is given.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -51,6 +54,8 @@ pub(super) struct ReplacedBox {
     /// whatever white-space the surrounding flow uses. An `<img>`'s `alt` is ordinary text and
     /// does not set this.
     pub(super) preformatted: bool,
+    pub(super) control: bool,
+    pub(super) image: bool,
 }
 
 impl ReplacedBox {
@@ -94,14 +99,23 @@ pub(super) struct Replaced {
     pub(super) preformatted: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct ReplacedInput<'a> {
+    pub(super) forms: &'a FormState,
+    pub(super) image: Option<&'a DecodedImage>,
+    pub(super) style: ComputedStyle,
+    pub(super) metric: CellMetric,
+    pub(super) width_basis: Option<usize>,
+}
+
 /// The stand-in for `id` at its intrinsic size, or `None` when the element is not replaced or
 /// renders nothing. Inline boxes never paint a border, so this always brackets.
 pub(super) fn replaced_content(
     document: &Document,
     id: NodeId,
-    forms: &FormState,
+    input: ReplacedInput<'_>,
 ) -> Option<Replaced> {
-    let box_ = replaced_box(document, id, forms, false)?;
+    let box_ = replaced_box(document, id, false, input)?;
     Some(Replaced {
         text: box_.intrinsic_text(),
         preformatted: box_.preformatted,
@@ -114,8 +128,8 @@ pub(super) fn replaced_content(
 pub(super) fn replaced_box(
     document: &Document,
     id: NodeId,
-    forms: &FormState,
     bordered: bool,
+    input: ReplacedInput<'_>,
 ) -> Option<ReplacedBox> {
     let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
         return None;
@@ -124,6 +138,23 @@ pub(super) fn replaced_box(
         return None;
     }
     if name == "img" {
+        if let Some(image) = input.image {
+            let (cols, rows) = image_cells(image, input.style, input.metric, input.width_basis);
+            return Some(ReplacedBox {
+                intrinsic_cols: cols,
+                intrinsic_rows: rows,
+                text: std::iter::repeat_n("\u{fffc}".repeat(cols), rows)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                fill: Fill::Label,
+                bracketed: false,
+                placeholder: false,
+                preformatted: true,
+                wraps: false,
+                control: false,
+                image: true,
+            });
+        }
         // `[alt]` carries its own brackets by convention and is ordinary text, not a field.
         return image_fallback(attrs).map(|text| ReplacedBox {
             intrinsic_cols: UnicodeWidthStr::width(text.as_str()),
@@ -134,10 +165,12 @@ pub(super) fn replaced_box(
             placeholder: false,
             preformatted: false,
             wraps: true,
+            control: false,
+            image: false,
         });
     }
     let kind = control_kind(document, id)?;
-    control_box(document, id, attrs, kind, forms, bordered)
+    control_box(document, id, attrs, kind, input.forms, bordered)
 }
 
 fn image_fallback(attrs: &[Attr]) -> Option<String> {
@@ -173,6 +206,8 @@ fn control_box(
             placeholder: false,
             preformatted: true,
             wraps: false,
+            control: true,
+            image: false,
         })
     }
     fn label(text: String, bordered: bool) -> Option<ReplacedBox> {
@@ -186,6 +221,8 @@ fn control_box(
             placeholder: false,
             preformatted: true,
             wraps: false,
+            control: true,
+            image: false,
         })
     }
     match kind {
@@ -233,6 +270,8 @@ fn control_box(
                 placeholder,
                 preformatted: true,
                 wraps: false,
+                control: true,
+                image: false,
             })
         }
         ControlKind::Text | ControlKind::Password => {
@@ -251,8 +290,160 @@ fn control_box(
                 placeholder,
                 preformatted: true,
                 wraps: false,
+                control: true,
+                image: false,
             })
         }
+    }
+}
+
+/// The content box a decoded image occupies, in cells.
+///
+/// This is CSS 2.1 §10.4's constraint table for replaced elements: `min-*` and `max-*` never
+/// distort the picture, they resize it along both axes at once. Clamping the two axes
+/// independently — what this used to do — turned an over-wide image into a stretched one.
+///
+/// Two details are ours rather than the specification's. The arithmetic runs in CSS pixels and
+/// quantises once at the end: a cell is 8×16, so a square picture is not a square box, and
+/// comparing a cell ratio against the picture's own would lose a row. And rounding matches
+/// [`CellMetric::resolve_cells`] rather than rounding up, so a 75px-wide picture and an authored
+/// `width: 75px` land on the same nine columns instead of differing by one.
+pub(super) fn image_cells(
+    image: &DecodedImage,
+    style: ComputedStyle,
+    metric: CellMetric,
+    width_basis: Option<usize>,
+) -> (usize, usize) {
+    let column_px = u64::from(metric.column_px());
+    let row_px = u64::from(metric.row_px());
+    let image_width = u64::from(image.width).max(1);
+    let image_height = u64::from(image.height).max(1);
+    let rows_for_cols = |cols: usize| -> usize {
+        round_div(cols as u64 * column_px * image_height, image_width * row_px).max(1)
+    };
+    let cols_for_rows = |rows: usize| -> usize {
+        round_div(rows as u64 * row_px * image_width, image_height * column_px).max(1)
+    };
+
+    // `box-sizing: border-box` measures every one of these against the border box, so the
+    // element's own chrome comes off before the picture is fitted to what is left.
+    let (chrome_cols, chrome_rows) = match style.box_sizing {
+        BoxSizing::ContentBox => (0, 0),
+        BoxSizing::BorderBox => (
+            edge_cells(style.padding.left, style.border.left)
+                .saturating_add(edge_cells(style.padding.right, style.border.right)),
+            edge_cells(style.padding.top, style.border.top)
+                .saturating_add(edge_cells(style.padding.bottom, style.border.bottom)),
+        ),
+    };
+    let content_cols = |value: usize| value.saturating_sub(chrome_cols);
+    let content_rows = |value: usize| value.saturating_sub(chrome_rows);
+
+    let min_cols = content_cols(minimum(style.min_width, width_basis));
+    let min_rows = content_rows(minimum(style.min_height, None));
+    // A minimum overrides a maximum it contradicts, so folding it in here leaves the table below
+    // with only the violations it actually describes.
+    let max_cols = maximum(style.max_width, width_basis)
+        .saturating_sub(chrome_cols)
+        .max(min_cols);
+    let max_rows = maximum(style.max_height, None)
+        .saturating_sub(chrome_rows)
+        .max(min_rows);
+
+    let width = definite_width(style.width, width_basis).map(content_cols);
+    let height = definite_height(style.height).map(content_rows);
+    let (cols, rows) = match (width, height) {
+        (Some(cols), Some(rows)) => (cols.max(1), rows.max(1)),
+        (Some(cols), None) => (cols.max(1), rows_for_cols(cols)),
+        (None, Some(rows)) => (cols_for_rows(rows), rows.max(1)),
+        (None, None) => (
+            round_div(image_width, column_px).max(1),
+            round_div(image_height, row_px).max(1),
+        ),
+    };
+
+    let (cols, rows) = match (
+        cols > max_cols,
+        cols < min_cols,
+        rows > max_rows,
+        rows < min_rows,
+    ) {
+        // Both maxima are violated: the axis that has to shrink further decides the scale.
+        (true, _, true, _) => {
+            if max_cols.saturating_mul(rows) <= max_rows.saturating_mul(cols) {
+                (max_cols, rows_for_cols(max_cols).max(min_rows))
+            } else {
+                (cols_for_rows(max_rows).max(min_cols), max_rows)
+            }
+        }
+        // Both minima are violated: the axis that has to grow further decides the scale.
+        (_, true, _, true) => {
+            if min_cols.saturating_mul(rows) <= min_rows.saturating_mul(cols) {
+                (cols_for_rows(min_rows).max(min_cols), min_rows)
+            } else {
+                (min_cols, rows_for_cols(min_cols).max(min_rows))
+            }
+        }
+        // One axis is pinned each way, so the ratio cannot be kept and both bounds win.
+        (_, true, true, _) => (min_cols, max_rows),
+        (true, _, _, true) => (max_cols, min_rows),
+        (true, ..) => (max_cols, rows_for_cols(max_cols).max(min_rows)),
+        (_, true, ..) => (min_cols, rows_for_cols(min_cols).min(max_rows)),
+        (_, _, true, _) => (cols_for_rows(max_rows).max(min_cols), max_rows),
+        (_, _, _, true) => (cols_for_rows(min_rows).min(max_cols), min_rows),
+        _ => (cols, rows),
+    };
+    // Two of the table's rows scale one axis to satisfy a minimum on the other and can overshoot
+    // that axis' own maximum — `min-width` with a smaller `max-height` is the case the WPT
+    // replaced-sizing tests pin. The picture is distorted at that point whichever way we go, so
+    // the declared bounds win, which is also what browsers show.
+    (
+        cols.clamp(min_cols, max_cols).max(1),
+        rows.clamp(min_rows, max_rows).max(1),
+    )
+}
+
+/// One edge's contribution to the chrome `box-sizing: border-box` measures. A padding that only a
+/// containing block could resolve counts as nothing, which is what the rest of the layout does
+/// with it too.
+fn edge_cells(padding: CssPadding, border: BorderSide) -> usize {
+    padding
+        .cells()
+        .unwrap_or(0)
+        .saturating_add(border.layout_width())
+}
+
+/// `numerator / denominator`, rounded to the nearest whole cell and away from zero at a half, so
+/// that it agrees with [`CellMetric::resolve_cells`].
+fn round_div(numerator: u64, denominator: u64) -> usize {
+    let denominator = denominator.max(1);
+    ((numerator + denominator / 2) / denominator) as usize
+}
+
+fn definite_width(size: CssSize, basis: Option<usize>) -> Option<usize> {
+    match size {
+        CssSize::Auto | CssSize::Calc(_) => None,
+        CssSize::Cells(value) => Some(value),
+        CssSize::Percent(value) => basis.map(|basis| value.resolve(basis)),
+    }
+}
+
+fn definite_height(size: CssSize) -> Option<usize> {
+    match size {
+        CssSize::Cells(value) => Some(value),
+        CssSize::Auto | CssSize::Percent(_) | CssSize::Calc(_) => None,
+    }
+}
+
+fn minimum(size: CssSize, basis: Option<usize>) -> usize {
+    definite_width(size, basis).unwrap_or(0)
+}
+
+fn maximum(size: CssMaxSize, basis: Option<usize>) -> usize {
+    match size {
+        CssMaxSize::None | CssMaxSize::Calc(_) => usize::MAX,
+        CssMaxSize::Cells(value) => value,
+        CssMaxSize::Percent(value) => basis.map_or(usize::MAX, |basis| value.resolve(basis)),
     }
 }
 

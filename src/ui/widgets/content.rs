@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Widget;
 
 use crate::core::style::CellStyle;
-use crate::paint::{DisplayList, PaintedSpan};
+use crate::paint::{DisplayList, PaintOverlay, PaintedImage, PaintedSpan};
 use crate::ui::theme::Theme;
 
 pub struct ContentLines<'a> {
@@ -46,7 +46,102 @@ impl Widget for Content<'_> {
                 buf.set_string(area.x + 1 + col, y, &clipped, span_style(span, self.theme));
             }
         }
+        for overlay in &self.lines.painted.overlays {
+            let PaintOverlay::Image(index) = *overlay else {
+                continue;
+            };
+            let Some(placement) = self.lines.painted.images.get(index) else {
+                continue;
+            };
+            let Some(image) = self.lines.painted.image_assets.get(&placement.asset_id) else {
+                continue;
+            };
+            if image.revision == placement.revision {
+                render_halfblocks(placement, image, area, self.lines.scroll, self.theme, buf);
+            }
+        }
     }
+}
+
+fn render_halfblocks(
+    placement: &PaintedImage,
+    image: &crate::core::image::DecodedImage,
+    area: Rect,
+    scroll: usize,
+    theme: &Theme,
+    buf: &mut Buffer,
+) {
+    if placement.rect.width == 0 || placement.rect.height == 0 || area.width < 2 {
+        return;
+    }
+    let interior = usize::from(area.width - 2);
+    let left = placement.rect.col.max(placement.clip.col);
+    let right = placement
+        .rect
+        .col
+        .saturating_add(placement.rect.width)
+        .min(placement.clip.col.saturating_add(placement.clip.width))
+        .min(interior);
+    let top = placement.rect.row.max(placement.clip.row).max(scroll);
+    let bottom = placement
+        .rect
+        .row
+        .saturating_add(placement.rect.height)
+        .min(placement.clip.row.saturating_add(placement.clip.height))
+        .min(scroll.saturating_add(usize::from(area.height)));
+    for row in top..bottom {
+        for col in left..right {
+            let x = area.x.saturating_add(1).saturating_add(col as u16);
+            let y = area.y.saturating_add((row - scroll) as u16);
+            let background = match buf[(x, y)].bg {
+                Color::Rgb(r, g, b) => crate::core::style::Rgb::new(r, g, b),
+                _ => crate::ui::theme::rgb_of(theme.bg),
+            };
+            let top = sampled_color(placement, image, col, row, 0, background);
+            let bottom = sampled_color(placement, image, col, row, 1, background);
+            buf[(x, y)].set_symbol("▀").set_style(
+                Style::default()
+                    .fg(Color::Rgb(top.r, top.g, top.b))
+                    .bg(Color::Rgb(bottom.r, bottom.g, bottom.b)),
+            );
+        }
+    }
+}
+
+fn sampled_color(
+    placement: &PaintedImage,
+    image: &crate::core::image::DecodedImage,
+    col: usize,
+    row: usize,
+    half: usize,
+    background: crate::core::style::Rgb,
+) -> crate::core::style::Rgb {
+    let local_x = col.saturating_sub(placement.rect.col);
+    let local_y = row
+        .saturating_sub(placement.rect.row)
+        .saturating_mul(2)
+        .saturating_add(half);
+    let source_x = local_x
+        .saturating_mul(image.width as usize)
+        .checked_div(placement.rect.width)
+        .unwrap_or(0)
+        .min(image.width.saturating_sub(1) as usize);
+    let source_y = local_y
+        .saturating_mul(image.height as usize)
+        .checked_div(placement.rect.height.saturating_mul(2))
+        .unwrap_or(0)
+        .min(image.height.saturating_sub(1) as usize);
+    let index = source_y
+        .saturating_mul(image.width as usize)
+        .saturating_add(source_x)
+        .saturating_mul(4);
+    image
+        .rgba
+        .get(index..index.saturating_add(4))
+        .map_or(background, |pixel| {
+            crate::core::style::Rgba::new(pixel[0], pixel[1], pixel[2], pixel[3])
+                .composite_over(background)
+        })
 }
 
 fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
@@ -188,5 +283,63 @@ mod tests {
         assert_eq!(loud.bg, ratatui::style::Color::Rgb(0, 128, 0));
         assert!(loud.modifier.contains(ratatui::style::Modifier::BOLD));
         insta::assert_snapshot!(crate::ui::test_util::styled_buffer_string(buffer));
+    }
+
+    #[test]
+    fn terminal_images_use_scrollable_alpha_composited_halfblocks() {
+        let mut document = crate::core::dom::Document::new();
+        let node = document.insert_element(None, "img", crate::core::dom::ElementNs::Html, vec![]);
+        let asset_id = crate::core::image::ImageAssetId(7);
+        let mut painted = DisplayList {
+            rows: vec![crate::paint::PaintedRow::default(); 2],
+            images: vec![PaintedImage {
+                node,
+                asset_id,
+                revision: 3,
+                rect: crate::layout::LayoutRect {
+                    col: 0,
+                    row: 1,
+                    width: 1,
+                    height: 1,
+                },
+                clip: crate::layout::LayoutRect {
+                    col: 0,
+                    row: 1,
+                    width: 1,
+                    height: 1,
+                },
+                depth: 0,
+            }],
+            overlays: vec![PaintOverlay::Image(0)],
+            ..Default::default()
+        };
+        painted.image_assets.insert(
+            asset_id,
+            crate::core::image::DecodedImage {
+                asset_id,
+                revision: 3,
+                width: 1,
+                height: 2,
+                rgba: std::sync::Arc::from([255, 0, 0, 255, 0, 0, 255, 128]),
+            },
+        );
+        let backend = TestBackend::new(4, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                Content {
+                    lines: &ContentLines {
+                        painted: &painted,
+                        scroll: 1,
+                    },
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
+            .unwrap();
+        let cell = &terminal.backend().buffer()[(1, 0)];
+        assert_eq!(cell.symbol(), "▀");
+        assert_eq!(cell.fg, Color::Rgb(255, 0, 0));
+        assert_eq!(cell.bg, Color::Rgb(0, 0, 213));
     }
 }

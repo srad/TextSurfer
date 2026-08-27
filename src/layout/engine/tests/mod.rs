@@ -14,6 +14,8 @@ fn authored_input<'a>(document: &'a Document, styles: &'a StyleTree) -> LayoutIn
         document,
         styles,
         forms: crate::core::form::FormState::empty(),
+        images: None,
+        cell_metric: crate::core::style::CellMetric::DEFAULT,
     }
 }
 

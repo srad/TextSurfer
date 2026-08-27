@@ -365,9 +365,17 @@ impl TableFormatter<'_> {
                     // are never walked: `<img>` and `<input>` have none, and a `<button>` label is
                     // already folded into the stand-in. Falling through here would paint the label
                     // a second time.
-                    if let Some(replaced) =
-                        crate::layout::replaced::replaced_content(self.document, node, self.forms)
-                    {
+                    if let Some(replaced) = crate::layout::replaced::replaced_content(
+                        self.document,
+                        node,
+                        crate::layout::replaced::ReplacedInput {
+                            forms: self.forms,
+                            image: self.images.and_then(|images| images.get(node)),
+                            style,
+                            metric: self.cell_metric,
+                            width_basis: None,
+                        },
+                    ) {
                         items.push(CellItem::Text(TextRun {
                             node,
                             text: replaced.text,

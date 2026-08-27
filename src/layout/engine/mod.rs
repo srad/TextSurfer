@@ -44,7 +44,19 @@ pub struct BoxTree {
     pub fills: Vec<BackgroundFill>,
     pub strokes: Vec<BorderStroke>,
     pub links: Vec<LinkBox>,
+    pub images: Vec<ImagePlacement>,
+    pub paint_order: HashMap<NodeId, usize>,
     pub limits: LayoutLimits,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImagePlacement {
+    pub node: NodeId,
+    pub asset_id: crate::core::image::ImageAssetId,
+    pub revision: u64,
+    pub rect: LayoutRect,
+    pub clip: LayoutRect,
+    pub depth: usize,
 }
 
 /// Ways a page can outgrow what the engine will do for it. `layout` sits below `app`
@@ -156,10 +168,45 @@ impl LayoutEngine for TaffyLayoutEngine {
         viewport: Size,
         forms: &FormState,
     ) -> BoxTree {
+        self.layout_page(
+            document,
+            styles,
+            viewport,
+            forms,
+            None,
+            crate::core::style::CellMetric::DEFAULT,
+        )
+    }
+}
+
+impl TaffyLayoutEngine {
+    pub fn layout_with_images(
+        &self,
+        document: &Document,
+        styles: &StyleTree,
+        viewport: Size,
+        forms: &FormState,
+        images: &crate::core::image::ImageResources,
+        cell_metric: crate::core::style::CellMetric,
+    ) -> BoxTree {
+        self.layout_page(document, styles, viewport, forms, Some(images), cell_metric)
+    }
+
+    fn layout_page(
+        &self,
+        document: &Document,
+        styles: &StyleTree,
+        viewport: Size,
+        forms: &FormState,
+        images: Option<&crate::core::image::ImageResources>,
+        cell_metric: crate::core::style::CellMetric,
+    ) -> BoxTree {
         let input = LayoutInput {
             document,
             styles,
             forms,
+            images,
+            cell_metric,
         };
         let width = usize::from(viewport.cols);
         let flow = build_flow_tree(input, width);
@@ -177,9 +224,20 @@ impl LayoutEngine for TaffyLayoutEngine {
         );
         tree.width = width;
         tree.links = links;
+        tree.paint_order = document_paint_order(document);
         assign_link_rects(document, &mut tree);
         tree
     }
+}
+
+fn document_paint_order(document: &Document) -> HashMap<NodeId, usize> {
+    let mut order = HashMap::new();
+    let mut stack = document.roots().iter().rev().copied().collect::<Vec<_>>();
+    while let Some(node) = stack.pop() {
+        order.insert(node, order.len());
+        stack.extend(document.children(node).into_iter().rev());
+    }
+    order
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -237,6 +295,8 @@ fn try_layout_flow(
         document,
         styles,
         forms: _,
+        images: _,
+        cell_metric: _,
     } = input;
     let parent_direction = prepare_flow(&mut flow);
     let mut table_cache = HashMap::new();
@@ -411,6 +471,7 @@ fn try_layout_flow(
                 flow[index].depth,
                 index.saturating_add(1),
             );
+            extract_inline_images(&mut tree, input);
             clip_since(&mut tree, starts, child_clip);
         } else if let Some(owner) = flow[index].owner {
             let left = layout.border.left + layout.padding.left;
@@ -482,23 +543,38 @@ fn try_layout_flow(
                 && content_rect.width > 0
                 && content_rect.height > 0
             {
-                let mut style = flow[index].style.cell_style();
-                style.dim |= replaced.placeholder;
-                let rows = replaced.rows(
-                    content_rect.width,
-                    content_rect.height,
-                    flow[index].style.text_align,
-                );
-                for (offset, text) in rows.into_iter().enumerate() {
-                    if let Some(fragment) = child_clip.fragment(&TextFragment {
-                        node: owner,
-                        col: content_rect.col,
-                        row: content_rect.row.saturating_add(offset),
-                        text,
-                        depth: flow[index].depth,
-                        style,
-                    }) {
-                        tree.fragments.push(fragment);
+                if replaced.image {
+                    if let Some(image) = input.images.and_then(|images| images.get(owner))
+                        && let Some(clip) = child_clip.rect(content_rect)
+                    {
+                        tree.images.push(ImagePlacement {
+                            node: owner,
+                            asset_id: image.asset_id,
+                            revision: image.revision,
+                            rect: content_rect,
+                            clip,
+                            depth: flow[index].depth,
+                        });
+                    }
+                } else {
+                    let mut style = flow[index].style.cell_style();
+                    style.dim |= replaced.placeholder;
+                    let rows = replaced.rows(
+                        content_rect.width,
+                        content_rect.height,
+                        flow[index].style.text_align,
+                    );
+                    for (offset, text) in rows.into_iter().enumerate() {
+                        if let Some(fragment) = child_clip.fragment(&TextFragment {
+                            node: owner,
+                            col: content_rect.col,
+                            row: content_rect.row.saturating_add(offset),
+                            text,
+                            depth: flow[index].depth,
+                            style,
+                        }) {
+                            tree.fragments.push(fragment);
+                        }
                     }
                 }
             }
@@ -536,6 +612,7 @@ fn try_layout_flow(
                 flow[index].style.text_align,
                 index.saturating_add(1),
             );
+            extract_inline_images(&mut tree, input);
             clip_since(&mut tree, starts, child_clip);
             if !fixed_subtree && let Some(rect) = child_clip.rect(rect) {
                 layout_height = layout_height.max(rect.row.saturating_add(rect.height));
@@ -570,6 +647,7 @@ struct OutputStarts {
     fills: usize,
     strokes: usize,
     fragments: usize,
+    images: usize,
 }
 
 impl OutputStarts {
@@ -579,6 +657,7 @@ impl OutputStarts {
             fills: tree.fills.len(),
             strokes: tree.strokes.len(),
             fragments: tree.fragments.len(),
+            images: tree.images.len(),
         }
     }
 }
@@ -615,6 +694,78 @@ fn clip_since(tree: &mut BoxTree, starts: OutputStarts, clip: ClipRegion) {
         .filter_map(|fragment| clip.fragment(&fragment))
         .collect();
     tree.fragments.extend(fragments);
+    let images: Vec<_> = tree
+        .images
+        .drain(starts.images..)
+        .filter_map(|mut image| {
+            image.clip = clip.rect(image.clip)?;
+            Some(image)
+        })
+        .collect();
+    tree.images.extend(images);
+}
+
+fn extract_inline_images(tree: &mut BoxTree, input: LayoutInput<'_>) {
+    let Some(resources) = input.images else {
+        return;
+    };
+    for (node, image) in resources.iter() {
+        let fragments = tree
+            .fragments
+            .iter()
+            .filter(|fragment| fragment.node == node && fragment.text.contains('\u{fffc}'))
+            .collect::<Vec<_>>();
+        if fragments.is_empty() {
+            continue;
+        }
+        let left = fragments
+            .iter()
+            .map(|fragment| fragment.col)
+            .min()
+            .unwrap_or(0);
+        let top = fragments
+            .iter()
+            .map(|fragment| fragment.row)
+            .min()
+            .unwrap_or(0);
+        let right = fragments
+            .iter()
+            .map(|fragment| fragment.rect().col.saturating_add(fragment.rect().width))
+            .max()
+            .unwrap_or(left);
+        let bottom = fragments
+            .iter()
+            .map(|fragment| fragment.rect().row.saturating_add(fragment.rect().height))
+            .max()
+            .unwrap_or(top);
+        let depth = fragments
+            .iter()
+            .map(|fragment| fragment.depth)
+            .max()
+            .unwrap_or(0);
+        let width = right.saturating_sub(left);
+        let height = bottom.saturating_sub(top);
+        tree.images.push(ImagePlacement {
+            node,
+            asset_id: image.asset_id,
+            revision: image.revision,
+            rect: LayoutRect {
+                col: left,
+                row: top,
+                width,
+                height,
+            },
+            clip: LayoutRect {
+                col: left,
+                row: top,
+                width,
+                height,
+            },
+            depth,
+        });
+    }
+    tree.fragments
+        .retain(|fragment| !fragment.text.contains('\u{fffc}'));
 }
 
 fn propagates_overflow(document: &Document, node: NodeId) -> bool {

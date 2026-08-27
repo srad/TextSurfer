@@ -33,7 +33,7 @@ written; the audit is re-run whenever a candidate crate appears.
 | Declarative refresh content (M2) | narrow standards adapter | **Keep narrow adapter** — html5ever owns HTML parsing and `<noscript>` behavior, while url 2.5.8 owns relative resolution. A 2026-08-26 crates.io search found no focused implementation of WHATWG's `meta[http-equiv=refresh]` content microsyntax; keep that scanner isolated from navigation policy and cap automatic chains in `app` |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` fixture format; this stays isolated from production code |
 
-### Prior-art audit (2026-08-22)
+### Prior-art audit (2026-08-22, re-checked 2026-08-26)
 
 Conformance is evidence, not reimplementation — and the same discipline applies to product
 behavior. Terminal browsers have already settled several questions we were answering ad hoc.
@@ -44,7 +44,8 @@ behavior. Terminal browsers have already settled several questions we were answe
 | chawan + [w3m](https://w3m.sourceforge.net/) | A real **table layout** engine (colspan/rowspan) is what separates a usable terminal browser from lynx | M1-D, ahead of flex/grid |
 | lynx · w3m · chawan | Every one ships a **non-interactive dump mode** | `--dump` in M1-B; doubles as the golden-fixture harness |
 | [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer (Parley there, textwrap fragments here) | Confirms the M1-B architecture; no dependency |
-| [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Unifies Sixel/Kitty/iTerm2 with a halfblock fallback and terminal font-size querying; depends on `ratatui ^0.30.1` (we pin 0.30.2) | The adopted crate for M6 images, replacing "Kitty protocol later" |
+| [image](https://crates.io/crates/image) 0.25.10 | Mature signature-based raster decoding with explicit format features and decoder limits; Rust 1.88 matches this crate's MSRV | The shared M6 decoder for PNG, JPEG, WebP and the first GIF frame, with default features disabled and strict TextSurfer-owned dimension, pixel and aggregate budgets |
+| [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, vertically sliced scrolling, terminal font-size querying and a primitive halfblock fallback; depends on `ratatui ^0.30.1` (we pin 0.30.2) | The terminal adapter only, with default features disabled and `crossterm` enabled. VGA uses its owned framebuffer instead of a terminal protocol |
 | Every browser since Firefox 3 | `:visited` must never be observable to page styling | `:visited` parses and never matches (M1-B) |
 
 ## Status legend
@@ -76,10 +77,11 @@ behavior. Terminal browsers have already settled several questions we were answe
 | M5 — Boa | Boa 0.21.1 behind trait; decision gate Boa vs Deno Core; host bindings subset; job pump | (open) |
 | M6 — Stretch | Custom properties, flex/grid + conformant floats, images, persistence, scroll memory, console view, config, perf gate | (in progress) |
 
-Test counts at the last green run (2026-08-26): **829 lib · 13 binary · 6 fetch-pipeline ·
-14 corpus · 42 golden** with the default VGA frontend, and **736 lib · 12 binary** with
-`--no-default-features`; the WPT integration target adds 4 passing tests and one deliberately
-ignored child-worker entry.
+Test counts at the last green run (2026-08-27): **858 lib · 13 binary · 6 fetch-pipeline ·
+14 corpus · 42 golden · 3 atlas** with the default VGA frontend, and **764 lib · 12 binary ·
+2 atlas** with `--no-default-features`; the WPT integration target adds 6 passing tests (5 without
+the `vga` feature) and one deliberately ignored child-worker entry, and the atlas adds one
+deliberately ignored VGA reference generator.
 Cross-cutting: test infrastructure (in progress: incremental static WPT backfill, corpus error-count
 and astral attribute-order gaps; contract suites, snapshots, proptest and fakes landed) · gates
 (done: local only, no CI) · coverage floor (open: optional local, 80% overall / 90%
@@ -126,8 +128,7 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 ## Session handoff
 
 1. Read this status board + Roadmap updates log (bottom).
-2. Resume the explicit next task: M6 Images across both frontends; return to the remaining M2
-   robustness work afterward.
+2. Smoke M6 Images in both frontends; return to the remaining M2 robustness work afterward.
 3. Run the gates before and after; never mark `(done)` with red gates.
 4. Manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) — run by the human per
    milestone close; never part of automated tests.
@@ -162,7 +163,9 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
 - **Module structure:** a module is a responsibility, not a file. See the AGENTS.md "Module
   structure" rules for when a `foo.rs` becomes a `foo/` directory and what `mod.rs` may contain.
 - `app` never imports crossterm: events come in as `core` types, results via `deliver_fetch`, time injected.
-- DOM never crosses threads. One thread owns everything except I/O (fetch worker threads only).
+- DOM never crosses threads. One thread owns all mutable browser state. Bounded fetch, image-decode
+  and frontend image-preparation workers receive and return only owned immutable bytes, pixels,
+  identifiers and value metadata.
 - `Document` owns DOM pre-insertion validation and hides indextree; template contents are detached
   document fragments, and DOM removal detaches rather than invalidating node handles.
 - The `DisplayList → ui content widget` edge lands in M1-B. Before it, the painter's hit and link
@@ -210,12 +213,13 @@ First snapshot write: `$env:INSTA_UPDATE = "always"; cargo test`. Coverage (opti
   costs a `Backend` impl and an event-mapping adapter — nothing in `css`/`layout`/`paint` moves. The
   VGA frontend is the active default and owns the native bitmap typography path. The terminal
   frontend is frozen as a compatibility fallback selected with `--terminal`; it remains available
-  in no-default-feature builds and its existing rendering must stay byte-for-byte stable.
+  in no-default-feature builds and its existing non-image rendering must stay byte-for-byte stable.
   *Why a window at all:* the DOS look is mostly the font, and inside a terminal emulator the font
   belongs to the user — `ui::Theme` fixes the palette but every glyph renders in whatever face the
   terminal was configured with. Owning a framebuffer is the only way to own the face, the cell metric
-  and the palette together. It also doubles the usable columns (1280x800 = 160x50) and makes future
-  image support a blit rather than a Sixel/Kitty capability matrix.
+  and the palette together. It also doubles the usable columns (1280x800 = 160x50) and makes image
+  support in the default VGA frontend a native blit; only the terminal compatibility frontend needs
+  the Sixel/Kitty/iTerm2 capability matrix.
   *Rejected alternatives:* `mousefood` 0.5.2 (ratatui-org, embedded-graphics backend) — solves the
   easy part, and its fixed-width `MonoFont` model cannot express Unifont's 16x16 wide glyphs across
   two cells; `ibm437` 0.5.0 (MIT, softbuffer-ready) — ships 8x8 and 9x14 only, and 8x16 is forced by
@@ -926,9 +930,85 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
       tables, flex items and `display: contents`; rollback-safe bounded interning; and topmost
       paint/hit/link behavior. *Proof:* cascade grammar and atomicity matrices, 96 focused Grid tests,
       two property laws, the Vector 2022 skeleton case, and a public rendering golden.
+- [ ] **Images** *(in progress — automated work green; human VGA and terminal image smoke pending)* — one delivery across the
+      shared pipeline, default VGA frontend and terminal compatibility frontend. The item is not
+      complete until all four subitems and both human frontends pass. Static HTML `<img src>` is the
+      first boundary: SVG, animation, `srcset`/`picture`, CSS images, `object-fit`, lazy loading,
+      `data:` URLs and cross-page caching remain deferred.
+      - [x] **Shared loading and decoding** *(done)*. Pin `image` 0.25.10 with default features disabled and
+        only PNG, JPEG, WebP and GIF enabled; GIF and animated WebP expose their first frame only.
+        Pin `ratatui-image` 11.0.6 separately as a terminal adapter with default features disabled
+        and `crossterm` enabled, avoiding Rayon, Chafa, `pkg-config` and unrelated decoders.
+        `PageLoad` owns typed stylesheet/image subresource state without changing `net::Fetch`:
+        normalized image URLs resolve against the document base, obey the existing subresource
+        scheme policy, fetch once per page, require a 2xx response and never extend the stylesheet
+        blocking window. An `ImageDecoder` contract returns immutable RGBA assets with stable IDs,
+        intrinsic dimensions and revisions; signature and enabled decoder support, not an extension
+        or untrusted MIME label, decide the format. Deliveries in one app tick coalesce into one
+        render. Empty/invalid URLs, fetch/decode failure, unsupported formats, refusal and pending
+        work retain M1-B's nonempty/empty/missing-alt behavior and remain non-fatal.
+
+        Before worker code lands, amend the standing thread invariant here and in `AGENTS.md` from
+        fetch-only workers to one main owner for DOM/mutable state plus bounded workers over
+        immutable bytes/pixels. The composition root injects one decode worker; the terminal adapter
+        owns one bounded protocol-preparation worker while VGA samples decoded pixels directly into
+        its owned framebuffer without allocating resized variants. Queues coalesce by work key, hold
+        at most 128 distinct jobs, cancel queued decode work on navigation, tag results with
+        tab/generation/asset revision/target geometry/render context, drop stale completions and
+        detach on quit. Strict pre-allocation
+        checks cap a page at 128 unique image URLs, 64 MiB fetched image bytes and 128 MiB decoded
+        RGBA; one image is capped at 8192 pixels per axis, 8,388,608 pixels and 32 MiB RGBA output.
+        `image::Limits.max_alloc` is set to 64 MiB only as defense in depth because that limit is
+        non-strict. Crossing an image budget refuses only that resource and reports one aggregate
+        page warning; unlike external CSS, already decoded images are not discarded atomically.
+      - [x] **Replaced layout and shared paint** *(done)*. Layout consumes image state and intrinsic metadata,
+        not pixel buffers. Pending or failed images use the existing fallback geometry; decoded
+        assets use intrinsic size/aspect ratio with the existing CSS and legacy width, height and
+        min/max constraints. `min-*`/`max-*` follow CSS 2.1 §10.4's constraint table, so they resize
+        the picture along both axes at once instead of stretching it, measure the element's own
+        padding and border when `box-sizing: border-box` says to, and quantise a natural size the
+        way an authored length does. Successful decode
+        reflows only when the used geometry changes. Image boxes participate in inline, block,
+        table, flex and grid layout, overflow clipping, anchors and hit testing. `BoxTree` carries
+        ordered image placements and `DisplayList` carries one unified paint-ordered overlay stream
+        for scaled text and images plus a separate ID/revision-addressed immutable asset store, so
+        buffers are neither duplicated per occurrence nor compared byte by byte. The cascade's
+        ordinary-inline size reset must exclude replaced elements; otherwise inline image CSS and
+        presentational dimensions are erased before layout.
+      - [x] **Native VGA output** *(done)*. The VGA adapter nearest-samples only the visible target
+        pixels from immutable decoded RGBA and alpha-blends them through the existing framebuffer
+        overlay path; unlike terminal protocols, this requires no resize allocation or encoding. Image and scaled-
+        text overlays share CSS paint order and obey content clipping, vertical scroll, partial
+        viewport edges, menu occlusion, retained-surface restoration and damage tracking; the cursor
+        still paints last. Navigation, resize, theme/backdrop changes and failed replacements cannot
+        leave stale pixels.
+      - [x] **Terminal output** *(done)*. Detect terminal capability once after terminal setup and build fixed-
+        size `ratatui_image::sliced::SlicedProtocol` variants off the UI thread so vertical scrolling
+        never resizes or encodes during presentation. Use Sixel/Kitty/iTerm2 only for an unobscured
+        rectangular placement; fall back per placement to primitive cell-native halfblocks for
+        horizontal clipping, later overlapping paint or popup occlusion, and use halfblocks globally
+        if detection fails. While protocol images are present, compose fresh content on scroll rather
+        than trusting the retained terminal scroll shortcut. Evict stale variants and force fresh
+        content composition on movement, resize, navigation and replacement; terminal teardown clears
+        the final screen on quit. `--dump` always retains the
+        textual fallback and existing non-image terminal snapshots remain unchanged.
+        A protocol carries its whole picture in one cell's escape and marks the rest of the image
+        `CellDiffOption::Skip`; because `FrameComposer` replaces ratatui's diff with its own damage
+        tracking, it owes that rule too and must never hand a skipped cell to the backend. Confirmed
+        regression on this path, fixed here.
+
+      *Proof required:* decoder/resource contracts for every format, first-frame behavior, misleading
+      MIME, malformed input, redirects, deduplication, budgets, refusal, cancellation and stale
+      generations; fallback transitions, intrinsic/CSS sizing, every supported formatting context,
+      clipping, linked-image hits, completion coalescing and overlay order; VGA pixel cases for
+      scaling, alpha, scroll, overlap, occlusion, damage and cursor order; injected terminal protocol
+      cases, halfblock snapshots, sliced scrolling, complex-clip fallback, stale-region clearing and
+      incremental-versus-fresh presentation equivalence. Run the complete local feature matrix for
+      delivery. The `terminal-cell-v1` WPT oracle continues to exclude image cases; raster reftests
+      now run under the separate `vga-pixel-v1` oracle below, where all three admitted cases are
+      `xfail` pending CSS pixel precision for replaced sizing.
+      Human Wikipedia image smoke in both VGA and terminal is the final acceptance gate.
 - [ ] **Floats** — conformant line-flow-around-float formatting.
-- [ ] **Images** via `ratatui-image` 11.0.6 (Sixel/Kitty/iTerm2 + halfblock fallback); `[alt]` from
-      M1-B stays the fallback when no protocol is available.
 - [ ] **Perf gate**: largest corpus page layout+paint < 200 ms debug. Includes memoizing
       `format_inline`, which is currently recomputed on every Taffy measure call, again for intrinsic
       width, and again when emitting fragments; it also decides whether `DisplayList` can stay dense
@@ -982,6 +1062,51 @@ mapping exists to keep the frozen terminal fallback behaviourally aligned, as `f
         upstream bytes, license and SHA-256 membership under `testdata/wpt/`; Rust tests never use
         the network. Completion requires audited=27, eligible=5, run=5, pass=5, xfail=0, skip=22,
         no unexpected/crash/timeout/harness result, all local gates, and the manual smoke list.
+- [x] **VGA pixel WPT profile** *(done)*. `vga-pixel-v1` is a second typed profile inside the same
+      manifest, so the raster cases inherit the existing hash, isolation, watchdog, allow-listed
+      resource and match/mismatch contracts rather than getting a parallel runner. It renders test
+      and reference at the fixed 100×38 cell viewport through deterministic `PageLoad`/image
+      delivery and the real VGA software surface, crops the browser chrome away and compares exact
+      RGB with no tolerance; a mismatch writes actual/expected/diff PNGs below `target/wpt-vga/`.
+      Terminal-cell verdicts stay separate, and font cases remain excluded independently.
+      - **Admitted:** WPT `css/css-sizing/box-sizing-replaced-001..003.xht` with their references
+        and 20 raster support files, at the existing pinned revision.
+      - **Result:** audited=3, eligible=3, run=3, pass=0, xfail=3, skip=0, no
+        unexpected/crash/timeout/harness result. The three are expected failures for the reason
+        below, and the profile reports a passing case as `unexpected`, so it is a two-way tripwire.
+      - **Honest label:** this is TextSurfer's deterministic VGA profile, not general browser pixel
+        equivalence.
+- [ ] **CSS pixel precision for replaced sizing** *(open — found by the `vga-pixel-v1` profile)*.
+      Lengths are converted to whole cells at computed-value time, so a replaced element's `min-*`
+      and `max-*` reach layout already rounded. When a constraint pins one axis, the ratio-preserving
+      size of the other is then derived from the rounded value: `max-height: 85px` becomes five
+      16px rows, and the width taken from it is 80px where the reference's authored `width: 75px`
+      is nine 8px columns. That one-column drift is why the three admitted WPT replaced-sizing
+      reftests are `xfail`. Closing it means carrying CSS pixel precision into replaced sizing and
+      quantising once, at the end; the WPT cases turning into `unexpected` passes is the proof.
+- [x] **Rendering regression atlas** *(done)*. `tests/fixtures/render_atlas.html` is one
+      deterministic offline document split into 10 stable named panels — `ua-flow`, `inline-state`,
+      `lists`, `tables`, `controls`, `search-flex`, `box-layout`, `flex-grid`, `images`,
+      `presentational` — covering the rendering-special element families and the supported block,
+      table, flex, grid, form-control and replaced-image constellations. Image requests are answered
+      synchronously from fixed RGBA fixtures; no network, worker, clock, OS font or JS is involved.
+      Every panel carries semantic and geometry assertions, and a manifest rejects duplicate,
+      missing, oversized or untested panels.
+      - **Reference inventory:** 33 Insta snapshots (30 per-panel styled-cell, 3 whole-document
+        structure) across the 40, 100 and 160-column widths, plus 30 exact VGA PNG references under
+        `tests/reference/vga/render_atlas/`.
+      - **Update rules:** ordinary runs compare and never rewrite. Terminal references use Insta's
+        explicit update mode; VGA references require both the ignored generator and
+        `TEXTSURFER_UPDATE_ATLAS=1`. Failures write actual and diff PNGs only below
+        `target/render-atlas/`.
+      - Standards correctness remains the pinned WPT profiles' job; the atlas locks TextSurfer's
+        reviewed cell-quantized result rather than declaring browser pixel equivalence.
+- **Standing rule — rendering regressions.** Every rendering defect gains a focused minimal
+  regression, and a visually relevant one also gains or amends an atlas panel. Every newly supported
+  rendering-special element or layout context extends the atlas manifest before its roadmap item can
+  be marked done. Compatible standards behavior is backfilled into the pinned WPT profiles
+  incrementally. Actual gate counts, reference inventory, WPT profile results and human-smoke status
+  are recorded in the log below.
 - [ ] **Incremental WPT terminal-cell backfill** *(open; non-blocking after the pilot)*. Import one
       bounded, fully inventoried tranche at a time from supported box, sizing, values, alignment,
       flex, grid and table suites. Exact existing case statuses may not regress, but the reported raw
@@ -1021,6 +1146,40 @@ full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, dra
 ## Roadmap updates log
 
 Log of decisions, pins, and plan changes only — task status lives in the plan markers above.
+
+- 2026-08-27 — **Terminal graphics-protocol images were being overprinted by their own halfblock
+  fallback; confirmed from user smoke and fixed.** Reported symptom: the top band of every image
+  rendered at full resolution, the rest as halfblocks, with the real picture visible behind the
+  halfblocks whenever a pointer move forced a repaint. Cause: a graphics protocol puts the entire
+  escape sequence in one cell and marks every other cell of the picture `CellDiffOption::Skip`;
+  those cells still hold the halfblock fallback, and `FrameComposer` — which does its own damage
+  tracking instead of using ratatui's diff — handed all of them to the backend. Two things followed:
+  the fallback text printed over the picture, and because the escape's cell declares
+  `ForcedWidth(1)` while a sixel leaves the real cursor below the image, the crossterm backend
+  suppressed its `MoveTo` and landed the rest of the run at the wrong place. The composer now drops
+  skipped cells, which is the rule ratatui's own diff applies. Proof: a focused regression drives a
+  real sixel picker and asserts the reserved cells are composed but withheld while the escape's own
+  cell is drawn; it fails on the previous code at the first covered cell. Format, all three strict
+  Clippy configurations and the default/JS/VGA/no-default matrices are green at 858 library tests
+  (764 without defaults). The terminal image path still needs a human re-smoke.
+
+- 2026-08-27 — **Rendering-regression hardening delivered; replaced sizing corrected and its
+  remaining drift pinned as an xfail.** The rendering atlas and the `vga-pixel-v1` WPT profile are
+  both in place with the inventories recorded in their items above. Admitting WPT
+  `box-sizing-replaced-001..003.xht` immediately caught a real defect the focused tests had missed:
+  `min-*`/`max-*` on a decoded image clamped the two axes independently, so a constraint stretched
+  the picture instead of scaling it, and `box-sizing: border-box` was ignored for those constraints
+  while a natural size rounded up where an authored length rounds to nearest. `image_cells` now
+  follows CSS 2.1 §10.4's table, subtracts the element's own chrome when `box-sizing` says to, and
+  rounds like `CellMetric::resolve_cells`; the two table rows that scale one axis to satisfy a
+  minimum are clamped afterwards, which is what the WPT references expect. What remains is not an
+  algorithm bug but lost precision — computed lengths are already whole cells, so a width derived
+  from a rounded `max-height` lands one column off the reference — and it is now an open item with
+  the three cases held as `xfail` rather than a weakened comparison. Format, all three strict Clippy
+  configurations and the default/JS/VGA/no-default matrices are green at 857 library tests (763
+  without defaults), 13/12 binary, 6 fetch-pipeline, 14 corpus, 42 golden, 3 atlas and 6 WPT.
+  Human VGA and terminal smoke on example.com, DuckDuckGo and Wikipedia images is still pending, so
+  **Images** stays open.
 
 - 2026-08-26 — **DuckDuckGo click-through smoke passed.** The user confirmed that searching for
   `cpu` and opening the first Wikipedia result now loads the destination successfully. This closes
@@ -1964,6 +2123,24 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   library, 13 binary, 4 fetch-pipeline, 14 corpus and 32 render-golden tests; no-default passes 501
   library, 12 binary and the same integration/golden sets. No snapshot changed and no `.snap.new`
   file was produced.
+- 2026-08-26 — **Next-work and image architecture re-audited; roadmap corrected (user).** The
+  user-run `cargo update` resolves latest indextree 4.9.0, whose current documentation identifies
+  `append_value` as the constant-time fast path for creating and appending a child; the API itself
+  predates 4.9.0. That directly invalidates the risk register's
+  older "not fixable at the call site" conclusion: the current `Document::append` is still
+  quadratic until migrated, so this focused M2 robustness item is now the immediate prerequisite
+  and must pass an isolated 100,000-node watchdog case plus the complete gates before feature work.
+  Images are promoted next, ahead of remaining M2 work and floats, as one required delivery across
+  both frontends. Latest audited pins are `image` 0.25.10 for bounded PNG/JPEG/WebP/first-GIF-frame
+  decoding and `ratatui-image` 11.0.6 only for terminal Sixel/Kitty/iTerm2/sliced/primitive-halfblock
+  output, both without default features; the default VGA frontend uses its native framebuffer.
+  The shared resource/decode, replaced-layout/paint, VGA and terminal subitems each own contract
+  tests and a full gate run. Terminal high-resolution protocols degrade to halfblocks for complex
+  clipping or occlusion, `--dump` keeps the existing alt fallback, and immutable CPU image work is
+  the only planned expansion of the thread invariant. The terminal-cell WPT profile remains honest:
+  image cases stay excluded until a separately reviewed `vga-pixel-v1` oracle exists. This entry
+  records a plan only; no item is in progress or done, no dependency pin has landed, and the user's
+  unverified lockfile update is preserved for its own later gate run.
 - 2026-08-26 — **Linear-time DOM construction landed.** Pinned indextree 4.9.0 and changed only
   `Document::append`'s fresh-child path to `append_value`; operations over existing `NodeId`s retain
   `Document` validation and indextree's checked mutations. The new isolated watchdog regression
@@ -1971,3 +2148,34 @@ Log of decisions, pins, and plan changes only — task status lives in the plan 
   0.26 s after the migration. Direct root/sibling/parent and move-cycle cases remain green. The
   complete local matrix passed: fmt; strict default, all-feature and no-default Clippy; default,
   JS, explicit-VGA and no-default tests. M6 Images is now the explicit next task.
+- 2026-08-26 — **Image dependency MSRV raised to 1.90 before implementation.** `image` 0.25.10
+  itself supports Rust 1.88, but latest `ratatui-image` 11.0.6 resolves `icy_sixel` 0.5.1 and
+  `quantette` 0.6.0, whose published floor is Rust 1.90. TextSurfer now declares Rust 1.90 rather
+  than claiming an unsupported 1.88 terminal-image graph; default features remain disabled on both
+  image crates.
+- 2026-08-27 — **M6 Images implemented; human VGA/terminal smoke pending.** Static `<img src>` now
+  resolves and deduplicates same-scheme page subresources without blocking first paint, decodes
+  signature-selected PNG/JPEG/WebP and first-frame GIF through a bounded generation-tagged worker,
+  rechecks redirected final schemes, and enforces per-image and aggregate fetch/RGBA limits. Pending and failed resources retain the
+  established alt fallback; decoded replacements preserve intrinsic aspect ratio and CSS sizing in
+  inline, block, table, flex and grid layout, including percentage bases, clipping, links and DOM-
+  ordered overlay/hit behavior. VGA nearest-samples visible RGBA directly into the retained
+  framebuffer with alpha, scroll, occlusion, damage restoration and cursor-last behavior. Terminal
+  output uses one bounded off-thread `SlicedProtocol` preparation worker after one capability query,
+  falls back per placement to alpha-composited halfblocks for clipping, occlusion or later overlaps,
+  and repaints image content rather than using the retained scroll shortcut. The dependency audit
+  remains `image` 0.25.10 and `ratatui-image` 11.0.6 at Rust 1.90; the user's lockfile refresh includes
+  ordered-float 5.5.0. The complete format, strict default/all-feature/no-default Clippy and
+  default/JS/VGA/no-default test matrix is green: 854 library tests with default, JS and VGA, 760
+  without defaults, plus 13/12 binary, 6 fetch-pipeline, 14 corpus, 42 render-golden and the static
+  WPT supervisor targets. No snapshot changed. Wikipedia image smoke in both frontends remains the
+  final acceptance gate, so the item is done rather than complete.
+- 2026-08-27 — **Image acceptance reopened and rendering hardening promoted.** A live 160-column
+  Wikipedia dump exposed a zero-row search-field content box: excluding decoded images from the
+  control minimum-height safeguard also replaced the border-box-adjusted intrinsic height with the
+  raw one-row control height. Existing tests covered flex, border-box padding and max-height
+  separately, so their real-site combination remained unguarded. Images return to in progress until
+  the exact flex/search constellation has a focused regression and the user's VGA/terminal smoke
+  passes. A deterministic named-panel rendering atlas now follows that fix, with semantic geometry,
+  styled terminal-cell and exact VGA-pixel layers, then the pinned static-WPT runner gains its
+  separately labelled `vga-pixel-v1` profile for supported raster reftests.

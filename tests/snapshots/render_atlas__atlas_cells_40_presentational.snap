@@ -1,0 +1,64 @@
+---
+source: tests/render_atlas.rs
+expression: "styled_panel(&page.painted, cols, start, end)"
+---
+│ATLAS:presentational                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..21 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
+  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                 center                 │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..18 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  18..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  24..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│              legacy colour             │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..15 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  15..28 fg=Rgb(0, 255, 0) bg=Rgb(0, 0, 128) mod=NONE
+  28..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│       ┌──────────────┐                 │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..8 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  8..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  24..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│       │   legacy cell│                 │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..8 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  8..9 fg=Rgb(102, 102, 102) bg=Rgb(64, 0, 0) mod=NONE
+  9..12 fg=Rgb(16, 16, 16) bg=Rgb(0, 64, 0) mod=NONE
+  12..23 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  23..24 fg=Rgb(102, 102, 102) bg=Rgb(64, 0, 0) mod=NONE
+  24..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│       └──────────────┘                 │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..8 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  8..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  24..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│        bottom caption                  │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  9..23 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  23..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

@@ -18,6 +18,7 @@ use crate::core::focus::Focus;
 use crate::core::frame::FrameDamage;
 use crate::core::geom::{Point, Size};
 use crate::core::style::{RenderMetrics, TextRendering};
+use crate::pipeline::image::{ImageDecodePool, ImageDecodeQueue, RasterImageDecoder};
 use crate::ui::editing::EditBuffer;
 use crate::ui::mouse::ChromeGeometry;
 
@@ -40,6 +41,7 @@ pub struct App {
     generation: u64,
     geometry: ChromeGeometry,
     net: Arc<dyn Navigate>,
+    images: Arc<dyn ImageDecodeQueue>,
     menu_open: bool,
     menu_active: usize,
     menu_item: usize,
@@ -56,6 +58,7 @@ pub struct App {
     pending_resize: Option<(Size, Duration)>,
     dynamic_settle: Option<Duration>,
     net_lost: bool,
+    image_decode_lost: bool,
 }
 
 impl Default for App {
@@ -84,6 +87,18 @@ impl App {
     }
 
     pub fn with_net_and_metrics(net: Arc<dyn Navigate>, render_metrics: RenderMetrics) -> Self {
+        Self::with_net_metrics_and_images(
+            net,
+            render_metrics,
+            Arc::new(ImageDecodePool::new(Arc::new(RasterImageDecoder))),
+        )
+    }
+
+    pub(crate) fn with_net_metrics_and_images(
+        net: Arc<dyn Navigate>,
+        render_metrics: RenderMetrics,
+        images: Arc<dyn ImageDecodeQueue>,
+    ) -> Self {
         let geometry = ChromeGeometry::for_size(DEFAULT_SIZE);
         Self {
             focus: Focus::Address,
@@ -97,6 +112,7 @@ impl App {
             generation: 0,
             geometry,
             net,
+            images,
             menu_open: false,
             menu_active: 0,
             menu_item: 0,
@@ -113,6 +129,7 @@ impl App {
             pending_resize: None,
             dynamic_settle: None,
             net_lost: false,
+            image_decode_lost: false,
         }
     }
 
@@ -124,6 +141,7 @@ impl App {
     /// timeout would otherwise hold the process open through `FetchPool::drop`.
     pub fn shutdown_net(&self) {
         self.net.shutdown();
+        self.images.shutdown();
     }
 
     pub fn take_dirty(&mut self) -> bool {

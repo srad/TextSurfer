@@ -39,7 +39,8 @@ Ready                              https://example.com
 **Current (M0, M1-R and M1.5 complete; M1-A and M1-B done, awaiting human smoke;
 M1-C done, awaiting human smoke; M1-D done, awaiting human VGA smoke; M3 slice 1 — mouse navigation
 — done, with wheel, links, toolbar and menu confirmed by hand in the VGA window; terminal smoke
-deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human smoke pending)**
+deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human smoke pending;
+M6 images — done, human VGA/terminal smoke pending)**
 
 - Real HTTP(S) and `file://` loading via a fixed 4-worker fetch pool (ureq, OS-native certificate
   roots) with timeouts, cancellation and a 10 MiB response limit. Quitting detaches the workers
@@ -115,8 +116,12 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   through the display list for keyboard and mouse targeting. Partial-alpha foregrounds composite
   over the effective cell background; transparent text loses its ink while retaining layout, link
   and hit geometry
-- `<img>` renders nonempty alternative text as `[alt]`, deliberately empty or whitespace-only
-  alternatives as nothing, and `[img]` when `alt` is absent; `<hr>` spans the content width
+- Static `<img src>` loads bounded PNG, JPEG, WebP and first-frame GIF resources without delaying
+  first paint. Decoded images participate in CSS sizing, inline/block/table/flex/grid layout,
+  clipping and linked hit geometry; failures keep nonempty alternative text as `[alt]`, deliberately
+  empty alternatives as nothing, and `[img]` when `alt` is absent. VGA paints native RGBA pixels;
+  the terminal selects Sixel/Kitty/iTerm2 once, prepares sliced protocols off-thread and falls back
+  per placement to alpha-composited halfblocks. `<hr>` spans the content width
 - Dynamic selectors: `:link`, `:any-link`, `:hover`, `:focus`, `:active`, `:checked`, `:enabled`
   and `:disabled` match against injected state; `:visited` never matches, so page styling cannot
   observe history. Form states are host-language-correct — `:checked` applies only to a checkbox,
@@ -152,14 +157,22 @@ deferred; M3 slice 3 — tab close boxes and the page scrollbar — done, human 
   passing, 22 explicitly skipped; each graph runs offline in an isolated child with a parent
   watchdog. This is a TextSurfer cell-rendering and crash-safety slice, not browser pixel
   conformance
+- Static WPT `vga-pixel` profile for raster reftests — 3 replaced-sizing cases rendered through the
+  real framebuffer and compared as exact RGB, all three held as expected failures while CSS lengths
+  are still rounded to whole cells before layout sees them
+- Rendering regression atlas — one offline document of 10 named panels rendered at 40, 100 and 160
+  columns, locked by 33 styled-cell snapshots and 30 exact VGA PNG references
 
 **Next on the roadmap** (see `ROADMAP.md`, the single source of truth): the CSS-math implementation
 and its real-site smoke are complete. Mixed length/percentage `calc()`/`min()`/`max()`/`clamp()`
 values now reach sizing, margins, padding, insets, gaps, flex basis, font size and Grid tracks
 through the frontend render metric and layout-time percentage bases. Grid provides block, inline
-and nested layout with named lines/areas, auto-placement, alignment and gaps. Floats are the next
-open M6 rendering item. Product work continues with keyboard links, form editing and submission,
-and in-page search (M2), then the JavaScript seam/Boa integration (M4–M5).
+and nested layout with named lines/areas, auto-placement, alignment and gaps. Static raster images
+are implemented across VGA and terminal, with human smoke pending. Rendering regressions are now
+caught by the atlas and the two WPT profiles rather than by eye; carrying CSS pixel precision into
+replaced-element sizing is the open item those raster reftests turned up. Product work returns to
+keyboard links, form editing and submission, and in-page search (M2); floats remain the next open M6
+rendering item, followed by the JavaScript seam/Boa integration (M4–M5).
 
 ## Architecture
 
@@ -259,6 +272,12 @@ its override key (usually `Shift`) while TextSurfer has the screen.
   with counters and `attr()`, simple and collapsed/spanned tables, nested/captioned tables, and
   fixed-layout overflow, outer/inner display modes, Flex, Grid and mixed CSS math, with assertions
   for link geometry, colour contrast and `--dump` parity.
+- **Rendering atlas** — one offline document of 10 named panels, each covering a rendering-special
+  element family or layout constellation, rendered at 40, 100 and 160 columns. Every panel is
+  asserted semantically first, then locked by a styled-cell snapshot and an exact VGA PNG
+  reference. Ordinary runs never rewrite a reference: terminal ones need Insta's explicit update
+  mode, VGA ones need both an ignored generator and `TEXTSURFER_UPDATE_ATLAS=1`, and a mismatch
+  writes actual and diff images below `target/`.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -302,6 +321,7 @@ M2 tabs/keyboard/forms · M4 JS seam · M5 Boa · M6 stretch.
 [thiserror](https://github.com/dtolnay/thiserror) · [boa_engine](https://github.com/boa-dev/boa)
 (behind the `js` feature) · [winit](https://github.com/rust-windowing/winit) ·
 [softbuffer](https://github.com/rust-windowing/softbuffer) ·
+[image](https://github.com/image-rs/image) · [ratatui-image](https://github.com/benjajaja/ratatui-image) ·
 [unifont-bitmap](https://github.com/SolraBizna/unifont-bitmap) (behind the `vga` feature) — plus the
 [Web Platform Tests](https://github.com/web-platform-tests/wpt) corpus for conformance.
 

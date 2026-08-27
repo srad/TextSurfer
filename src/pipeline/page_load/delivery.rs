@@ -38,7 +38,16 @@ impl PageLoad {
         result: Result<FetchResponse, FetchError>,
     ) -> bool {
         if resource_id == ResourceId::DOCUMENT || self.external_disabled {
+            if resource_id == ResourceId::DOCUMENT {
+                return false;
+            }
+            if self.image_fetch_index.contains_key(&resource_id) {
+                return self.deliver_image_fetch(resource_id, result);
+            }
             return false;
+        }
+        if self.image_fetch_index.contains_key(&resource_id) {
+            return self.deliver_image_fetch(resource_id, result);
         }
         let Some(index) = self.fetch_index.get(&resource_id).copied() else {
             return false;
@@ -174,11 +183,12 @@ impl PageLoad {
 
     pub(super) fn disable_external(&mut self) {
         self.external_disabled = true;
-        self.cancel_requested = true;
+        self.cancel_requested = self.images.is_empty();
         self.raw_bytes = 0;
         self.decoded_bytes = 0;
         self.decoded_cache.clear();
-        self.commands.clear();
+        self.commands
+            .retain(|command| self.image_fetch_index.contains_key(&command.resource_id));
         for fetch in &mut self.fetches {
             fetch.state = FetchState::Failed;
         }

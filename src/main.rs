@@ -126,6 +126,8 @@ fn main() -> io::Result<()> {
         previous_hook(info);
     }));
     ratatui::run(|terminal| {
+        let picker = ratatui_image::picker::Picker::from_query_stdio()
+            .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
         let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
         let mut app = App::with_net(net);
         let area = terminal.size()?;
@@ -137,7 +139,7 @@ fn main() -> io::Result<()> {
             app.submit_url(&url);
         }
         io::stdout().execute(EnableMouseCapture)?;
-        let outcome = run(terminal, &mut app);
+        let outcome = run(terminal, &mut app, picker);
         io::stdout().execute(DisableMouseCapture)?;
         outcome
     })
@@ -174,15 +176,21 @@ fn dump(fetch: Arc<dyn textsurfer::net::Fetch>, url: &str, cols: u16, rows: u16)
     Ok(())
 }
 
-fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
+fn run(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    picker: ratatui_image::picker::Picker,
+) -> io::Result<()> {
     let started = Instant::now();
     let mut events = CrosstermEvents;
     let area = terminal.size()?;
-    let mut composer = FrameComposer::new(area.into());
+    let mut composer = FrameComposer::with_image_picker(area.into(), picker);
+    let image_work = composer.image_work_signal();
     run_with(
         &mut events,
         app,
         || started.elapsed(),
+        image_work,
         |app, damage| {
             let view = app.chrome_view();
             composer.present(terminal.backend_mut(), &view, damage)
@@ -209,7 +217,13 @@ impl TerminalEvents for CrosstermEvents {
     }
 }
 
-fn run_with<E, N, D>(events: &mut E, app: &mut App, mut now: N, mut draw: D) -> io::Result<()>
+fn run_with<E, N, D>(
+    events: &mut E,
+    app: &mut App,
+    mut now: N,
+    image_work: Option<std::sync::Arc<textsurfer::ui::frame::ImageWorkSignal>>,
+    mut draw: D,
+) -> io::Result<()>
 where
     E: TerminalEvents,
     N: FnMut() -> Duration,
@@ -223,7 +237,10 @@ where
         } else if app.next_wake().is_some_and(|deadline| deadline <= current) {
             app.advance(&InputBatch::new(), current);
         }
-        let damage = app.take_damage();
+        let mut damage = app.take_damage();
+        if damage.is_empty() && image_work.as_ref().is_some_and(|work| work.ready()) {
+            damage = FrameDamage::full();
+        }
         if !damage.is_empty() {
             draw(app, &damage)?;
         }
@@ -233,9 +250,12 @@ where
             return Ok(());
         }
         let current = now();
-        let timeout = scheduler
+        let mut timeout = scheduler
             .next_deadline(app.next_wake())
             .map_or(IDLE_POLL, |deadline| deadline.saturating_sub(current));
+        if image_work.as_ref().is_some_and(|work| work.pending()) {
+            timeout = timeout.min(Duration::from_millis(16));
+        }
         if events.poll(timeout)? {
             push_terminal_event(&mut scheduler, events.read()?, now());
             for _ in 1..EVENTS_PER_FRAME {

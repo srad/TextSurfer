@@ -56,6 +56,14 @@ impl PageLoad {
         self.render_page()
     }
 
+    pub fn render_after_image(&mut self) -> Option<RenderedPage> {
+        if !self.first_painted || !self.dirty {
+            return None;
+        }
+        self.dirty = false;
+        Some(self.render_page())
+    }
+
     pub(super) fn applicable_graph_settled(&self) -> bool {
         if self.external_disabled {
             return true;

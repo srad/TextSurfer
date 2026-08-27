@@ -1,0 +1,149 @@
+---
+source: tests/render_atlas.rs
+expression: "styled_panel(&page.painted, cols, start, end)"
+---
+│ATLAS:images                            │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..13 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
+  13..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                         │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  9..16 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  16..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                         │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  9..16 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  16..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│┌────────┐                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀▀▀▀▀│                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..6 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  6..10 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  10..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀▀▀▀▀│                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..6 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  6..10 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  10..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀▀▀▀▀│                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..6 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  6..10 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  10..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀▀▀▀▀│                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..6 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  6..10 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  10..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│└────────┘                              │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..11 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  11..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│ ▀▀▀▀                                   │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..4 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  4..6 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  6..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│ ▀▀▀▀                                   │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..4 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  4..6 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  6..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│┌────────────────────────────┐          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀ beside                 │          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..4 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  4..6 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  6..7 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  7..13 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  13..30 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  30..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀                        │          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..4 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  4..6 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  6..30 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  30..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│└────────────────────────────┘          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│┌────────────────────────────┐          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀      beside            │          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..4 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  4..6 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  6..12 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  12..18 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  18..30 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  30..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││▀▀▀▀                        │          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  2..4 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  4..6 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  6..30 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  30..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│└────────────────────────────┘          │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

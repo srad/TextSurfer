@@ -109,6 +109,8 @@ pub(super) struct TableFormatter<'a> {
     document: &'a Document,
     styles: &'a StyleTree,
     forms: &'a FormState,
+    images: Option<&'a crate::core::image::ImageResources>,
+    cell_metric: crate::core::style::CellMetric,
     metric_cache: RefCell<HashMap<(NodeId, usize, usize, usize), MetricAtom>>,
 }
 
@@ -126,6 +128,8 @@ impl<'a> TableFormatter<'a> {
             document: input.document,
             styles: input.styles,
             forms: input.forms,
+            images: input.images,
+            cell_metric: input.cell_metric,
             metric_cache: RefCell::new(HashMap::new()),
         }
     }

@@ -1,5 +1,67 @@
 use super::*;
 
+#[test]
+fn image_fetches_route_through_the_injected_decoder_by_tab_and_generation() {
+    let net = Arc::new(FakeNet::default());
+    let images = Arc::new(FakeImages::default());
+    let mut app = App::with_net_metrics_and_images(
+        net.clone(),
+        crate::core::style::RenderMetrics::TERMINAL,
+        images.clone(),
+    );
+    app.submit_url("https://example.com/page");
+    let document = net.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/page").unwrap(),
+            status: 200,
+            body: b"<img id=hero src=hero.png>".to_vec(),
+            content_type: Some("text/html".to_string()),
+        }),
+        ..document
+    }));
+    let image_fetch = net.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/hero.png").unwrap(),
+            status: 200,
+            body: vec![1, 2, 3],
+            content_type: Some("text/plain".to_string()),
+        }),
+        ..image_fetch
+    }));
+    let job = images.submitted.lock().unwrap().pop().unwrap();
+    assert_eq!(job.tab_id, app.tabs.active().id);
+    assert_eq!(job.generation, app.tabs.active().generation);
+    images.pending.lock().unwrap().push(ImageDecodePayload {
+        tab_id: job.tab_id,
+        generation: job.generation,
+        asset_id: job.request.asset_id,
+        revision: job.request.revision,
+        result: Ok(crate::core::image::DecodedImage {
+            asset_id: job.request.asset_id,
+            revision: job.request.revision,
+            width: 1,
+            height: 1,
+            rgba: Arc::from([7, 8, 9, 255]),
+        }),
+    });
+    app.step(Duration::ZERO);
+    let tab = app.tabs.active();
+    let node = tab
+        .document
+        .as_ref()
+        .unwrap()
+        .borrow()
+        .element_by_id("hero")
+        .expect("image node");
+    let load = tab.load.as_ref().unwrap();
+    assert_eq!(
+        load.decoded_image(node).unwrap().rgba.as_ref(),
+        &[7, 8, 9, 255]
+    );
+}
+
 fn scrolled_page_waiting_for_late_stylesheet() -> (App, FetchPayload) {
     let fake = Arc::new(FakeNet::default());
     let mut app = App::with_net(fake.clone());

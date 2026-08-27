@@ -5,11 +5,12 @@ mod strokes;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::NodeId;
+use crate::core::image::{DecodedImage, ImageAssetId};
 use crate::core::style::{CellStyle, Palette};
 use crate::layout::{BoxTree, LayoutLimits, LayoutRect};
 
@@ -25,6 +26,9 @@ pub struct DisplayList {
     pub hit_rows: BTreeMap<usize, Vec<usize>>,
     pub links: Vec<PaintedLink>,
     pub scaled_text: Vec<ScaledTextRun>,
+    pub images: Vec<PaintedImage>,
+    pub image_assets: HashMap<ImageAssetId, DecodedImage>,
+    pub overlays: Vec<PaintOverlay>,
     /// Carried through from layout so the chrome can say what the page did not get.
     /// It rides the display list rather than `RenderedPage` because the resize path
     /// repaints straight from a stored document and never builds one.
@@ -53,6 +57,22 @@ pub struct ScaledTextRun {
     pub ink: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintedImage {
+    pub node: NodeId,
+    pub asset_id: ImageAssetId,
+    pub revision: u64,
+    pub rect: LayoutRect,
+    pub clip: LayoutRect,
+    pub depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaintOverlay {
+    ScaledText(usize),
+    Image(usize),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaintedLink {
     pub node: NodeId,
@@ -74,6 +94,7 @@ pub struct HitRegion {
 pub enum HitKind {
     Box,
     Text,
+    Image,
 }
 
 impl DisplayList {
@@ -245,6 +266,51 @@ impl Painter for BasicPainter {
                 run.style.strike = strike;
             }
         }
+        let images = box_tree
+            .images
+            .iter()
+            .map(|image| PaintedImage {
+                node: image.node,
+                asset_id: image.asset_id,
+                revision: image.revision,
+                rect: image.rect,
+                clip: image.clip,
+                depth: image.depth,
+            })
+            .collect::<Vec<_>>();
+        let mut overlays = scaled_text
+            .iter()
+            .enumerate()
+            .map(|(index, run)| {
+                (
+                    run.depth,
+                    box_tree
+                        .paint_order
+                        .get(&run.node)
+                        .copied()
+                        .unwrap_or(index),
+                    index,
+                    PaintOverlay::ScaledText(index),
+                )
+            })
+            .chain(images.iter().enumerate().map(|(index, image)| {
+                (
+                    image.depth,
+                    box_tree
+                        .paint_order
+                        .get(&image.node)
+                        .copied()
+                        .unwrap_or(index),
+                    index,
+                    PaintOverlay::Image(index),
+                )
+            }))
+            .collect::<Vec<_>>();
+        overlays.sort_by_key(|(depth, order, index, _)| (*depth, *order, *index));
+        let overlays = overlays
+            .into_iter()
+            .map(|(_, _, _, overlay)| overlay)
+            .collect();
         let mut painted = vec![PaintedRow::default(); box_tree.height];
         for (row, buffer) in rows {
             painted[row] = buffer.into_row(palette);
@@ -261,14 +327,47 @@ impl Painter for BasicPainter {
                 paint_order: hits.len(),
             });
         }
-        let mut hit_fragments: Vec<_> = box_tree.fragments.iter().collect();
-        hit_fragments.sort_by_key(|fragment| (fragment.depth, fragment.row, fragment.col));
-        for fragment in hit_fragments {
+        let mut content_hits = box_tree
+            .fragments
+            .iter()
+            .map(|fragment| {
+                (
+                    fragment.depth,
+                    box_tree
+                        .paint_order
+                        .get(&fragment.node)
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    fragment.row,
+                    fragment.col,
+                    fragment.node,
+                    fragment.rect(),
+                    HitKind::Text,
+                )
+            })
+            .chain(images.iter().map(|image| {
+                (
+                    image.depth,
+                    box_tree
+                        .paint_order
+                        .get(&image.node)
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    image.rect.row,
+                    image.rect.col,
+                    image.node,
+                    image.clip,
+                    HitKind::Image,
+                )
+            }))
+            .collect::<Vec<_>>();
+        content_hits.sort_by_key(|(depth, order, row, col, _, _, _)| (*depth, *order, *row, *col));
+        for (depth, _, _, _, node, rect, kind) in content_hits {
             hits.push(HitRegion {
-                node: fragment.node,
-                rect: fragment.rect(),
-                depth: fragment.depth,
-                kind: HitKind::Text,
+                node,
+                rect,
+                depth,
+                kind,
                 paint_order: hits.len(),
             });
         }
@@ -285,7 +384,7 @@ impl Painter for BasicPainter {
                 let paint_order = hits
                     .iter()
                     .filter(|hit| {
-                        hit.kind == HitKind::Text
+                        hit.kind != HitKind::Box
                             && link.hit_nodes.contains(&hit.node)
                             && link.rects.iter().any(|rect| covers(*rect, hit.rect))
                     })
@@ -306,6 +405,9 @@ impl Painter for BasicPainter {
             hit_rows,
             links,
             scaled_text,
+            images,
+            image_assets: HashMap::new(),
+            overlays,
             limits: box_tree.limits,
         }
     }

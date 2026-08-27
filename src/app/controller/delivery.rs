@@ -6,6 +6,7 @@ use crate::net::{
     FetchPayload, FetchPoll, ResourceId, charset_from_content_type, decode, decode_text,
 };
 use crate::paint::DisplayList;
+use crate::pipeline::image::{ImageDecodeJob, ImageDecodePayload, ImageDecodePoll, ImageSubmitted};
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
 use crate::pipeline::render::{RenderedPage, ResponseKind, response_kind};
 
@@ -51,6 +52,22 @@ impl App {
                 }
             }
         }
+        let mut image_payloads = Vec::new();
+        let mut image_decode_lost = false;
+        for _ in 0..FETCH_RESULTS_PER_STEP {
+            match self.images.poll() {
+                ImageDecodePoll::Ready(payload) => image_payloads.push(payload),
+                ImageDecodePoll::Empty => break,
+                ImageDecodePoll::Disconnected => {
+                    image_decode_lost = true;
+                    break;
+                }
+            }
+        }
+        self.deliver_image_decodes(image_payloads);
+        if image_decode_lost {
+            self.report_image_decode_lost();
+        }
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
         let display_changed = {
@@ -81,12 +98,40 @@ impl App {
         }
         self.net_lost = true;
         for tab in self.tabs.tabs_mut() {
-            if tab.document_pending || tab.load.as_ref().is_some_and(|load| !load.is_settled()) {
+            let was_pending =
+                tab.document_pending || tab.load.as_ref().is_some_and(|load| !load.is_settled());
+            if let Some(load) = tab.load.as_mut() {
+                load.fail_pending_image_fetches();
+            }
+            if was_pending {
                 tab.document_pending = false;
                 tab.message = "the network stopped responding - reopen TextSurfer".to_string();
             }
         }
         self.touch();
+    }
+
+    fn report_image_decode_lost(&mut self) {
+        if self.image_decode_lost {
+            return;
+        }
+        self.image_decode_lost = true;
+        let active = self.tabs.active_index();
+        let mut visible_change = false;
+        for (index, tab) in self.tabs.tabs_mut().iter_mut().enumerate() {
+            let changed = tab
+                .load
+                .as_mut()
+                .is_some_and(PageLoad::fail_pending_image_decodes);
+            if changed {
+                update_load_message(tab);
+                tab.render_dirty = index != active;
+                visible_change |= index == active;
+            }
+        }
+        if visible_change {
+            self.touch();
+        }
     }
 
     pub fn deliver_fetch(&mut self, payload: FetchPayload) -> bool {
@@ -103,6 +148,7 @@ impl App {
         let palette = self.theme().palette();
         let color_scheme = self.color_scheme();
         let mut commands = Vec::new();
+        let mut image_commands = Vec::new();
         let mut cancel = false;
         let mut declarative_refresh = None;
         let mut visible_change;
@@ -120,6 +166,7 @@ impl App {
                     return false;
                 }
                 commands = load.take_commands();
+                image_commands = load.take_image_decode_commands();
                 cancel = load.take_cancel_requested();
                 let page = (index == active_index)
                     .then(|| load.render_if_ready(self.now))
@@ -193,6 +240,7 @@ impl App {
                                         declarative_refresh = Some(url);
                                     } else {
                                         commands = load.take_commands();
+                                        image_commands = load.take_image_decode_commands();
                                         cancel = load.take_cancel_requested();
                                         let page = (index == active_index)
                                             .then(|| load.render_if_ready(self.now))
@@ -274,9 +322,43 @@ impl App {
             self.follow_declarative_refresh(tab_id, &url);
             return accepted;
         }
+        let mut closed_resources = Vec::new();
         for command in commands {
-            self.net
-                .submit(tab_id, generation, command.resource_id, command.url);
+            if self
+                .net
+                .submit(tab_id, generation, command.resource_id, command.url)
+                == crate::net::Submitted::Closed
+            {
+                closed_resources.push(command.resource_id);
+            }
+        }
+        for resource_id in closed_resources {
+            let _ = self.deliver_fetch(FetchPayload {
+                tab_id,
+                generation,
+                resource_id,
+                result: Err(crate::net::FetchError::Network(
+                    "the network is not running".to_string(),
+                )),
+            });
+        }
+        for request in image_commands {
+            let asset_id = request.asset_id;
+            let revision = request.revision;
+            let submitted = self.images.submit(ImageDecodeJob {
+                tab_id,
+                generation,
+                request,
+            });
+            if matches!(submitted, ImageSubmitted::Refused | ImageSubmitted::Closed) {
+                let _ = self.deliver_image_decode(ImageDecodePayload {
+                    tab_id,
+                    generation,
+                    asset_id,
+                    revision,
+                    result: Err(crate::core::image::ImageDecodeError::Unavailable),
+                });
+            }
         }
         if cancel {
             self.net.cancel(tab_id, generation);
@@ -285,6 +367,51 @@ impl App {
             self.refresh_hover();
         }
         if visible_change {
+            self.touch();
+        }
+        accepted
+    }
+
+    pub fn deliver_image_decode(&mut self, payload: ImageDecodePayload) -> bool {
+        self.deliver_image_decodes(std::iter::once(payload)) > 0
+    }
+
+    fn deliver_image_decodes(
+        &mut self,
+        payloads: impl IntoIterator<Item = ImageDecodePayload>,
+    ) -> usize {
+        let active_index = self.tabs.active_index();
+        let width = self.geometry.content_cols();
+        let rows = self.geometry.content_rows();
+        let mut accepted = 0;
+        let mut active_changed = false;
+        for payload in payloads {
+            let Some((index, tab)) = self.tabs.find_load_mut(payload.tab_id, payload.generation)
+            else {
+                continue;
+            };
+            let Some(load) = tab.load.as_mut() else {
+                continue;
+            };
+            if !load.deliver_image_decode(payload.asset_id, payload.revision, payload.result) {
+                continue;
+            }
+            accepted += 1;
+            if index == active_index {
+                active_changed = true;
+            } else {
+                tab.render_dirty = true;
+            }
+        }
+        if active_changed {
+            let tab = self.tabs.active_mut();
+            if let Some(load) = tab.load.as_mut() {
+                if let Some(page) = load.render_after_image() {
+                    apply_rendered_page(tab, page, width, rows);
+                }
+                update_load_message(tab);
+            }
+            self.refresh_hover();
             self.touch();
         }
         accepted
@@ -324,6 +451,11 @@ pub(super) fn update_load_message(tab: &mut Tab) {
     }
     if load.external_disabled() {
         notes.push("external CSS disabled".to_string());
+    }
+    let failed_images = load.failed_images();
+    if failed_images > 0 {
+        let suffix = if failed_images == 1 { "" } else { "s" };
+        notes.push(format!("{failed_images} image{suffix} failed"));
     }
     if let Some(note) = layout_note(tab) {
         notes.push(note.to_string());

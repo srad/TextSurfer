@@ -403,6 +403,441 @@ fn occurrence_and_byte_ceiling_failures_discard_all_external_css() {
 }
 
 #[test]
+fn image_fetches_deduplicate_resolve_and_never_block_first_paint() {
+    let mut load =
+        load("<base href='/assets/'><img id=one src='cat.png'><img id=two src='./cat.png'>");
+    let commands = load.take_commands();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].url.as_str(),
+        "https://example.com/assets/cat.png"
+    );
+    assert!(load.render_if_ready(Duration::ZERO).is_some());
+    assert!(!load.is_settled());
+}
+
+#[test]
+fn image_fetches_require_success_and_have_an_independent_byte_budget() {
+    let mut failed = load("<img src='missing.png'>");
+    let command = failed.take_commands().pop().unwrap();
+    assert!(failed.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 404,
+            body: vec![1, 2, 3],
+            content_type: Some("image/png".to_string()),
+        })
+    ));
+    assert_eq!(failed.failed_images(), 1);
+    assert!(failed.take_image_decode_commands().is_empty());
+
+    let mut too_large = load("<img src='large.png'>");
+    let command = too_large.take_commands().pop().unwrap();
+    too_large.image_raw_bytes = MAX_IMAGE_FETCH_BYTES;
+    assert!(too_large.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: vec![0],
+            content_type: Some("text/plain".to_string()),
+        })
+    ));
+    assert_eq!(too_large.failed_images(), 1);
+    assert!(!too_large.external_disabled());
+}
+
+#[test]
+fn image_redirects_recheck_the_final_scheme() {
+    let mut accepted = load("<img src='/image'>");
+    let command = accepted.take_commands().pop().unwrap();
+    assert!(accepted.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: Url::parse("https://cdn.example/image.png").unwrap(),
+            status: 200,
+            body: vec![1],
+            content_type: None,
+        })
+    ));
+    assert_eq!(accepted.take_image_decode_commands().len(), 1);
+
+    let mut rejected = load("<img src='/image'>");
+    let command = rejected.take_commands().pop().unwrap();
+    assert!(rejected.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: Url::parse("file:///private/image.png").unwrap(),
+            status: 200,
+            body: vec![1],
+            content_type: None,
+        })
+    ));
+    assert!(rejected.take_image_decode_commands().is_empty());
+    assert_eq!(rejected.failed_images(), 1);
+}
+
+#[test]
+fn image_decode_delivery_is_revision_checked_and_budgeted() {
+    let mut page_load = load("<img src='pixel.png'>");
+    let command = page_load.take_commands().pop().unwrap();
+    assert!(page_load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: vec![1, 2, 3],
+            content_type: Some("text/plain".to_string()),
+        })
+    ));
+    let decode = page_load.take_image_decode_commands().pop().unwrap();
+    assert!(!page_load.deliver_image_decode(
+        decode.asset_id,
+        decode.revision + 1,
+        Ok(crate::core::image::DecodedImage {
+            asset_id: decode.asset_id,
+            revision: decode.revision + 1,
+            width: 1,
+            height: 1,
+            rgba: std::sync::Arc::from([0, 0, 0, 255]),
+        })
+    ));
+    assert!(page_load.deliver_image_decode(
+        decode.asset_id,
+        decode.revision,
+        Ok(crate::core::image::DecodedImage {
+            asset_id: decode.asset_id,
+            revision: decode.revision,
+            width: 1,
+            height: 1,
+            rgba: std::sync::Arc::from([0, 0, 0, 255]),
+        })
+    ));
+    assert_eq!(page_load.image_decoded_bytes, 4);
+    assert!(page_load.is_settled());
+
+    let mut over_budget = load("<img src='pixel.png'>");
+    let command = over_budget.take_commands().pop().unwrap();
+    assert!(over_budget.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: vec![1],
+            content_type: None,
+        })
+    ));
+    let decode = over_budget.take_image_decode_commands().pop().unwrap();
+    over_budget.image_decoded_bytes = MAX_IMAGE_DECODED_BYTES;
+    assert!(over_budget.deliver_image_decode(
+        decode.asset_id,
+        decode.revision,
+        Ok(crate::core::image::DecodedImage {
+            asset_id: decode.asset_id,
+            revision: decode.revision,
+            width: 1,
+            height: 1,
+            rgba: std::sync::Arc::from([0, 0, 0, 255]),
+        })
+    ));
+    assert_eq!(over_budget.failed_images(), 1);
+}
+
+#[test]
+fn decoded_images_replace_fallbacks_with_intrinsic_ordered_hit_geometry() {
+    let mut load = load(
+        "<a href='/target'><img src='pixel.png' alt='fallback' style='width:32px;height:auto'></a>",
+    );
+    let before = load.force_render();
+    assert!(
+        before
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("[fallback]"))
+    );
+    let command = load.take_commands().pop().unwrap();
+    assert!(load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: vec![1],
+            content_type: Some("text/plain".to_string()),
+        })
+    ));
+    let decode = load.take_image_decode_commands().pop().unwrap();
+    assert!(load.deliver_image_decode(
+        decode.asset_id,
+        decode.revision,
+        Ok(crate::core::image::DecodedImage {
+            asset_id: decode.asset_id,
+            revision: decode.revision,
+            width: 16,
+            height: 16,
+            rgba: std::sync::Arc::from(vec![255; 16 * 16 * 4]),
+        })
+    ));
+    let page = load.render_after_image().unwrap();
+    let node = *load.image_node_index.keys().next().unwrap();
+    assert_eq!(
+        page.styles.get(node).width,
+        crate::core::style::CssSize::Cells(4)
+    );
+    assert_eq!(page.painted.images.len(), 1);
+    assert_eq!(page.painted.images[0].rect.width, 4);
+    assert_eq!(page.painted.images[0].rect.height, 2);
+    assert!(page.painted.image_assets.contains_key(&decode.asset_id));
+    let image = page.painted.images[0];
+    assert_eq!(
+        page.painted
+            .link_at(image.clip.col, image.clip.row)
+            .map(|link| link.href.as_str()),
+        Some("/target")
+    );
+    assert!(
+        !page
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains('\u{fffc}'))
+    );
+}
+
+#[test]
+fn decoded_images_participate_in_block_table_flex_and_grid_layout() {
+    let mut load = load(
+        "<img src='block.png' style='display:block'>
+         <table><tr><td><img src='table.png'></td></tr></table>
+         <div style='display:flex'><img src='flex.png'></div>
+         <div style='display:grid'><img src='grid.png'></div>",
+    );
+    load.force_render();
+    let commands = load.take_commands();
+    for command in commands {
+        assert!(load.deliver(
+            command.resource_id,
+            Ok(FetchResponse {
+                final_url: command.url,
+                status: 200,
+                body: vec![1],
+                content_type: None,
+            })
+        ));
+        let decode = load.take_image_decode_commands().pop().unwrap();
+        assert!(load.deliver_image_decode(
+            decode.asset_id,
+            decode.revision,
+            Ok(crate::core::image::DecodedImage {
+                asset_id: decode.asset_id,
+                revision: decode.revision,
+                width: 8,
+                height: 16,
+                rgba: std::sync::Arc::from(vec![255; 8 * 16 * 4]),
+            })
+        ));
+    }
+    let page = load.render_after_image().unwrap();
+    assert_eq!(page.painted.images.len(), 4);
+    assert!(
+        page.painted
+            .images
+            .iter()
+            .all(|image| image.clip.width > 0 && image.clip.height > 0)
+    );
+}
+
+#[test]
+fn decoded_images_do_not_inherit_the_control_content_height_floor() {
+    let mut load = load(
+        "<img src='tall.png' style='display:block;box-sizing:border-box;
+         border:1px solid;max-height:48px'>",
+    );
+    load.force_render();
+    let command = load.take_commands().pop().unwrap();
+    assert!(load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: vec![1],
+            content_type: None,
+        })
+    ));
+    let decode = load.take_image_decode_commands().pop().unwrap();
+    assert!(load.deliver_image_decode(
+        decode.asset_id,
+        decode.revision,
+        Ok(crate::core::image::DecodedImage {
+            asset_id: decode.asset_id,
+            revision: decode.revision,
+            width: 16,
+            height: 64,
+            rgba: std::sync::Arc::from(vec![255; 16 * 64 * 4]),
+        })
+    ));
+    let page = load.render_after_image().unwrap();
+    assert_eq!(page.painted.images.len(), 1);
+    assert_eq!(page.painted.images[0].rect.height, 1);
+}
+
+/// `min-*`/`max-*` on a decoded image resize the picture along both axes at once, measure the
+/// element's own chrome when `box-sizing` says to, and quantise the way an authored length does.
+/// Clamping the axes independently used to stretch the picture, which is what made the WPT
+/// replaced-sizing references disagree with us by whole cells.
+#[test]
+fn decoded_image_constraints_scale_the_picture_instead_of_stretching_it() {
+    let mut load = load(
+        "<img src='ratio.png' style='display:block;max-height:32px'>
+         <img src='chrome.png'
+              style='display:block;box-sizing:border-box;padding:0 8px;max-width:40px'>
+         <img src='intrinsic.png' style='display:block'>
+         <img src='authored.png' style='display:block;width:75px'>",
+    );
+    load.force_render();
+    for command in load.take_commands() {
+        // 64 is a whole number of cells either way; 75 is the WPT size that falls between them.
+        let square = if command.url.path().ends_with("ratio.png")
+            || command.url.path().ends_with("chrome.png")
+        {
+            64u32
+        } else {
+            75u32
+        };
+        assert!(load.deliver(
+            command.resource_id,
+            Ok(FetchResponse {
+                final_url: command.url,
+                status: 200,
+                body: vec![1],
+                content_type: None,
+            })
+        ));
+        let decode = load.take_image_decode_commands().pop().unwrap();
+        assert!(load.deliver_image_decode(
+            decode.asset_id,
+            decode.revision,
+            Ok(crate::core::image::DecodedImage {
+                asset_id: decode.asset_id,
+                revision: decode.revision,
+                width: square,
+                height: square,
+                rgba: std::sync::Arc::from(vec![255; (square * square * 4) as usize]),
+            })
+        ));
+    }
+    let page = load.render_after_image().unwrap();
+    let mut placements = page.painted.images.clone();
+    placements.sort_by_key(|image| image.rect.row);
+    assert_eq!(
+        placements
+            .iter()
+            .map(|image| (image.rect.width, image.rect.height))
+            .collect::<Vec<_>>(),
+        [
+            // Two rows of `max-height` leave four columns, not the eight the picture asked for.
+            (4, 2),
+            // `max-width: 40px` is five columns of border box, and the 8px padding is two of them.
+            (3, 2),
+            // A 75px picture and an authored `width: 75px` agree on nine columns.
+            (9, 5),
+            (9, 5),
+        ]
+    );
+}
+
+#[test]
+fn image_percentages_use_only_definite_layout_bases() {
+    let mut load = load(
+        "<table><tr><td><img src='table.png' style='width:50%'></td></tr></table>
+         <div><img src='inline.png' style='width:32px;height:50%'></div>",
+    );
+    load.force_render();
+    for command in load.take_commands() {
+        assert!(load.deliver(
+            command.resource_id,
+            Ok(FetchResponse {
+                final_url: command.url,
+                status: 200,
+                body: vec![1],
+                content_type: None,
+            })
+        ));
+        let decode = load.take_image_decode_commands().pop().unwrap();
+        assert!(load.deliver_image_decode(
+            decode.asset_id,
+            decode.revision,
+            Ok(crate::core::image::DecodedImage {
+                asset_id: decode.asset_id,
+                revision: decode.revision,
+                width: 16,
+                height: 16,
+                rgba: std::sync::Arc::from(vec![255; 16 * 16 * 4]),
+            })
+        ));
+    }
+    let page = load.render_after_image().unwrap();
+    let sizes = page
+        .painted
+        .images
+        .iter()
+        .map(|image| (image.rect.width, image.rect.height))
+        .collect::<Vec<_>>();
+    assert!(sizes.contains(&(2, 1)), "{sizes:?}");
+    assert!(sizes.contains(&(4, 2)), "{sizes:?}");
+}
+
+#[test]
+fn a_lost_decoder_fails_pending_images_without_sticking_the_page() {
+    let mut load = load("<img src='one.png'><img src='two.png'>");
+    let commands = load.take_commands();
+    for command in commands {
+        assert!(load.deliver(
+            command.resource_id,
+            Ok(FetchResponse {
+                final_url: command.url,
+                status: 200,
+                body: vec![1, 2, 3],
+                content_type: None,
+            })
+        ));
+    }
+    assert!(load.fail_pending_image_decodes());
+    assert_eq!(load.failed_images(), 2);
+    assert!(!load.fail_pending_image_decodes());
+}
+
+#[test]
+fn a_lost_fetcher_fails_pending_images_without_sticking_the_page() {
+    let mut load = load("<img src='one.png'><img src='two.png'>");
+    assert!(load.fail_pending_image_fetches());
+    assert_eq!(load.failed_images(), 2);
+    assert!(load.is_settled());
+    assert!(!load.fail_pending_image_fetches());
+}
+
+#[test]
+fn image_url_limit_refuses_only_excess_images() {
+    let images = (0..=MAX_IMAGE_URLS)
+        .map(|index| format!("<img src='{index}.png'>"))
+        .collect::<String>();
+    let mut load = load(&images);
+    assert_eq!(load.take_commands().len(), MAX_IMAGE_URLS);
+    assert_eq!(load.failed_images(), 1);
+    assert!(!load.external_disabled());
+}
+
+#[test]
+fn empty_invalid_and_cross_scheme_image_urls_fail_without_network_work() {
+    let mut load = load(
+        "<img src=''><img src='http://[invalid'><img src='file:///private.png'><img src='ok.png'>",
+    );
+    assert_eq!(load.take_commands().len(), 1);
+    assert_eq!(load.failed_images(), 2);
+}
+
+#[test]
 fn one_fetch_can_produce_two_environment_decodings() {
     let mut load = load(
         "<!doctype html><link rel=stylesheet href='one.css'>
