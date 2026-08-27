@@ -96,3 +96,50 @@ fn dump_bounds_declarative_refresh_chains() {
     .unwrap_err();
     assert_eq!(error.to_string(), "automatic redirect limit reached");
 }
+
+struct UntypedDumpFetch {
+    body: Vec<u8>,
+}
+
+impl Fetch for UntypedDumpFetch {
+    fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
+        Ok(FetchResponse {
+            final_url: request.url.clone(),
+            status: 200,
+            body: self.body.clone(),
+            content_type: None,
+        })
+    }
+}
+
+#[test]
+fn dump_uses_the_same_untyped_html_sniffing_as_the_app() {
+    let lines = dump_lines(
+        Arc::new(UntypedDumpFetch {
+            body: b"<p>sniffed html</p>".to_vec(),
+        }),
+        "https://example.com/untyped",
+        Size { cols: 80, rows: 24 },
+        Palette::DEFAULT,
+    )
+    .unwrap();
+    assert!(lines.iter().any(|line| line.contains("sniffed html")));
+}
+
+#[test]
+fn dump_rejects_untyped_binary_content() {
+    let error = dump_lines(
+        Arc::new(UntypedDumpFetch {
+            body: b"binary\0body".to_vec(),
+        }),
+        "https://example.com/binary",
+        Size { cols: 80, rows: 24 },
+        Palette::DEFAULT,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert_eq!(
+        error.to_string(),
+        "unsupported content type: application/octet-stream"
+    );
+}

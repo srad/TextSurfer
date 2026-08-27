@@ -39,7 +39,7 @@ pub fn dump_lines(
             .content_type
             .as_deref()
             .and_then(charset_from_content_type);
-        match response_kind(response.content_type.as_deref()) {
+        match response_kind(response.content_type.as_deref(), &response.body) {
             ResponseKind::Html => {
                 let decoded = decode(&response.body, charset.as_deref());
                 let mut load = PageLoad::new(

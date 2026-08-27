@@ -116,9 +116,7 @@ fn stale_fetch_results_are_dropped_fresh_ones_accepted() {
             final_url: Url::parse("https://example.com/").unwrap(),
             status: 200,
             body: vec![],
-            // Deliberately undeclared and empty: zero bytes carry no evidence, so
-            // sniffing leaves this as HTML rather than guessing plain text.
-            content_type: None,
+            content_type: Some("text/html".to_string()),
         }),
     }));
     assert_eq!(app.message(), message);
@@ -130,9 +128,7 @@ fn stale_fetch_results_are_dropped_fresh_ones_accepted() {
             final_url: Url::parse("https://example.com/").unwrap(),
             status: 200,
             body: vec![],
-            // Deliberately undeclared and empty: zero bytes carry no evidence, so
-            // sniffing leaves this as HTML rather than guessing plain text.
-            content_type: None,
+            content_type: Some("text/html".to_string()),
         }),
     }));
     assert_eq!(app.message(), "loaded https://example.com/");
@@ -343,6 +339,57 @@ fn unsupported_valid_media_types_are_not_parsed_as_html() {
     }));
     assert!(app.tabs.active().painted.text_lines()[0].starts_with("cannot display"));
     assert_eq!(app.message(), "unsupported content type: image/png");
+}
+
+#[test]
+fn a_missing_media_type_is_sniffed_before_document_rendering() {
+    let mut app = App::new();
+    app.submit_url("https://example.com/untyped");
+    let generation = app.tabs.active().generation;
+    let tab_id = app.tabs.active().id;
+    assert!(app.deliver_fetch(FetchPayload {
+        tab_id,
+        generation,
+        resource_id: ResourceId::DOCUMENT,
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/untyped").unwrap(),
+            status: 200,
+            body: b"\n<h1>sniffed html</h1>".to_vec(),
+            content_type: None,
+        }),
+    }));
+    assert!(
+        app.tabs
+            .active()
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("sniffed html"))
+    );
+}
+
+#[test]
+fn a_missing_media_type_never_routes_binary_bytes_to_html() {
+    let mut app = App::new();
+    app.submit_url("https://example.com/binary");
+    let generation = app.tabs.active().generation;
+    let tab_id = app.tabs.active().id;
+    assert!(app.deliver_fetch(FetchPayload {
+        tab_id,
+        generation,
+        resource_id: ResourceId::DOCUMENT,
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/binary").unwrap(),
+            status: 200,
+            body: b"binary\0body".to_vec(),
+            content_type: None,
+        }),
+    }));
+    assert!(app.tabs.active().painted.text_lines()[0].starts_with("cannot display"));
+    assert_eq!(
+        app.message(),
+        "unsupported content type: application/octet-stream"
+    );
 }
 
 #[test]

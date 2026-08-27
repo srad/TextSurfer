@@ -44,7 +44,8 @@ Ready                              https://example.com
 - Full HTML5 parsing via html5ever into an indextree-backed DOM (`<base href>`, quirks mode, foreign
   content, adoption agency, foster parenting, detached template fragments)
 - WHATWG encoding detection (BOM → header → `<meta charset>` prescan → UTF-8) and media-type routing:
-  HTML/XHTML parse, plain text stays literal, unsupported types render a controlled error page
+  declared HTML/XHTML parses, plain text stays literal, unsupported types render a controlled error
+  page, and missing, malformed or generic types use bounded HTML/text/binary sniffing
 - A server's own 4xx/5xx page renders with the status in the context bar; an error response is never
   accepted as a stylesheet. Zero-delay `meta refresh` (including `<noscript>` fallbacks) replaces its
   wrapper history entry and stops after eight hops

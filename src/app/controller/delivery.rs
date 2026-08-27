@@ -186,7 +186,7 @@ impl App {
                 tab.document_pending = false;
                 match payload.result {
                     Ok(response) => {
-                        let kind = response_kind(response.content_type.as_deref());
+                        let kind = response_kind(response.content_type.as_deref(), &response.body);
                         let charset = response
                             .content_type
                             .as_deref()

@@ -22,6 +22,7 @@ against the audit below before it is written; the audit is re-run whenever a can
 | Parser | Status | Verdict |
 |---|---|---|
 | `net/encoding/prescan.rs` — WHATWG sniffing | custom | **Keep** — html5ever ships only the meta-`charset` substring extractor and it is `pub(crate)`; encoding_rs is decode-only; no sniffer exists in the ecosystem |
+| `pipeline/render/response.rs` — document MIME sniffing | custom | **Keep narrow adapter** — mediatype owns declared MIME parsing; mimesniff 0.3.0 and mime-sniffer 0.1.3 are stale and incomplete, while infer and tree_magic_mini identify file signatures rather than implement the WHATWG browsing-context rules; custom code is limited to the security-relevant 1,445-byte HTML/text/binary classifier |
 | `core/url.rs` — `url_fix` | not a parser | **No change** — real parsing delegates to `url`; scheme/host/search heuristics are address-bar UX |
 | `css/parser.rs` | library adapter | **Keep** — tokenization delegates to cssparser, selector parsing and matching to selectors |
 | `css/parser.rs` — terminal media-query grammar | custom adapter | **Keep narrow adapter** — cssparser owns tokens, blocks and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 lacks MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui excludes `@media`, and Stylo/Blitz/litehtml/Ladybird require replacement DOM/style stacks |
@@ -407,9 +408,9 @@ the keyboard and forms work resumes once images close.
       non-2xx up front. *Open:* the failure screens are still the three-line stub, and the
       unparseable-URL and unknown-scheme paths in `navigation.rs` paint nothing at all — both need
       the real themed page.
-- [ ] **Content-type honesty.** A missing or unparseable `Content-Type` currently defaults to HTML,
-      so a binary body is parsed and painted as garbage. Sniff (WHATWG minimum: leading `<`,
-      BOM/NUL heuristics) and otherwise refuse with the unsupported-type page.
+- [x] **Content-type honesty** *(done).* Declared supported types are authoritative; missing,
+      malformed and generic types use a bounded WHATWG-minimum HTML/text/binary classifier, and
+      unsupported content reaches the controlled failure page in both interactive and dump modes.
 - [ ] **Back/forward without refetching.** A small per-tab document cache keyed by history entry, so
       Back/Forward restore instead of re-issuing a request; the per-load pivot still applies to
       fresh navigations.
