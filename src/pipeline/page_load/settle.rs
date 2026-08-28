@@ -17,7 +17,7 @@ impl PageLoad {
             .media
             .with_palette(palette)
             .with_color_scheme(color_scheme);
-        self.invalidate(RenderInvalidation::Style, RenderCause::Theme);
+        self.invalidate(RenderInvalidation::STYLE, RenderCause::Theme);
         true
     }
 
@@ -51,7 +51,7 @@ impl PageLoad {
         self.first_painted = true;
         self.final_painted = self.applicable_graph_settled();
         if self.invalidation.is_none() {
-            self.invalidation = Some(RenderInvalidation::Paint);
+            self.invalidation = Some(RenderInvalidation::PAINT);
             self.render_causes.insert(RenderCause::Forced);
         }
         self.render_page()

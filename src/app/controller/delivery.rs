@@ -19,6 +19,21 @@ const RENDER_POLL: Duration = Duration::from_millis(8);
 const PARSE_POLL: Duration = Duration::from_millis(1);
 const PARSE_BYTES_PER_STEP: usize = 64 * 1024;
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct RenderAdvance {
+    pub(super) published: bool,
+    pub(super) painted_changed: bool,
+}
+
+impl RenderAdvance {
+    fn union(self, other: Self) -> Self {
+        Self {
+            published: self.published || other.published,
+            painted_changed: self.painted_changed || other.painted_changed,
+        }
+    }
+}
+
 impl App {
     pub fn next_wake(&self) -> Option<Duration> {
         let load = self
@@ -228,7 +243,11 @@ impl App {
     }
 
     pub(super) fn advance_render_queue(&mut self) -> bool {
-        let mut display_changed = self.poll_render_result();
+        self.advance_render_queue_result().published
+    }
+
+    pub(super) fn advance_render_queue_result(&mut self) -> RenderAdvance {
+        let mut advance = self.poll_render_result();
         if self.render_inflight.is_none() {
             let active = self.tabs.active();
             let key = RenderKey {
@@ -289,17 +308,17 @@ impl App {
                 }
             }
         }
-        display_changed |= self.poll_render_result();
-        display_changed
+        advance = advance.union(self.poll_render_result());
+        advance
     }
 
-    fn poll_render_result(&mut self) -> bool {
+    fn poll_render_result(&mut self) -> RenderAdvance {
         let result = match self.renders.poll() {
             RenderPoll::Ready(result) => *result,
-            RenderPoll::Empty => return false,
+            RenderPoll::Empty => return RenderAdvance::default(),
             RenderPoll::Disconnected => {
                 self.report_render_lost();
-                return false;
+                return RenderAdvance::default();
             }
         };
         if self.render_inflight == Some(result.key) {
@@ -313,6 +332,7 @@ impl App {
             hard_epoch = result.key.hard_epoch,
             causes = %result.causes,
             cascade_ms = result.timings.cascade.as_millis(),
+            restyle_ms = result.timings.restyle.as_millis(),
             layout_ms = result.timings.layout.as_millis(),
             paint_ms = result.timings.paint.as_millis(),
             "render result received"
@@ -324,18 +344,22 @@ impl App {
             .tabs
             .find_load_mut(result.key.tab_id, result.key.generation)
         else {
-            return false;
+            return RenderAdvance::default();
         };
         let Some(page) = tab
             .load
             .as_mut()
             .and_then(|load| load.apply_render_result(result))
         else {
-            return false;
+            return RenderAdvance::default();
         };
-        apply_rendered_page(tab, page, width, rows);
+        let painted_changed = apply_rendered_page(tab, page, width, rows);
         update_load_message(tab);
-        index == active_index
+        let published = index == active_index;
+        RenderAdvance {
+            published,
+            painted_changed: published && painted_changed,
+        }
     }
 
     fn report_render_lost(&mut self) {
@@ -682,13 +706,20 @@ impl App {
     }
 }
 
-pub(super) fn apply_rendered_page(tab: &mut Tab, page: RenderedPage, width: usize, rows: usize) {
+pub(super) fn apply_rendered_page(
+    tab: &mut Tab,
+    page: RenderedPage,
+    width: usize,
+    rows: usize,
+) -> bool {
+    let painted_changed = page.painted_changed;
     tab.painted = page.painted;
     tab.layout_width = width;
     tab.document = Some(page.document);
     tab.styles = Some(page.styles);
     tab.render_dirty = false;
     tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
+    painted_changed
 }
 
 /// What layout could not do for this page.

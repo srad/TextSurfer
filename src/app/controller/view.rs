@@ -42,6 +42,7 @@ impl App {
             return Some(LoadProgress {
                 phase: activity.map_or("render", |activity| match activity.stage {
                     RenderStage::Cascade => "styles",
+                    RenderStage::Restyle => "restyle",
                     RenderStage::Layout => "layout",
                     RenderStage::Paint => "paint",
                 }),

@@ -33,6 +33,7 @@ pub struct RenderedPage {
     pub document: SharedDocument,
     pub styles: Arc<StyleTree>,
     pub painted: DisplayList,
+    pub painted_changed: bool,
     pub parse_errors: usize,
     pub css_warnings: usize,
 }

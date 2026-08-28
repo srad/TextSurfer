@@ -196,6 +196,43 @@ fn an_inherited_css_cursor_changes_without_dirtying_the_canvas() {
 }
 
 #[test]
+fn a_dynamic_cursor_restyle_does_not_dirty_the_canvas() {
+    let mut app = loaded(
+        "<!doctype html><style>#target:hover { cursor: text }</style><p id=target>target</p>",
+    );
+    let target = app
+        .tabs
+        .active()
+        .document
+        .as_ref()
+        .unwrap()
+        .borrow()
+        .element_by_id("target")
+        .unwrap();
+    let rect = app
+        .tabs
+        .active()
+        .painted
+        .hits
+        .iter()
+        .find(|hit| hit.node == target)
+        .unwrap()
+        .rect;
+    let _ = app.take_damage();
+    app.handle_mouse(event(
+        MouseKind::Move,
+        Point {
+            col: ORIGIN.col + rect.col as u16,
+            row: ORIGIN.row + rect.row as u16,
+        },
+    ));
+    assert_eq!(app.pointer_cursor(), Cursor::Text);
+    let damage = app.take_damage();
+    assert!(!damage.content.full);
+    assert_eq!(damage.content.repaint, crate::core::frame::RowDamage::None);
+}
+
+#[test]
 fn chrome_focus_hides_and_restores_retained_dom_focus() {
     let mut app = loaded(
         "<!doctype html><style>a:focus { font-weight: bold }</style><a id=target href=#x>target</a>",

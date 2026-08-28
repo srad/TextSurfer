@@ -2,6 +2,7 @@ mod alignment;
 mod box_model;
 mod color;
 mod display;
+mod dynamic;
 mod flex;
 mod float;
 mod grid;
@@ -293,6 +294,10 @@ impl StyleTree {
 
     pub(crate) fn set_store(&mut self, store: StyleStore) {
         self.store = store;
+    }
+
+    pub(crate) fn store_mut(&mut self) -> &mut StyleStore {
+        &mut self.store
     }
 
     pub fn resolve_calc(&self, value: CssCalc, basis: f32) -> Option<f32> {

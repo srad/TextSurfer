@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use cssparser::{Parser, ParserInput};
 
@@ -7,14 +7,14 @@ use super::syntax::{dependencies, substitute};
 use super::{Environment, Lookup, MAX_VALUE_BYTES};
 
 pub(crate) fn derive_environment(
-    parent: Rc<Environment>,
+    parent: Arc<Environment>,
     winners: HashMap<String, String>,
-) -> Rc<Environment> {
+) -> Arc<Environment> {
     if winners.is_empty() {
         return parent;
     }
     let mut raw = HashMap::new();
-    let mut values: HashMap<String, Option<Rc<str>>> = HashMap::new();
+    let mut values: HashMap<String, Option<Arc<str>>> = HashMap::new();
     for (name, value) in winners {
         match css_wide(&value) {
             Some("initial") => {
@@ -52,14 +52,14 @@ pub(crate) fn derive_environment(
                 }
                 Some("inherit" | "unset" | "revert") => {}
                 _ => {
-                    values.insert(name, Some(Rc::from(value)));
+                    values.insert(name, Some(Arc::from(value)));
                 }
             }
         } else {
             values.insert(name, None);
         }
     }
-    Rc::new(Environment {
+    Arc::new(Environment {
         parent: Some(parent),
         values,
     })

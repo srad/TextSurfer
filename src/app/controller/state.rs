@@ -77,18 +77,17 @@ impl App {
     fn apply_dynamic_state(&mut self, state: DynamicState) -> (bool, bool) {
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
-        let before = self.tabs.active().painted.clone();
         let tab = self.tabs.active_mut();
         let page = tab
             .load
             .as_mut()
             .and_then(|load| load.set_dynamic_state(state));
         if let Some(page) = page {
-            apply_rendered_page(tab, page, width, rows);
-            return (true, before != self.tabs.active().painted);
+            let painted_changed = apply_rendered_page(tab, page, width, rows);
+            return (true, painted_changed);
         }
-        let rendered = self.advance_render_queue();
-        (rendered, before != self.tabs.active().painted)
+        let advance = self.advance_render_queue_result();
+        (advance.published, advance.painted_changed)
     }
 
     pub(super) fn focusable_ancestor(&self, mut node: NodeId) -> Option<NodeId> {

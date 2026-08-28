@@ -1,4 +1,5 @@
 pub mod cascade;
+mod effects;
 mod math;
 pub mod parser;
 mod presentational;
@@ -7,7 +8,9 @@ mod ua;
 mod values;
 mod variables;
 
+pub(crate) use cascade::CascadeState;
 pub use cascade::{BasicCascade, Cascade, MediaContext};
+pub(crate) use effects::{DynamicEffect, StateEffects};
 pub use parser::{
     ColorScheme, CssDiagnostic, CssDiagnosticKind, CssDiagnostics, CssParser, CssRule,
     CssSourcePosition, CssparserParser, Declaration, DimensionCondition, ImportRule, MediaAxis,

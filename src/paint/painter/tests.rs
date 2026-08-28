@@ -11,6 +11,7 @@ fn painted(tree: &BoxTree) -> DisplayList {
 fn plain_box(node: NodeId, rect: LayoutRect, depth: usize) -> LayoutBox {
     LayoutBox {
         node,
+        paint_source: crate::layout::engine::PaintStyleSource::Element(node),
         border_rect: rect,
         content_rect: rect,
         depth,
@@ -258,6 +259,7 @@ fn borders_are_drawn_from_box_geometry() {
         height: 3,
         boxes: vec![LayoutBox {
             node,
+            paint_source: crate::layout::engine::PaintStyleSource::Element(node),
             border_rect: rect,
             content_rect: LayoutRect {
                 col: 2,
@@ -334,12 +336,12 @@ fn backgrounds_paint_under_text_in_depth_order() {
         fills: vec![
             BackgroundFill {
                 rect: outer_rect,
-                color: Rgb::new(10, 10, 10),
+                color: Some(Rgb::new(10, 10, 10)),
                 depth: 0,
             },
             BackgroundFill {
                 rect: inner_rect,
-                color: Rgb::new(20, 20, 20),
+                color: Some(Rgb::new(20, 20, 20)),
                 depth: 1,
             },
         ],
@@ -387,12 +389,12 @@ fn partial_foreground_alpha_resolves_against_the_deepest_background() {
         fills: vec![
             BackgroundFill {
                 rect: outer_rect,
-                color: Rgb::new(0, 0, 128),
+                color: Some(Rgb::new(0, 0, 128)),
                 depth: 0,
             },
             BackgroundFill {
                 rect: inner_rect,
-                color: Rgb::BLACK,
+                color: Some(Rgb::BLACK),
                 depth: 1,
             },
         ],

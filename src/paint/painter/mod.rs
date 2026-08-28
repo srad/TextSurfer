@@ -200,13 +200,10 @@ impl Painter for BasicPainter {
         let mut fills: Vec<_> = box_tree.fills.iter().enumerate().collect();
         fills.sort_by_key(|(index, fill)| (float_fills.contains(index), fill.depth));
         for (_, fill) in fills {
-            fill_background(
-                &mut rows,
-                box_tree.width,
-                box_tree.height,
-                fill.rect,
-                fill.color,
-            );
+            let Some(color) = fill.color else {
+                continue;
+            };
+            fill_background(&mut rows, box_tree.width, box_tree.height, fill.rect, color);
         }
         let float_strokes: HashSet<_> = box_tree.float_strokes.iter().copied().collect();
         let mut strokes: Vec<_> = box_tree.strokes.iter().copied().enumerate().collect();

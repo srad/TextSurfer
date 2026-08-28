@@ -143,6 +143,7 @@ pub(super) fn place_table(
     {
         output.boxes.push(LayoutBox {
             node,
+            paint_source: crate::layout::engine::PaintStyleSource::Element(node),
             border_rect: table_rect,
             content_rect: table_rect,
             depth: 0,
@@ -150,7 +151,7 @@ pub(super) fn place_table(
         });
     }
     add_fill(&mut output.fills, table_rect, table_style, 0);
-    if !table_style.visibility.is_hidden() && !geometry.collapsed && table_style.border.is_visible()
+    if !table_style.visibility.is_hidden() && !geometry.collapsed && table_style.border.has_layout()
     {
         output.strokes.push(BorderStroke {
             rect: table_rect,
@@ -393,6 +394,7 @@ pub(super) fn place_table(
         {
             output.boxes.push(LayoutBox {
                 node,
+                paint_source: crate::layout::engine::PaintStyleSource::Element(node),
                 border_rect: hit_rect,
                 content_rect,
                 depth: 5,
@@ -409,7 +411,7 @@ pub(super) fn place_table(
                     style.cell_style(),
                     5,
                 );
-            } else if style.border.is_visible() {
+            } else if style.border.has_layout() {
                 output.strokes.push(BorderStroke {
                     rect,
                     edges: style.border,
@@ -431,7 +433,7 @@ pub(super) fn place_table(
         output
             .strokes
             .extend(collapse_segments.into_values().filter_map(|candidate| {
-                candidate.side.is_visible().then_some(BorderStroke {
+                (candidate.side.layout_width() > 0).then_some(BorderStroke {
                     rect: candidate.rect,
                     edges: candidate.edges,
                     style: candidate.style,
@@ -485,6 +487,7 @@ impl TableFormatter<'_> {
                 .owner
                 .map(|node| LayoutBox {
                     node,
+                    paint_source: crate::layout::engine::PaintStyleSource::Element(node),
                     border_rect: rect,
                     content_rect: rect,
                     depth: 0,
@@ -540,6 +543,10 @@ pub(super) fn add_fill(
     if !style.visibility.is_hidden()
         && let Some(color) = style.background
     {
-        fills.push(BackgroundFill { rect, color, depth });
+        fills.push(BackgroundFill {
+            rect,
+            color: Some(color),
+            depth,
+        });
     }
 }

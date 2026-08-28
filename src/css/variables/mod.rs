@@ -5,7 +5,7 @@ mod syntax;
 mod tests;
 
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub(super) use environment::derive_environment;
 pub(super) use syntax::{
@@ -17,13 +17,13 @@ pub(super) const MAX_COMPONENT_DEPTH: usize = 64;
 
 #[derive(Clone)]
 pub(super) struct Environment {
-    parent: Option<Rc<Self>>,
-    values: HashMap<String, Option<Rc<str>>>,
+    parent: Option<Arc<Self>>,
+    values: HashMap<String, Option<Arc<str>>>,
 }
 
 impl Environment {
-    pub(super) fn root() -> Rc<Self> {
-        Rc::new(Self {
+    pub(super) fn root() -> Arc<Self> {
+        Arc::new(Self {
             parent: None,
             values: HashMap::new(),
         })
@@ -49,7 +49,7 @@ impl Environment {
 
 #[derive(Clone)]
 enum Lookup {
-    Value(Rc<str>),
+    Value(Arc<str>),
     Invalid,
     Missing,
 }

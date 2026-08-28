@@ -80,7 +80,7 @@ impl PageLoad {
             }
         }
         self.process_materializations();
-        self.invalidate_soft(RenderInvalidation::Style, RenderCause::Stylesheet);
+        self.invalidate_soft(RenderInvalidation::STYLE, RenderCause::Stylesheet);
         true
     }
 
@@ -197,6 +197,6 @@ impl PageLoad {
             occurrence.sheet = None;
             occurrence.imports.clear();
         }
-        self.invalidate_soft(RenderInvalidation::Style, RenderCause::Stylesheet);
+        self.invalidate_soft(RenderInvalidation::STYLE, RenderCause::Stylesheet);
     }
 }

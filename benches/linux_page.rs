@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use encoding_rs::UTF_8;
 use textsurfer::core::geom::Size;
 use textsurfer::core::style::{Palette, RenderContext};
-use textsurfer::css::ColorScheme;
+use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::pipeline::page_load::{PageLoadOptions, PendingPageLoad};
 use textsurfer::pipeline::render::RenderKey;
 use url::Url;
@@ -54,11 +54,32 @@ fn main() {
         .execute();
     let snapshot_and_render = snapshot_started.elapsed();
     let timings = result.timings;
-    let render = timings.cascade + timings.layout + timings.paint;
+    let render = timings.cascade + timings.restyle + timings.layout + timings.paint;
     let snapshot = snapshot_and_render.saturating_sub(render);
     let page = load.apply_render_result(result).unwrap();
+    let hovered = page.painted.links.first().unwrap().node;
+    assert!(
+        load.set_dynamic_state(DynamicState {
+            hover: Some(hovered),
+            ..Default::default()
+        })
+        .is_none()
+    );
+    let hover = load
+        .take_render_job(RenderKey {
+            tab_id: 0,
+            generation: 0,
+            epoch: load.render_epoch(),
+            hard_epoch: load.hard_epoch(),
+        })
+        .unwrap()
+        .execute();
+    let hover_timings = hover.timings;
+    assert_eq!(hover_timings.layout, Duration::ZERO);
+    let hover_render =
+        hover_timings.cascade + hover_timings.restyle + hover_timings.layout + hover_timings.paint;
     println!(
-        "linux revision 1371530035: bytes={} slices={} parse+discovery_ms={} max_parse_slice_ms={} snapshot_ms={} render_ms={} cascade_ms={} layout_ms={} paint_ms={} rows={} images={}",
+        "linux revision 1371530035: bytes={} slices={} parse+discovery_ms={} max_parse_slice_ms={} snapshot_ms={} render_ms={} cascade_ms={} restyle_ms={} layout_ms={} paint_ms={} hover_render_ms={} hover_cascade_ms={} hover_restyle_ms={} hover_layout_ms={} hover_paint_ms={} rows={} images={}",
         SOURCE.len(),
         slices,
         parse_and_discovery.as_millis(),
@@ -66,8 +87,14 @@ fn main() {
         snapshot.as_millis(),
         render.as_millis(),
         timings.cascade.as_millis(),
+        timings.restyle.as_millis(),
         timings.layout.as_millis(),
         timings.paint.as_millis(),
+        hover_render.as_millis(),
+        hover_timings.cascade.as_millis(),
+        hover_timings.restyle.as_millis(),
+        hover_timings.layout.as_millis(),
+        hover_timings.paint.as_millis(),
         page.painted.len(),
         page.painted.images.len(),
     );

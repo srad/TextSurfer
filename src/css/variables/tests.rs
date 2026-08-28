@@ -46,7 +46,7 @@ fn long_dependency_chains_resolve_without_using_the_call_stack() {
 
 #[test]
 fn substitution_budget_and_component_depth_are_enforced() {
-    let large = Rc::<str>::from("x".repeat(64));
+    let large = Arc::<str>::from("x".repeat(64));
     assert!(syntax::substitute("var(--x)", |_| Lookup::Value(large.clone()), 32).is_err());
 
     let nested = format!("{}red{}", "fn(".repeat(66), ")".repeat(66));

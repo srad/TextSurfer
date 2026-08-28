@@ -10,7 +10,7 @@ use crate::core::dom::Document;
 use crate::core::form::FormState;
 use crate::core::image::ImageResources;
 use crate::core::style::{Palette, StyleTree};
-use crate::css::{BasicCascade, Cascade, MediaContext, StyleSheet};
+use crate::css::{BasicCascade, CascadeState, MediaContext, StyleSheet};
 use crate::layout::{BoxTree, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
 
@@ -27,12 +27,15 @@ pub struct RenderJob {
     pub causes: RenderCauses,
     pub document: RenderTree,
     pub styles: Option<Arc<StyleTree>>,
+    pub(crate) previous_styles: Option<Arc<StyleTree>>,
+    pub(crate) cascade_state: Option<Arc<CascadeState>>,
     pub sheets: Vec<StyleSheet>,
     pub forms: FormState,
     pub images: ImageResources,
     pub media: MediaContext,
     pub palette: Palette,
     pub layout: Option<BoxTree>,
+    pub layout_styles: Option<Arc<StyleTree>>,
     pub css_warnings: usize,
 }
 
@@ -54,6 +57,17 @@ pub struct RenderResult {
     pub layout: BoxTree,
     pub styles: Arc<StyleTree>,
     pub painted: DisplayList,
+    pub painted_changed: bool,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "asserted by the page_load tests and traced at the failure site; no \
+            production consumer reads it back off the result yet"
+        )
+    )]
+    pub(crate) restyle_failure: Option<crate::layout::RestyleFailure>,
+    pub(crate) cascade_state: Option<Arc<CascadeState>>,
     pub css_warnings: usize,
     pub timings: RenderTimings,
 }
@@ -61,6 +75,7 @@ pub struct RenderResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderStage {
     Cascade,
+    Restyle,
     Layout,
     Paint,
 }
@@ -82,6 +97,7 @@ struct ActiveRender {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RenderTimings {
     pub cascade: Duration,
+    pub restyle: Duration,
     pub layout: Duration,
     pub paint: Duration,
 }
@@ -116,6 +132,10 @@ impl RenderCauses {
 
     pub(crate) fn contains(self, cause: RenderCause) -> bool {
         self.0 & (1 << cause as u8) != 0
+    }
+
+    fn is_only(self, cause: RenderCause) -> bool {
+        self.0 == 1 << cause as u8
     }
 
     pub fn bits(self) -> u16 {
@@ -203,14 +223,18 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         causes,
         document,
         styles,
+        previous_styles,
+        cascade_state,
         sheets,
         forms,
         images,
         media,
         palette,
         layout,
+        layout_styles,
         css_warnings,
     } = job;
+    let cascade_required = styles.is_none();
     let render_span = tracing::trace_span!(
         target: "textsurfer::perf",
         "render",
@@ -226,45 +250,92 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         images = images.iter().count()
     );
     let _render_guard = render_span.enter();
-    if styles.is_none() {
+    let mut incremental_style_time = Duration::ZERO;
+    let retained = if cascade_required && causes.is_only(RenderCause::DynamicState) {
+        previous_styles
+            .as_ref()
+            .zip(cascade_state.as_ref())
+            .and_then(|(previous, state)| {
+                set_activity(activity, key, RenderStage::Restyle);
+                let started = Instant::now();
+                let result = BasicCascade.apply_dynamic_with_form_state(
+                    &sheets,
+                    &document.document,
+                    media,
+                    &forms,
+                    previous,
+                    state,
+                );
+                incremental_style_time = started.elapsed();
+                result
+            })
+    } else {
+        None
+    };
+    let (styles, cascade_state, cascade) = if let Some(styles) = styles {
+        (styles, cascade_state, Duration::ZERO)
+    } else if let Some((styles, state)) = retained {
+        (Arc::new(styles), Some(Arc::new(state)), Duration::ZERO)
+    } else {
+        incremental_style_time = Duration::ZERO;
         set_activity(activity, key, RenderStage::Cascade);
-    }
-    let started = Instant::now();
-    let styles = {
+        let started = Instant::now();
         let span = tracing::trace_span!(
             target: "textsurfer::perf",
             "cascade",
-            reused = styles.is_some()
+            reused = false
         );
         let _guard = span.enter();
-        styles.unwrap_or_else(|| {
-            Arc::new(BasicCascade.apply_with_form_state(&sheets, &document.document, media, &forms))
-        })
+        let (styles, state) =
+            BasicCascade.apply_retained_with_form_state(&sheets, &document.document, media, &forms);
+        (Arc::new(styles), Some(Arc::new(state)), started.elapsed())
     };
-    let cascade = started.elapsed();
+    let mut layout = layout;
+    let mut restyle_time = incremental_style_time;
+    let mut painted_changed = true;
+    let mut restyle_failure = None;
+    if cascade_required
+        && let (Some(tree), Some(previous)) = (layout.as_mut(), layout_styles.as_ref())
+    {
+        set_activity(activity, key, RenderStage::Restyle);
+        let started = Instant::now();
+        let span = tracing::trace_span!(target: "textsurfer::perf", "restyle");
+        let _guard = span.enter();
+        match crate::layout::restyle(tree, previous, &styles) {
+            Ok(()) => {
+                restyle_time = restyle_time.saturating_add(started.elapsed());
+                painted_changed = !previous.paint_compatible_with(&styles);
+            }
+            Err(failure) => {
+                tracing::trace!(target: "textsurfer::perf", ?failure, "restyle rejected");
+                restyle_failure = Some(failure);
+                layout = None;
+            }
+        }
+    }
     if layout.is_none() {
         set_activity(activity, key, RenderStage::Layout);
     }
-    let started = Instant::now();
-    let layout = {
+    let (layout, layout_time) = if let Some(layout) = layout {
+        (layout, Duration::ZERO)
+    } else {
+        let started = Instant::now();
         let span = tracing::trace_span!(
             target: "textsurfer::perf",
             "layout",
-            reused = layout.is_some()
+            reused = false
         );
         let _guard = span.enter();
-        layout.unwrap_or_else(|| {
-            TaffyLayoutEngine.layout_with_images(
-                &document.document,
-                styles.as_ref(),
-                media.viewport,
-                &forms,
-                &images,
-                media.cell_metric,
-            )
-        })
+        let layout = TaffyLayoutEngine.layout_with_images(
+            &document.document,
+            styles.as_ref(),
+            media.viewport,
+            &forms,
+            &images,
+            media.cell_metric,
+        );
+        (layout, started.elapsed())
     };
-    let layout_time = started.elapsed();
     set_activity(activity, key, RenderStage::Paint);
     let started = Instant::now();
     let painted = {
@@ -284,6 +355,7 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         epoch = key.epoch,
         hard_epoch = key.hard_epoch,
         cascade_ms = cascade.as_millis(),
+        restyle_ms = restyle_time.as_millis(),
         layout_ms = layout_time.as_millis(),
         paint_ms = paint.as_millis(),
         rows = painted.len(),
@@ -296,9 +368,13 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         layout,
         styles,
         painted,
+        painted_changed,
+        restyle_failure,
+        cascade_state,
         css_warnings,
         timings: RenderTimings {
             cascade,
+            restyle: restyle_time,
             layout: layout_time,
             paint,
         },

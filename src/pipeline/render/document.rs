@@ -118,6 +118,7 @@ pub(crate) fn render_document_with_images(
         document,
         styles,
         painted,
+        painted_changed: true,
         parse_errors,
         css_warnings,
     }

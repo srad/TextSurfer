@@ -123,6 +123,7 @@ pub(super) fn append_captions(
         if !caption.style.visibility.is_hidden() {
             output.boxes.push(LayoutBox {
                 node: caption.node,
+                paint_source: crate::layout::engine::PaintStyleSource::Element(caption.node),
                 border_rect,
                 content_rect,
                 depth: 1,
@@ -130,7 +131,7 @@ pub(super) fn append_captions(
             });
         }
         add_fill(&mut output.fills, border_rect, caption.style, 1);
-        if !caption.style.visibility.is_hidden() && caption.style.border.is_visible() {
+        if !caption.style.visibility.is_hidden() && caption.style.border.has_layout() {
             output.strokes.push(BorderStroke {
                 rect: border_rect,
                 edges: caption.style.border,

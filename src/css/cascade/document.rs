@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use unicode_width::UnicodeWidthStr;
 
@@ -22,6 +22,18 @@ use super::declaration::{apply_declaration, declaration_value_is_valid};
 use super::media::{MediaContext, active_style_rules};
 use super::typography::{apply_font_size, font_size_value_is_valid};
 
+#[derive(Clone)]
+pub(crate) struct CascadeState {
+    pub(super) environments: HashMap<NodeId, Arc<Environment>>,
+    pub(super) root_font_size: crate::core::style::FontSize,
+    pub(super) dynamic_state: crate::css::DynamicState,
+}
+
+pub(crate) struct CascadeOutput {
+    pub(crate) tree: StyleTree,
+    pub(crate) state: CascadeState,
+}
+
 pub(super) fn cascade_document(
     sheets: &[StyleSheet],
     document: &Document,
@@ -29,6 +41,16 @@ pub(super) fn cascade_document(
     forms: &FormState,
     bucketed: bool,
 ) -> StyleTree {
+    cascade_document_retained(sheets, document, media, forms, bucketed).tree
+}
+
+pub(super) fn cascade_document_retained(
+    sheets: &[StyleSheet],
+    document: &Document,
+    media: MediaContext,
+    forms: &FormState,
+    bucketed: bool,
+) -> CascadeOutput {
     let mut tree = StyleTree::default();
     let mut store = StyleStore::default();
     let rules = active_style_rules(sheets, media);
@@ -38,7 +60,7 @@ pub(super) fn cascade_document(
     let mut hidden_depth: Option<usize> = None;
     let mut root_font_size = media.root_font_size;
     let root_environment = Environment::root();
-    let mut environments: HashMap<NodeId, Rc<Environment>> = HashMap::new();
+    let mut environments: HashMap<NodeId, Arc<Environment>> = HashMap::new();
     for (id, depth) in elements_in_document_order(document) {
         counters.enter(depth);
         if hidden_depth.is_some_and(|hidden| depth <= hidden) {
@@ -242,10 +264,17 @@ pub(super) fn cascade_document(
         );
     }
     tree.set_store(store);
-    tree
+    CascadeOutput {
+        tree,
+        state: CascadeState {
+            environments,
+            root_font_size,
+            dynamic_state: media.state,
+        },
+    }
 }
 
-fn is_replaced_element(document: &Document, id: NodeId) -> bool {
+pub(super) fn is_replaced_element(document: &Document, id: NodeId) -> bool {
     matches!(
         document.node(id),
         Some(crate::core::dom::Node::Element { name, ns, .. })
@@ -277,7 +306,7 @@ fn cascade_pseudo(
     counters: &CounterScopes,
     fallback: Option<String>,
     flex_item: bool,
-    origin_environment: Rc<Environment>,
+    origin_environment: Arc<Environment>,
     store: &mut StyleStore,
 ) -> Option<PseudoBox> {
     let mut declarations = Vec::new();
@@ -390,7 +419,7 @@ fn cascade_pseudo(
     Some(PseudoBox { text, style })
 }
 
-fn resolve_declarations(
+pub(super) fn resolve_declarations(
     declarations: Vec<(bool, u32, usize, crate::css::Declaration)>,
     environment: &Environment,
     parent_style: Option<ComputedStyle>,
@@ -449,7 +478,7 @@ fn computed_value_is_valid(
     }
 }
 
-fn compute_box_values(
+pub(super) fn compute_box_values(
     document: &Document,
     tree: &StyleTree,
     id: NodeId,
@@ -505,7 +534,7 @@ fn compute_box_values(
 }
 
 /// Flex and grid items are both blockified, so both formatting contexts answer this the same way.
-fn pseudo_is_layout_item(
+pub(super) fn pseudo_is_layout_item(
     document: &Document,
     tree: &StyleTree,
     id: NodeId,
@@ -540,7 +569,7 @@ fn nearest_box_parent_lays_out_items(document: &Document, tree: &StyleTree, id: 
 }
 
 #[derive(Default)]
-struct RuleIndex {
+pub(super) struct RuleIndex {
     ids: HashMap<String, Vec<usize>>,
     classes: HashMap<String, Vec<usize>>,
     local_names: HashMap<String, Vec<usize>>,
@@ -549,7 +578,7 @@ struct RuleIndex {
 }
 
 impl RuleIndex {
-    fn new(rules: &[&StyleRule], document: &Document) -> Self {
+    pub(super) fn new(rules: &[&StyleRule], document: &Document) -> Self {
         let quirks = document.quirks_mode() == crate::core::dom::DomQuirksMode::Quirks;
         let mut index = Self {
             quirks,
@@ -569,7 +598,7 @@ impl RuleIndex {
         index
     }
 
-    fn candidates(&self, document: &Document, id: NodeId) -> Vec<usize> {
+    pub(super) fn candidates(&self, document: &Document, id: NodeId) -> Vec<usize> {
         let mut candidates = self.universal.clone();
         let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
             return candidates;

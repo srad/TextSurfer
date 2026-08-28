@@ -19,7 +19,7 @@ use crate::layout::clip::ClipRegion;
 use crate::core::dom::{Document, NodeId};
 use crate::core::form::FormState;
 use crate::core::geom::Size;
-use crate::core::style::{BorderEdges, CellStyle, DisplayInside, FlexDirection, Rgb, StyleTree};
+use crate::core::style::{BorderEdges, CellStyle, DisplayInside, FlexDirection, StyleTree};
 use crate::layout::LayoutInput;
 use crate::layout::table::{TableFormatter, TableLimits};
 use crate::layout::text_flow::{
@@ -53,6 +53,23 @@ pub struct BoxTree {
     pub(crate) float_images: Vec<usize>,
     pub paint_order: HashMap<NodeId, usize>,
     pub limits: LayoutLimits,
+    pub(crate) paint_sources: PaintSources,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PaintSources {
+    pub(crate) boxes: Vec<PaintStyleSource>,
+    pub(crate) fragments: Vec<PaintStyleSource>,
+    pub(crate) fills: Vec<PaintStyleSource>,
+    pub(crate) strokes: Vec<PaintStyleSource>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaintStyleSource {
+    Missing,
+    Element(NodeId),
+    Pseudo(NodeId, crate::core::style::PseudoElement),
+    Marker(NodeId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +111,7 @@ pub struct LayoutRect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutBox {
     pub node: NodeId,
+    pub(crate) paint_source: PaintStyleSource,
     pub border_rect: LayoutRect,
     pub content_rect: LayoutRect,
     pub depth: usize,
@@ -103,7 +121,7 @@ pub struct LayoutBox {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackgroundFill {
     pub rect: LayoutRect,
-    pub color: Rgb,
+    pub color: Option<crate::core::style::Rgb>,
     pub depth: usize,
 }
 
@@ -232,6 +250,7 @@ impl TaffyLayoutEngine {
         tree.links = links;
         tree.paint_order = document_paint_order(document);
         assign_link_rects(document, &mut tree);
+        crate::layout::restyle::capture_sources(&mut tree, document, styles);
         tree
     }
 }
@@ -542,12 +561,12 @@ fn try_layout_flow(
             {
                 tree.fills.push(BackgroundFill {
                     rect,
-                    color,
+                    color: Some(color),
                     depth: flow[index].depth,
                 });
             }
             if visible
-                && flow[index].style.border.is_visible()
+                && flow[index].style.border.has_layout()
                 && let Some(stroke) = inherited_clip.stroke(BorderStroke {
                     rect: border_rect,
                     edges: flow[index].style.border,
@@ -561,6 +580,7 @@ fn try_layout_flow(
             if visible && let Some(border_rect) = painted_border {
                 tree.boxes.push(LayoutBox {
                     node: owner,
+                    paint_source: flow[index].paint_source,
                     border_rect,
                     content_rect: inherited_clip.rect(content_rect).unwrap_or_default(),
                     depth: flow[index].depth,

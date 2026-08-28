@@ -17,6 +17,8 @@ use crate::layout::text_flow::{
 use taffy::BlockContext;
 use taffy::style::Clear as TaffyClear;
 
+use super::PaintStyleSource;
+
 use super::tables::append_table_output;
 use super::{BoxTree, TextFragment};
 
@@ -45,6 +47,7 @@ pub(super) struct FlowTree {
 
 pub(super) struct FlowBox {
     pub(super) owner: Option<NodeId>,
+    pub(super) paint_source: PaintStyleSource,
     pub(super) style: ComputedStyle,
     pub(super) depth: usize,
     pub(super) inline: Vec<InlinePiece>,
@@ -64,6 +67,7 @@ impl Clone for FlowBox {
     fn clone(&self) -> Self {
         Self {
             owner: self.owner,
+            paint_source: self.paint_source,
             style: self.style,
             depth: self.depth,
             inline: self.inline.clone(),
@@ -82,6 +86,7 @@ impl FlowBox {
     pub(super) fn new(owner: Option<NodeId>, style: ComputedStyle, depth: usize) -> Self {
         Self {
             owner,
+            paint_source: owner.map_or(PaintStyleSource::Missing, PaintStyleSource::Element),
             style,
             depth,
             inline: Vec::new(),
@@ -564,7 +569,7 @@ fn build_flow_tree_from(
                                 replaced: replaced_box(
                                     document,
                                     node,
-                                    style.border.is_visible(),
+                                    style.border.has_layout(),
                                     crate::layout::replaced::ReplacedInput {
                                         forms,
                                         image: images.and_then(|images| images.get(node)),
@@ -1089,6 +1094,7 @@ fn append_flow_pseudo(
     }
     let child = flow.len();
     flow.push(FlowBox {
+        paint_source: PaintStyleSource::Pseudo(node, which),
         inline: (!piece.text.is_empty())
             .then_some(piece)
             .into_iter()
@@ -1112,6 +1118,7 @@ fn append_item_pseudo(
     };
     let child = flow.len();
     flow.push(FlowBox {
+        paint_source: PaintStyleSource::Pseudo(node, which),
         inline: vec![InlinePiece {
             node,
             text: pseudo.text.clone(),

@@ -163,7 +163,10 @@ impl MediaContext {
     }
 }
 
-pub(super) fn active_style_rules(sheets: &[StyleSheet], media: MediaContext) -> Vec<&StyleRule> {
+pub(in crate::css) fn active_style_rules(
+    sheets: &[StyleSheet],
+    media: MediaContext,
+) -> Vec<&StyleRule> {
     let mut stack = Vec::new();
     for sheet in sheets.iter().rev() {
         stack.extend(sheet.rules.iter().rev());

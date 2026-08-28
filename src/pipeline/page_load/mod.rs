@@ -25,7 +25,10 @@ use crate::core::form::{
 use crate::core::geom::Size;
 use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeRequest};
 use crate::core::style::{Palette, RenderContext};
-use crate::css::{ColorScheme, DynamicState, MediaContext, MediaQueryList, StateDeps, StyleSheet};
+use crate::css::{
+    CascadeState, ColorScheme, DynamicEffect, DynamicState, MediaContext, MediaQueryList,
+    StateDeps, StateEffects, StyleSheet,
+};
 use crate::html::{Html5everParser, HtmlParser, ParseOutcome};
 use crate::net::{FetchResponse, ResourceId};
 
@@ -35,11 +38,36 @@ use crate::layout::BoxTree;
 
 pub use pending::PendingPageLoad;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum RenderInvalidation {
-    Paint,
-    Layout,
-    Style,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RenderInvalidation {
+    cascade: bool,
+    layout: bool,
+}
+
+impl RenderInvalidation {
+    const PAINT: Self = Self {
+        cascade: false,
+        layout: false,
+    };
+    const RESTYLE: Self = Self {
+        cascade: true,
+        layout: false,
+    };
+    const LAYOUT: Self = Self {
+        cascade: false,
+        layout: true,
+    };
+    const STYLE: Self = Self {
+        cascade: true,
+        layout: true,
+    };
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            cascade: self.cascade || other.cascade,
+            layout: self.layout || other.layout,
+        }
+    }
 }
 
 pub const STYLESHEET_DEADLINE: Duration = Duration::from_millis(250);
@@ -188,13 +216,16 @@ pub struct PageLoad {
     invalidation: Option<RenderInvalidation>,
     render_causes: RenderCauses,
     cached_styles: Option<Arc<StyleTree>>,
+    cached_cascade_state: Option<Arc<CascadeState>>,
     cached_layout: Option<BoxTree>,
+    cached_layout_styles: Option<Arc<StyleTree>>,
     cached_css_warnings: usize,
     deferred_rendering: bool,
     render_epoch: u64,
     hard_epoch: u64,
     last_published_epoch: u64,
     state_deps: StateDeps,
+    state_effects: StateEffects,
 }
 
 impl PageLoad {
@@ -210,7 +241,7 @@ impl PageLoad {
         }
         self.invalidation = Some(
             self.invalidation
-                .map_or(level, |current| current.max(level)),
+                .map_or(level, |current| current.union(level)),
         );
         self.render_causes.insert(cause);
         tracing::trace!(
@@ -319,16 +350,19 @@ impl PageLoad {
             deadline: started.saturating_add(STYLESHEET_DEADLINE),
             first_painted: false,
             final_painted: false,
-            invalidation: Some(RenderInvalidation::Style),
+            invalidation: Some(RenderInvalidation::STYLE),
             render_causes: RenderCauses::one(RenderCause::Initial),
             cached_styles: None,
+            cached_cascade_state: None,
             cached_layout: None,
+            cached_layout_styles: None,
             cached_css_warnings: 0,
             deferred_rendering: false,
             render_epoch: 1,
             hard_epoch: 1,
             last_published_epoch: 0,
             state_deps: StateDeps::default(),
+            state_effects: StateEffects::default(),
         };
         load.discover_document_sources(&effective_base);
         load.discover_document_images(&effective_base);
@@ -364,7 +398,7 @@ impl PageLoad {
     pub fn set_viewport(&mut self, viewport: Size) {
         if self.media.viewport != viewport {
             self.media = self.media.with_viewport(viewport);
-            self.invalidate(RenderInvalidation::Style, RenderCause::Viewport);
+            self.invalidate(RenderInvalidation::STYLE, RenderCause::Viewport);
         }
     }
 
@@ -377,7 +411,17 @@ impl PageLoad {
         if !self.first_painted || !self.restyle_needed(previous, state) {
             return None;
         }
-        self.invalidate(RenderInvalidation::Style, RenderCause::DynamicState);
+        let mut effect = self.state_effects.transition(previous, state);
+        if effect == DynamicEffect::None
+            && self.hovered_link(previous.hover) != self.hovered_link(state.hover)
+        {
+            effect = DynamicEffect::Paint;
+        }
+        let invalidation = match effect {
+            DynamicEffect::None => return None,
+            DynamicEffect::Paint | DynamicEffect::Layout => RenderInvalidation::RESTYLE,
+        };
+        self.invalidate(invalidation, RenderCause::DynamicState);
         self.render_or_defer()
     }
 
@@ -470,7 +514,7 @@ impl PageLoad {
     }
 
     fn render_after_form_mutation(&mut self) -> Option<RenderedPage> {
-        self.invalidate(RenderInvalidation::Style, RenderCause::FormState);
+        self.invalidate(RenderInvalidation::STYLE, RenderCause::FormState);
         if !self.first_painted {
             return None;
         }

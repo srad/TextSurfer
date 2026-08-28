@@ -227,7 +227,7 @@ impl PageLoad {
             decoded_bytes = bytes,
             "image decode invalidated layout"
         );
-        self.invalidate_soft(RenderInvalidation::Layout, RenderCause::Image);
+        self.invalidate_soft(RenderInvalidation::LAYOUT, RenderCause::Image);
         true
     }
 

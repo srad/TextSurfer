@@ -493,7 +493,7 @@ pub(super) fn declaration_value_is_valid(
     })
 }
 
-fn is_supported_property(property: &str) -> bool {
+pub(in crate::css) fn is_supported_property(property: &str) -> bool {
     matches!(
         property,
         "display"
