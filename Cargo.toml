@@ -35,11 +35,13 @@ softbuffer = { version = "0.4.8", optional = true }
 unifont-bitmap = { version = "1.0.0", optional = true }
 winit = { version = "0.30.13", optional = true }
 app_units = { version = "0.7.8", optional = true }
+atomic_refcell = { version = "0.1.14", optional = true }
 euclid = { version = "0.22.11", optional = true }
 servo_arc = { version = "0.4.3", optional = true }
 stylo = { version = "0.20.0", optional = true }
 stylo_dom = { version = "0.20.0", optional = true }
 stylo_traits = { version = "0.20.0", optional = true }
+web_atoms = { version = "0.2.6", optional = true }
 
 [features]
 default = ["vga"]
@@ -49,11 +51,13 @@ vga = ["dep:softbuffer", "dep:unifont-bitmap", "dep:winit"]
 # tables from vendored Mako templates.
 stylo = [
     "dep:app_units",
+    "dep:atomic_refcell",
     "dep:euclid",
     "dep:servo_arc",
     "dep:stylo",
     "dep:stylo_dom",
     "dep:stylo_traits",
+    "dep:web_atoms",
 ]
 
 [dev-dependencies]

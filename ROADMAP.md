@@ -89,10 +89,10 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-28): **920 lib · 20 binary · 6 fetch-pipeline · 14
-corpus · 48 golden · 3 atlas** with the default VGA frontend, **816 lib · 19 binary · 2 atlas**
-with `--no-default-features`; the WPT target adds 6 passing tests (5 without `vga`), plus two
-deliberately ignored entries (the child worker and the VGA reference generator).
+Test counts at the last green run (2026-08-28): **1,027 total** with the default VGA frontend and
+**920** with `--no-default-features`; `--features stylo` adds the 16 Stylo DOM-adapter tests for
+**1,043**. The WPT target contributes 6 passing tests (5 without `vga`), plus two deliberately
+ignored entries (the child worker and the VGA reference generator).
 
 ### Open risk register
 
@@ -774,13 +774,33 @@ allocation.
       recompiles. Release binary delta is not yet measurable (1 KiB) because no code references
       stylo and the linker drops it; **the real size delta is recorded at S4**, once the mapper
       pulls the property tables in.
-- [ ] **S2 — interface refactor, zero behaviour change.** `StyleInput`/`StyleSession`; the retained
-      and dynamic entry points move off `BasicCascade`'s inherent impl onto the trait; session
-      ownership moves into the render worker; `RenderJob.sheets` becomes owned `SheetSource` text and
-      a prelude-only `@import` prescan replaces AST-walking discovery in `pipeline::page_load`. The
-      prescan is exact, not a heuristic: CSS requires `@import` before every other rule.
-- [ ] **S3 — DOM adapter.** The `css::stylo::dom` mirror, `TDocument`/`TNode`/`TElement`, `Device`
-      and a cell-metric `FontMetricsProvider`. The single-`allow(unsafe_code)` test lands here.
+      *S3 runs before S2:* abstracting the cascade boundary with one implementation is guesswork,
+      and S3 is purely additive behind the feature flag, so it is also where the remaining unknowns
+      are cheapest to answer.
+- [x] **S3a — DOM adapter (done).** `css::stylo::dom` mirrors `Document` into an owned arena and
+      implements `TDocument`, `TNode`, `TElement` and `selectors::Element` over `Copy` handles, with
+      16 tests covering navigation, interning, case sensitivity, attributes, state bits, dirty and
+      snapshot bits, `ElementData`, opaque identity and depth truncation. The crate root moved from
+      `forbid(unsafe_code)` to `deny`; `tests/unsafe_code.rs` pins `css::stylo::dom` as the only
+      module that opts out and asserts the adapter contains no `unsafe` *block*.
+      *Two findings worth keeping:* html5ever 0.39 and stylo 0.20 share one `web_atoms` 0.2.6, so
+      `LocalName`/`Namespace` need no conversion and no second atom table; and Stylo's own
+      `ElementDataWrapper` replaces the `AtomicRefCell<ElementData>` an embedder would otherwise
+      hand-roll. The mirror drops comments, PIs, doctypes and fragments — they match no selector and
+      inherit nothing — and caps build depth at `MAX_MIRROR_DEPTH` because the source is untrusted.
+- [ ] **S3b — `Device` and font metrics.** Construct `Device` with a cell-metric
+      `FontMetricsProvider`, build a `Stylist` from the UA sheet, and cascade the root element.
+- [ ] **S2 — interface refactor.** `StyleInput`/`StyleSession`; the retained and dynamic entry
+      points move off `BasicCascade`'s inherent impl onto the trait. *Deferred to after S4* because
+      the second implementation is what reveals the right boundary.
+      *Session ownership moves in S6, not here.* `CascadeState` is `Send` and travels in the job
+      today, so nothing forces the move yet; the Stylo session is `!Send`, and `RenderQueue: Sync`
+      means neither the test-only `InlineRenderQueue` nor the free `RenderJob::execute` can hold one.
+      That is a real design problem, and it is cheaper to solve once the `!Send` type exists.
+      `RenderJob.sheets` becomes owned `SheetSource` text with a prelude-only `@import` prescan in
+      S5, where Stylo takes over parsing — moving it earlier would relocate CSS parsing off the
+      owner sequence, which is a behaviour change, not a refactor. The prescan is exact, not a
+      heuristic: CSS requires `@import` before every other rule.
 - [ ] **S4 — cascade and mapper.** `StyloCascade` plus the full `ComputedValues` → `ComputedStyle`
       mapping. The cascade suites run both impls in one process as a differential oracle; the
       layout, paint and golden suites are not duplicated — the `--features stylo` gate row covers

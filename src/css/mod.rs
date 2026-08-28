@@ -4,6 +4,8 @@ mod math;
 pub mod parser;
 mod presentational;
 mod selectors;
+#[cfg(feature = "stylo")]
+mod stylo;
 mod ua;
 mod values;
 mod variables;
