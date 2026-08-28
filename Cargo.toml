@@ -41,6 +41,7 @@ servo_arc = { version = "0.4.3", optional = true }
 stylo = { version = "0.20.0", optional = true }
 stylo_dom = { version = "0.20.0", optional = true }
 stylo_traits = { version = "0.20.0", optional = true }
+typed-arena = { version = "2.0.2", optional = true }
 web_atoms = { version = "0.2.6", optional = true }
 
 [features]
@@ -57,6 +58,7 @@ stylo = [
     "dep:stylo",
     "dep:stylo_dom",
     "dep:stylo_traits",
+    "dep:typed-arena",
     "dep:web_atoms",
 ]
 

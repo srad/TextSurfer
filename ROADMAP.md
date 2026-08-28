@@ -49,6 +49,7 @@ questions we were answering ad hoc.
 | [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer | Confirms the architecture; no dependency. Its `blitz-dom` is the reference for embedding Stylo outside Servo (M7) |
 | [stylo](https://crates.io/crates/stylo) 0.20.0 | Browser-grade cascade, computed values, snapshots and dynamic-state invalidation, on stable Rust with `default = ["servo"]` — no Gecko, bindgen, nightly or C++ toolchain | Adopted in M7 as the cascade. Adds one build prerequisite: **Python 3 on `PATH`** (`build.rs` runs the vendored-Mako `properties/build.py`). Uses `pool: None`, so no rayon threads are spawned |
 | [stylo_taffy](https://crates.io/crates/stylo_taffy) 0.3.0-beta.2 | Maps Stylo computed values onto `taffy::Style`, against taffy 0.14 — our exact pin | **Reference only, not a dependency** — it emits px, while our layout is cell-quantised (`AxisCellLength`, per-axis rounding, the 65,535 cap, unresolved-percentage preservation) |
+| [typed-arena](https://crates.io/crates/typed-arena) 2.0.2 | One lifetime for every value in an arena, which makes a reference-linked tree expressible without raw pointers | Adopted in M7 for the style mirror. Stylo's sharing cache requires a pointer-sized element handle, so the mirror cannot be index-linked; this is what keeps the links safe. MIT, zero dependencies, `std` feature only |
 | [image](https://crates.io/crates/image) 0.25.10 | Signature-based raster decoding with explicit format features and decoder limits | The shared decoder for PNG, JPEG, WebP and first-frame GIF, default features off, TextSurfer-owned budgets |
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
 | [arboard](https://crates.io/crates/arboard) 3.6.1 | Current cross-platform text clipboard access without a UI toolkit | Frontend adapters only, default features off; `app` exchanges owned clipboard requests and remains I/O-free |
@@ -90,8 +91,8 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
 Test counts at the last green run (2026-08-28): **1,027 total** with the default VGA frontend and
-**920** with `--no-default-features`; `--features stylo` adds the 16 Stylo DOM-adapter tests for
-**1,043**. The WPT target contributes 6 passing tests (5 without `vga`), plus two deliberately
+**920** with `--no-default-features`; `--features stylo` adds the 27 Stylo adapter and cascade tests
+for **1,054**. The WPT target contributes 6 passing tests (5 without `vga`), plus two deliberately
 ignored entries (the child worker and the VGA reference generator).
 
 ### Open risk register
@@ -184,10 +185,13 @@ before any item is marked `(done)`. While M7 steps S1–S6 are open, a ninth row
 - **Single crate with modules**, not a workspace — fastest iteration; a split is trivial later.
 - **`#![deny(unsafe_code)]` at the crate root, with exactly one permitted exception:
   `css::stylo::dom`** (M7). Stylo's `TElement` declares seven `unsafe fn` methods for Gecko's
-  benefit; under edition 2024 their bodies are ordinary safe code, so our impls contain no `unsafe`
-  block — the lint fires on the token alone. `forbid` cannot be overridden by `#[allow]` anywhere in
-  the crate, which is why the root relaxes to `deny`. A test asserts the tree holds exactly one
-  `allow(unsafe_code)`. *Rejected:* a separate adapter crate — same code, but it breaks the
+  benefit; under edition 2024 their bodies are ordinary safe code, so the trait impls contain no
+  `unsafe` block — the lint fires on the token alone. `forbid` cannot be overridden by `#[allow]`
+  anywhere in the crate, which is why the root relaxes to `deny`. The module also wraps those
+  methods in safe functions, so nothing outside it needs an `unsafe` block; those wrappers are the
+  only `unsafe` blocks in the tree. Tests assert exactly one `allow(unsafe_code)` and that every
+  `unsafe` block is a call to one of Stylo's own `unsafe fn` trait methods — a raw-pointer
+  dereference or a transmute fails them. *Rejected:* a separate adapter crate — same code, but it breaks the
   single-crate decision above and forces the DOM mirror, the style mapper and `RenderContext` into a
   public cross-crate API.
 - **Stylo state never leaves the render worker, and the type system says so.** Servo's `Device` owns
@@ -782,14 +786,35 @@ allocation.
       16 tests covering navigation, interning, case sensitivity, attributes, state bits, dirty and
       snapshot bits, `ElementData`, opaque identity and depth truncation. The crate root moved from
       `forbid(unsafe_code)` to `deny`; `tests/unsafe_code.rs` pins `css::stylo::dom` as the only
-      module that opts out and asserts the adapter contains no `unsafe` *block*.
+      module that opts out and constrains every `unsafe` block in it to a Stylo trait call.
       *Two findings worth keeping:* html5ever 0.39 and stylo 0.20 share one `web_atoms` 0.2.6, so
       `LocalName`/`Namespace` need no conversion and no second atom table; and Stylo's own
       `ElementDataWrapper` replaces the `AtomicRefCell<ElementData>` an embedder would otherwise
       hand-roll. The mirror drops comments, PIs, doctypes and fragments — they match no selector and
       inherit nothing — and caps build depth at `MAX_MIRROR_DEPTH` because the source is untrusted.
-- [ ] **S3b — `Device` and font metrics.** Construct `Device` with a cell-metric
-      `FontMetricsProvider`, build a `Stylist` from the UA sheet, and cascade the root element.
+- [x] **S3b — `Device`, font metrics and the first real cascade (done).** Stylo now resolves real
+      computed styles: UA sheet, author override, specificity, inheritance, and `ex`/`ch` through a
+      cell-metric `FontMetricsProvider`. The `Device` viewport reuses `CellMetric::viewport_css_pixels`
+      so VGA and terminal cannot diverge, and `StyloEngine::new` flushes the `Stylist` internally so
+      no caller can observe an un-flushed rule database.
+      **Hard constraint found here:** Stylo's style sharing cache requires the element handle to be
+      *exactly pointer-sized* — `FakeCandidate` declares `_element: usize` and
+      `StyleSharingCache::new` asserts the two cache layouts match. The S3a index-plus-arena handle
+      was two words and tripped it at runtime. The mirror is now reference-linked through
+      `typed-arena` 2.0.2, which gives every node one lifetime and keeps the links safe shared
+      references rather than raw pointers; a test pins the handle width where the message is legible.
+      **Defect fixed from S3a:** `has_data`/`borrow_data` claimed data unconditionally, but Stylo
+      allocates `ElementData` lazily and `with_default_parent_styles` reads
+      `borrow_data().styles.primary()` — an `unwrap` — for any parent reporting data. Resolving a
+      child before its parent panicked. Allocation is now tracked and resolution is top-down.
+      **Also required:** `thread_state::initialize(ThreadState::LAYOUT)` on every thread touching the
+      style system, or `SequentialTaskList::drop` trips a debug assertion. S4/S6 must do this on the
+      render worker.
+- **M7 divergence ledger** (Stylo accepts what the custom cascade refuses; S4's differential suite
+  will extend this):
+  - `cap`, `rcap`, `ic`, `ric` length units — absent from `CssLengthUnit`, so the custom cascade
+    rejects the whole declaration. The cell metrics provider returns no cap/ic metric, so Stylo
+    falls back to its own constants rather than a terminal-derived value.
 - [ ] **S2 — interface refactor.** `StyleInput`/`StyleSession`; the retained and dynamic entry
       points move off `BasicCascade`'s inherent impl onto the trait. *Deferred to after S4* because
       the second implementation is what reveals the right boundary.

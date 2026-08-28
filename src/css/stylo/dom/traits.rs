@@ -20,12 +20,12 @@ use style::{Atom, CaseSensitivityExt, LocalName as StyleLocalName, Namespace as 
 use stylo_dom::ElementState;
 use web_atoms::{LocalName, Namespace, ns};
 
-use super::{DOCUMENT, MirrorId, NodeKind, StyleDom, StyloDocument, StyloElement, StyloNode};
+use super::{NodeKind, StyleNode, StyloDocument, StyloElement, StyloNode};
 
 /// The mirror has no shadow DOM. Stylo only ever reaches this type through `Option`, so an
 /// uninhabited stand-in satisfies the associated type without admitting any shadow behaviour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NoShadowRoot<'dom> {
+pub(crate) enum NoShadowRoot<'a> {
     // Only under `test`: the module-level expectation already covers the lib build.
     #[cfg_attr(
         test,
@@ -34,11 +34,11 @@ pub(crate) enum NoShadowRoot<'dom> {
             reason = "uninhabited on purpose: carrying the lifetime is the variant's only job"
         )
     )]
-    Never(PhantomData<&'dom ()>, std::convert::Infallible),
+    Never(PhantomData<&'a ()>, std::convert::Infallible),
 }
 
-impl<'dom> TShadowRoot for NoShadowRoot<'dom> {
-    type ConcreteNode = StyloNode<'dom>;
+impl<'a> TShadowRoot for NoShadowRoot<'a> {
+    type ConcreteNode = StyloNode<'a>;
 
     fn as_node(&self) -> Self::ConcreteNode {
         match *self {
@@ -46,15 +46,15 @@ impl<'dom> TShadowRoot for NoShadowRoot<'dom> {
         }
     }
 
-    fn host(&self) -> StyloElement<'dom> {
+    fn host(&self) -> StyloElement<'a> {
         match *self {
             NoShadowRoot::Never(_, never) => match never {},
         }
     }
 
-    fn style_data<'a>(&self) -> Option<&'a CascadeData>
+    fn style_data<'b>(&self) -> Option<&'b CascadeData>
     where
-        Self: 'a,
+        Self: 'b,
     {
         match *self {
             NoShadowRoot::Never(_, never) => match never {},
@@ -64,22 +64,19 @@ impl<'dom> TShadowRoot for NoShadowRoot<'dom> {
 
 impl NodeInfo for StyloNode<'_> {
     fn is_element(&self) -> bool {
-        matches!(self.dom.node(self.id).kind, NodeKind::Element(_))
+        matches!(self.0.kind, NodeKind::Element(_))
     }
 
     fn is_text_node(&self) -> bool {
-        matches!(self.dom.node(self.id).kind, NodeKind::Text)
+        matches!(self.0.kind, NodeKind::Text)
     }
 }
 
-impl<'dom> TDocument for StyloDocument<'dom> {
-    type ConcreteNode = StyloNode<'dom>;
+impl<'a> TDocument for StyloDocument<'a> {
+    type ConcreteNode = StyloNode<'a>;
 
     fn as_node(&self) -> Self::ConcreteNode {
-        StyloNode {
-            dom: self.0,
-            id: DOCUMENT,
-        }
+        StyloNode(self.0)
     }
 
     fn is_html_document(&self) -> bool {
@@ -87,41 +84,41 @@ impl<'dom> TDocument for StyloDocument<'dom> {
     }
 
     fn quirks_mode(&self) -> QuirksMode {
-        self.0.quirks_mode()
+        self.document().quirks_mode()
     }
 
     fn shared_lock(&self) -> &SharedRwLock {
-        self.0.shared_lock()
+        self.document().lock()
     }
 }
 
-impl<'dom> TNode for StyloNode<'dom> {
-    type ConcreteElement = StyloElement<'dom>;
-    type ConcreteDocument = StyloDocument<'dom>;
-    type ConcreteShadowRoot = NoShadowRoot<'dom>;
+impl<'a> TNode for StyloNode<'a> {
+    type ConcreteElement = StyloElement<'a>;
+    type ConcreteDocument = StyloDocument<'a>;
+    type ConcreteShadowRoot = NoShadowRoot<'a>;
 
     fn parent_node(&self) -> Option<Self> {
-        self.relative(self.dom.node(self.id).parent)
+        self.0.parent.get().map(StyloNode)
     }
 
     fn first_child(&self) -> Option<Self> {
-        self.relative(self.dom.node(self.id).first_child)
+        self.0.first_child.get().map(StyloNode)
     }
 
     fn last_child(&self) -> Option<Self> {
-        self.relative(self.dom.node(self.id).last_child)
+        self.0.last_child.get().map(StyloNode)
     }
 
     fn prev_sibling(&self) -> Option<Self> {
-        self.relative(self.dom.node(self.id).prev_sibling)
+        self.0.prev_sibling.get().map(StyloNode)
     }
 
     fn next_sibling(&self) -> Option<Self> {
-        self.relative(self.dom.node(self.id).next_sibling)
+        self.0.next_sibling.get().map(StyloNode)
     }
 
     fn owner_doc(&self) -> Self::ConcreteDocument {
-        StyloDocument(self.dom)
+        StyloDocument(self.0.owner_document().unwrap_or(self.0))
     }
 
     fn is_in_document(&self) -> bool {
@@ -133,19 +130,19 @@ impl<'dom> TNode for StyloNode<'dom> {
     }
 
     fn opaque(&self) -> OpaqueNode {
-        OpaqueNode(self.dom.node_address(self.id))
+        OpaqueNode(std::ptr::from_ref(self.0) as usize)
     }
 
     fn debug_id(self) -> usize {
-        self.id as usize
+        std::ptr::from_ref(self.0) as usize
     }
 
     fn as_element(&self) -> Option<Self::ConcreteElement> {
-        StyloElement::new(self.dom, self.id)
+        StyloElement::new(self.0)
     }
 
     fn as_document(&self) -> Option<Self::ConcreteDocument> {
-        (self.id == DOCUMENT).then_some(StyloDocument(self.dom))
+        matches!(self.0.kind, NodeKind::Document(_)).then_some(StyloDocument(self.0))
     }
 
     fn as_shadow_root(&self) -> Option<Self::ConcreteShadowRoot> {
@@ -153,18 +150,17 @@ impl<'dom> TNode for StyloNode<'dom> {
     }
 }
 
-pub(crate) struct ChildIterator<'dom> {
-    dom: &'dom StyleDom,
-    next: Option<MirrorId>,
+pub(crate) struct ChildIterator<'a> {
+    next: Option<&'a StyleNode<'a>>,
 }
 
-impl<'dom> Iterator for ChildIterator<'dom> {
-    type Item = StyloNode<'dom>;
+impl<'a> Iterator for ChildIterator<'a> {
+    type Item = StyloNode<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.next?;
-        self.next = self.dom.node(id).next_sibling;
-        Some(StyloNode { dom: self.dom, id })
+        let node = self.next?;
+        self.next = node.next_sibling_node();
+        Some(StyloNode(node))
     }
 }
 
@@ -172,11 +168,11 @@ impl SelectorsElement for StyloElement<'_> {
     type Impl = SelectorImpl;
 
     fn opaque(&self) -> OpaqueElement {
-        OpaqueElement::new(self.element())
+        OpaqueElement::new(self.0)
     }
 
     fn parent_element(&self) -> Option<Self> {
-        self.0.parent_node().and_then(|node| node.as_element())
+        self.0.parent.get().and_then(StyloElement::new)
     }
 
     fn parent_node_is_shadow_root(&self) -> bool {
@@ -192,34 +188,34 @@ impl SelectorsElement for StyloElement<'_> {
     }
 
     fn prev_sibling_element(&self) -> Option<Self> {
-        let mut sibling = self.0.prev_sibling();
+        let mut sibling = self.0.prev_sibling.get();
         while let Some(node) = sibling {
-            if let Some(element) = node.as_element() {
+            if let Some(element) = StyloElement::new(node) {
                 return Some(element);
             }
-            sibling = node.prev_sibling();
+            sibling = node.prev_sibling_node();
         }
         None
     }
 
     fn next_sibling_element(&self) -> Option<Self> {
-        let mut sibling = self.0.next_sibling();
+        let mut sibling = self.0.next_sibling.get();
         while let Some(node) = sibling {
-            if let Some(element) = node.as_element() {
+            if let Some(element) = StyloElement::new(node) {
                 return Some(element);
             }
-            sibling = node.next_sibling();
+            sibling = node.next_sibling_node();
         }
         None
     }
 
     fn first_element_child(&self) -> Option<Self> {
-        let mut child = self.0.first_child();
+        let mut child = self.0.first_child.get();
         while let Some(node) = child {
-            if let Some(element) = node.as_element() {
+            if let Some(element) = StyloElement::new(node) {
                 return Some(element);
             }
-            child = node.next_sibling();
+            child = node.next_sibling_node();
         }
         None
     }
@@ -336,19 +332,22 @@ impl SelectorsElement for StyloElement<'_> {
     }
 
     fn is_empty(&self) -> bool {
-        let mut child = self.0.first_child();
+        let mut child = self.0.first_child.get();
         while let Some(node) = child {
-            match node.dom.node(node.id).kind {
+            match node.kind {
                 NodeKind::Element(_) | NodeKind::Text => return false,
-                NodeKind::Document => {}
+                NodeKind::Document(_) => {}
             }
-            child = node.next_sibling();
+            child = node.next_sibling_node();
         }
         true
     }
 
     fn is_root(&self) -> bool {
-        self.0.dom.root_element() == Some(self.0.id)
+        self.0
+            .parent
+            .get()
+            .is_some_and(|parent| matches!(parent.kind, NodeKind::Document(_)))
     }
 
     fn add_element_unique_hashes(&self, _filter: &mut BloomFilter) -> bool {
@@ -356,18 +355,17 @@ impl SelectorsElement for StyloElement<'_> {
     }
 }
 
-impl<'dom> TElement for StyloElement<'dom> {
-    type ConcreteNode = StyloNode<'dom>;
-    type TraversalChildrenIterator = ChildIterator<'dom>;
+impl<'a> TElement for StyloElement<'a> {
+    type ConcreteNode = StyloNode<'a>;
+    type TraversalChildrenIterator = ChildIterator<'a>;
 
     fn as_node(&self) -> Self::ConcreteNode {
-        self.0
+        StyloNode(self.0)
     }
 
     fn traversal_children(&self) -> LayoutIterator<Self::TraversalChildrenIterator> {
         LayoutIterator(ChildIterator {
-            dom: self.0.dom,
-            next: self.0.dom.node(self.0.id).first_child,
+            next: self.0.first_child.get(),
         })
     }
 
@@ -480,23 +478,29 @@ impl<'dom> TElement for StyloElement<'dom> {
     }
 
     unsafe fn ensure_data(&self) -> ElementDataMut<'_> {
-        self.element().data.borrow_mut()
+        let element = self.element();
+        element.allocated.set(true);
+        element.data.borrow_mut()
     }
 
     unsafe fn clear_data(&self) {
-        *self.element().data.borrow_mut() = ElementData::default();
+        let element = self.element();
+        *element.data.borrow_mut() = ElementData::default();
+        element.allocated.set(false);
     }
 
     fn has_data(&self) -> bool {
-        true
+        self.element().allocated.get()
     }
 
     fn borrow_data(&self) -> Option<ElementDataRef<'_>> {
-        Some(self.element().data.borrow())
+        let element = self.element();
+        element.allocated.get().then(|| element.data.borrow())
     }
 
     fn mutate_data(&self) -> Option<ElementDataMut<'_>> {
-        Some(self.element().data.borrow_mut())
+        let element = self.element();
+        element.allocated.get().then(|| element.data.borrow_mut())
     }
 
     fn skip_item_display_fixup(&self) -> bool {
@@ -527,11 +531,11 @@ impl<'dom> TElement for StyloElement<'dom> {
         false
     }
 
-    fn shadow_root(&self) -> Option<NoShadowRoot<'dom>> {
+    fn shadow_root(&self) -> Option<NoShadowRoot<'a>> {
         None
     }
 
-    fn containing_shadow(&self) -> Option<NoShadowRoot<'dom>> {
+    fn containing_shadow(&self) -> Option<NoShadowRoot<'a>> {
         None
     }
 
@@ -597,8 +601,8 @@ impl<'dom> TElement for StyloElement<'dom> {
     }
 }
 
-impl<'dom> StyloElement<'dom> {
-    fn attr(&self, namespace: &Namespace, name: &str) -> Option<&'dom AttrValue> {
+impl<'a> StyloElement<'a> {
+    fn attr(&self, namespace: &Namespace, name: &str) -> Option<&'a AttrValue> {
         self.element()
             .attrs
             .iter()

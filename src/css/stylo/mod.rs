@@ -5,16 +5,22 @@
 //! and a stable identity, none of which can live on `core::dom::Node` without pulling `style::`
 //! into `core`.
 
-// S3 builds the DOM adapter and proves it against its own tests; nothing in the production cascade
-// path reaches it until S4 adds `StyloCascade`. This is scoped to non-test builds so it lifts on
-// its own — once S4 wires the adapter in, the expectation goes unfulfilled and the build fails
-// until this attribute is deleted.
+// S3a/S3b build the adapter and prove it against their own tests; nothing in the production cascade
+// path reaches it until S4 adds `StyloCascade`. Scoped to non-test builds so it lifts on its own —
+// once S4 wires the adapter in, the expectation goes unfulfilled and the build fails until this
+// attribute is deleted.
 #![cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "S3 lands the DOM adapter; S4 is what makes the production cascade use it"
+        reason = "S3 lands the adapter; S4 is what makes the production cascade use it"
     )
 )]
 
+mod device;
 mod dom;
+mod engine;
+mod sheets;
+
+#[cfg(test)]
+mod tests;

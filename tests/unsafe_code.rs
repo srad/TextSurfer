@@ -55,27 +55,51 @@ fn the_crate_root_still_denies_unsafe_code() {
     );
 }
 
-/// The adapter's `unsafe fn` items exist only because the trait declares them. Under edition 2024
-/// an `unsafe fn` body is ordinary safe code, so the implementation must contain no `unsafe`
-/// *block* — that is the difference between satisfying a signature and actually asserting an
-/// invariant. Test modules are exempt: calling an `unsafe fn` needs a block wherever it happens.
+/// Every `unsafe` method Stylo makes us implement, and which we may therefore call.
+///
+/// `TElement` declares these `unsafe fn` for Gecko's benefit — Gecko can race to allocate or leak
+/// without exclusive access to the element. Our arena is single-threaded and owned by one style
+/// session, so none of them carries a real proof obligation here. Nothing else may be `unsafe`.
+const CALLABLE: &[&str] = &[
+    "TElement::ensure_data",
+    "TElement::clear_data",
+    "TElement::set_dirty_descendants",
+    "TElement::unset_dirty_descendants",
+    "TElement::set_handled_snapshot",
+];
+
+/// The adapter's own `unsafe fn` bodies are ordinary safe code under edition 2024, so the only
+/// `unsafe` blocks it may contain are calls to the trait methods above — the safe wrappers that let
+/// the rest of the crate stay clean. A raw-pointer dereference or a transmute would fail this.
+///
+/// Test modules are exempt: calling an `unsafe fn` needs a block wherever it happens.
 #[test]
-fn the_stylo_dom_adapter_contains_no_unsafe_block() {
+fn the_stylo_adapter_uses_unsafe_only_to_call_stylos_own_trait_methods() {
     let mut sources = Vec::new();
     rust_sources(Path::new("src/css/stylo"), &mut sources);
+    let mut checked = 0usize;
     for path in sources {
         if path.file_name().is_some_and(|name| name == "tests.rs") {
             continue;
         }
         let text = std::fs::read_to_string(&path).expect("the source file is valid UTF-8");
         for (number, line) in text.lines().enumerate() {
-            let trimmed = line.trim_start();
+            if !line.contains("unsafe {") {
+                continue;
+            }
+            checked += 1;
             assert!(
-                !(trimmed.starts_with("unsafe {") || trimmed.contains("= unsafe {")),
-                "{}:{} introduces an unsafe block: {trimmed}",
+                CALLABLE.iter().any(|callable| line.contains(callable)),
+                "{}:{} uses unsafe for something other than a Stylo trait call: {}",
                 path.display(),
-                number + 1
+                number + 1,
+                line.trim()
             );
         }
     }
+    assert!(
+        checked > 0,
+        "the adapter should still be calling Stylo's unsafe trait methods; \
+         if that changed, this guard needs revisiting rather than deleting"
+    );
 }
