@@ -34,11 +34,27 @@ boa_engine = { version = "0.21.1", optional = true }
 softbuffer = { version = "0.4.8", optional = true }
 unifont-bitmap = { version = "1.0.0", optional = true }
 winit = { version = "0.30.13", optional = true }
+app_units = { version = "0.7.8", optional = true }
+euclid = { version = "0.22.11", optional = true }
+servo_arc = { version = "0.4.3", optional = true }
+stylo = { version = "0.20.0", optional = true }
+stylo_dom = { version = "0.20.0", optional = true }
+stylo_traits = { version = "0.20.0", optional = true }
 
 [features]
 default = ["vga"]
 js = ["dep:boa_engine"]
 vga = ["dep:softbuffer", "dep:unifont-bitmap", "dep:winit"]
+# M7: the Stylo cascade. Requires Python 3 on PATH — stylo's build.rs generates its property
+# tables from vendored Mako templates.
+stylo = [
+    "dep:app_units",
+    "dep:euclid",
+    "dep:servo_arc",
+    "dep:stylo",
+    "dep:stylo_dom",
+    "dep:stylo_traits",
+]
 
 [dev-dependencies]
 insta = "1.48.0"

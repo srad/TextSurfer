@@ -133,8 +133,13 @@ either the crossterm terminal or `vga`'s window, and everything below `ui` is id
 
 ## Getting started
 
-**Requirements:** Rust **1.88+** (edition 2024). Windows, macOS and Linux are supported; HTTPS uses
-OS-native certificate roots.
+**Requirements:** Rust **1.88+** (edition 2024) and **Python 3 on `PATH`**. Windows, macOS and Linux
+are supported; HTTPS uses OS-native certificate roots.
+
+Python is a build-time dependency of the `stylo` CSS engine, whose `build.rs` generates the property
+tables from Mako templates. The templating packages are vendored in the crate, so nothing needs
+installing beyond the interpreter itself. No Gecko, bindgen, nightly Rust or C++ toolchain is
+involved.
 
 ```console
 $ cargo build --release

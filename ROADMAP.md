@@ -25,7 +25,7 @@ against the audit below before it is written; the audit is re-run whenever a can
 | `pipeline/render/response.rs` — document MIME sniffing | custom | **Keep narrow adapter** — mediatype owns declared MIME parsing; mimesniff 0.3.0 and mime-sniffer 0.1.3 are stale and incomplete, while infer and tree_magic_mini identify file signatures rather than implement the WHATWG browsing-context rules; custom code is limited to the security-relevant 1,445-byte HTML/text/binary classifier |
 | `core/url.rs` — `url_fix` | not a parser | **No change** — real parsing delegates to `url`; scheme/host/search heuristics are address-bar UX |
 | `css/parser.rs` | library adapter | **Keep** — tokenization delegates to cssparser, selector parsing and matching to selectors |
-| `css/parser.rs` — terminal media-query grammar | custom adapter | **Keep narrow adapter** — cssparser owns tokens, blocks and recovery; the adapter evaluates media types plus scripting, color scheme and cell viewport dimensions. css-mediaquery 0.1.1 lacks MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui excludes `@media`, and Stylo/Blitz/litehtml/Ladybird require replacement DOM/style stacks |
+| `css/parser.rs` — terminal media-query grammar | custom adapter | **Superseded by M7** — the row below reverses the Stylo rejection. Stylo's `Device` is the runtime-context evaluator this row said did not exist, and it needs no replacement DOM: `Device::new` takes an embedder `FontMetricsProvider`, and the DOM contract is a trait a shadow arena can satisfy. Until M7 lands, the narrow adapter stands (css-mediaquery 0.1.1 lacks MQ5 grammar/recovery, LightningCSS has no runtime-context evaluator, rdom-tui excludes `@media`) |
 | `css/cascade/{content,counters}.rs` + `css/values.rs` | library adapter | **Keep** — cssparser owns tokenization and recovery; the adapter maps tokenized values onto `ComputedStyle` and the counter engine. Components the terminal cannot render (`url()`, quotes) are refused so the declaration drops whole, per spec |
 | Table layout | custom, implemented | **Custom is correct** — Taffy 0.14 has no table algorithm; `super-table` 0.3.0 takes string matrices, `iris-layout` 0.4.0 has no integrated CSS table formatter. Neither supplies anonymous-table fixup, spans, captions, border conflict resolution or nested box layout |
 | Presentational HTML legacy values | narrow standards adapter | **Custom is correct** — nothing implements WHATWG's legacy integer/dimension/color algorithms. Keep isolated under `css::presentational`; compare with Ladybird `8baf4260d40dd53cd09c21c868d2bd0625a69149`, WHATWG authoritative |
@@ -34,6 +34,7 @@ against the audit below before it is written; the audit is re-run whenever a can
 | CSS math values | narrow standards adapter | **Keep** — `muskitty-css-values` 0.1.0 is parse-only with an independent tokenizer and no computed-value type checking, percentage bases, ceilings or `clamp(..., none, ...)` |
 | Declarative refresh content | narrow standards adapter | **Keep** — no crate implements WHATWG's `meta[http-equiv=refresh]` microsyntax (searched 2026-08-26); keep the scanner isolated from navigation policy and cap chains in `app` |
 | `tests/support/dat.rs` | test-fixture parser | **Custom is correct** — no crate parses the WPT `.dat` format; isolated from production code |
+| CSS cascade, computed values and dynamic invalidation | custom, implemented | **Replace with Stylo (M7, 2026-08-28)** — this reverses the rows above for the media-query grammar, the declaration→`ComputedStyle` adapter, custom properties and CSS math. The custom cascade has no rule-hash bucketing at browser quality, no cascade-data revalidation, no ancestor bloom filter and no style sharing cache, and the pinned Linux page with both external sheets costs 566 ms; supplying those by hand is the browser style system the mission refuses to write. `stylo` 0.20.0 pins the same `cssparser` 0.37 and `selectors` 0.40 this crate already uses. Scope kept out of Stylo: cell geometry, palette and contrast correction, markers/counter resolution, table layout |
 
 ### Prior-art audit (2026-08-22, re-checked 2026-08-26)
 
@@ -45,7 +46,9 @@ questions we were answering ad hoc.
 | [chawan](https://github.com/sourcehut-mirrors/chawan) (`doc/css.md`) | The terminal CSS contract: author colours contrast-corrected against the background; binary `border-*-width`; `font-weight > 500` = bold; underline/line-through; sub-cell inline margins ignored; overflow-x displays, overflow-y clips; `::before`/`::after` + counters for markers; link hints for keyboard navigation | All locked below. `font-size` ignored is our one departure: the VGA profile scales integer bitmaps, terminal cells stay fixed |
 | chawan + [w3m](https://w3m.sourceforge.net/) | A real **table layout** engine is what separates a usable terminal browser from lynx | Delivered in M1-D, ahead of flex/grid |
 | lynx · w3m · chawan | Every one ships a **non-interactive dump mode** | `--dump`; doubles as the golden-fixture harness |
-| [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer | Confirms the architecture; no dependency |
+| [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer | Confirms the architecture; no dependency. Its `blitz-dom` is the reference for embedding Stylo outside Servo (M7) |
+| [stylo](https://crates.io/crates/stylo) 0.20.0 | Browser-grade cascade, computed values, snapshots and dynamic-state invalidation, on stable Rust with `default = ["servo"]` — no Gecko, bindgen, nightly or C++ toolchain | Adopted in M7 as the cascade. Adds one build prerequisite: **Python 3 on `PATH`** (`build.rs` runs the vendored-Mako `properties/build.py`). Uses `pool: None`, so no rayon threads are spawned |
+| [stylo_taffy](https://crates.io/crates/stylo_taffy) 0.3.0-beta.2 | Maps Stylo computed values onto `taffy::Style`, against taffy 0.14 — our exact pin | **Reference only, not a dependency** — it emits px, while our layout is cell-quantised (`AxisCellLength`, per-axis rounding, the 65,535 cap, unresolved-percentage preservation) |
 | [image](https://crates.io/crates/image) 0.25.10 | Signature-based raster decoding with explicit format features and decoder limits | The shared decoder for PNG, JPEG, WebP and first-frame GIF, default features off, TextSurfer-owned budgets |
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
 | [arboard](https://crates.io/crates/arboard) 3.6.1 | Current cross-platform text clipboard access without a UI toolkit | Frontend adapters only, default features off; `app` exchanges owned clipboard requests and remains I/O-free |
@@ -79,6 +82,7 @@ signed off.
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
 | M5 — Boa | Boa 0.21.1 behind the trait; host bindings subset; job pump; test262 slice | (open) |
 | M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (SVG + smoke pending) · floats ✅ · perf | (in progress) |
+| M7 — Stylo cascade | Replace the custom cascade with Stylo 0.20.0 behind the existing `Cascade` trait | (in progress) |
 
 Cross-cutting: test infrastructure (in progress — static WPT backfill, corpus error-count and
 astral attribute-order gaps) · gates (done, local only) · coverage floor (open — optional local,
@@ -107,18 +111,20 @@ history.
 ## Gates
 
 Local only — CI deliberately refused. The command list is in `AGENTS.md`; all eight must be green
-before any item is marked `(done)`.
+before any item is marked `(done)`. While M7 steps S1–S6 are open, a ninth row applies:
+`cargo clippy --all-targets --features stylo -- -D warnings` and `cargo test --features stylo`.
 
 ## Session handoff
 
 1. Read this status board, then recent `git log` entries for historical context.
-2. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
-3. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
+2. M7 is the active item: work S1 → S7 in order, and stop at the S1 build spike if it fails.
+3. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
+4. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
-4. Run the gates before and after; never mark `(done)` with red gates.
-5. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+5. Run the gates before and after; never mark `(done)` with red gates.
+6. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-6. Live repo: no commits without explicit user confirmation.
+7. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -176,6 +182,24 @@ before any item is marked `(done)`.
   cascade → style tree, layout → cell grid, paint/DisplayList, chrome/App/event loop, and table
   layout. Everything else adopts a mature crate.
 - **Single crate with modules**, not a workspace — fastest iteration; a split is trivial later.
+- **`#![deny(unsafe_code)]` at the crate root, with exactly one permitted exception:
+  `css::stylo::dom`** (M7). Stylo's `TElement` declares seven `unsafe fn` methods for Gecko's
+  benefit; under edition 2024 their bodies are ordinary safe code, so our impls contain no `unsafe`
+  block — the lint fires on the token alone. `forbid` cannot be overridden by `#[allow]` anywhere in
+  the crate, which is why the root relaxes to `deny`. A test asserts the tree holds exactly one
+  `allow(unsafe_code)`. *Rejected:* a separate adapter crate — same code, but it breaks the
+  single-crate decision above and forces the DOM mirror, the style mapper and `RenderContext` into a
+  public cross-crate API.
+- **Stylo state never leaves the render worker, and the type system says so.** Servo's `Device` owns
+  a `Box<dyn FontMetricsProvider>`, a `Sync`-but-not-`Send` trait object, and `unsafe impl Send for
+  Device` exists only under the `gecko` feature. `Stylist` is therefore `!Send` on our path, so the
+  retained style session cannot cross a channel even by mistake. Render jobs and results carry owned
+  inputs only — stylesheet *source text*, never a parsed sheet.
+- **The style engine sees a shadow DOM, not `core::dom`.** Stylo needs per-element interior-mutable
+  `ElementData`, state bits, selector flags and stable pointer identity; putting any of that on
+  `core::dom::Node` would drag `style::` types into `core` and break `Document`'s derives. The mirror
+  arena lives in `css::stylo::dom`, is rebuilt on a hard revision and patched through the existing
+  `MutateOp` funnel.
 - **`app` is the composition root only; `pipeline` is the rendering subsystem; `main.rs` is the
   frontend adapter only.** Keeping `PageLoad`, the render facade and `--dump` in `app` forced
   `main`, the golden tests and `css`/`layout` unit tests to import into the composition root.
@@ -228,13 +252,22 @@ before any item is marked `(done)`.
 
 ### Locked — terminal CSS semantics
 
-- **The UA stylesheet is hardcoded Rust** in `css/ua.rs::ua_style`, not CSS text. Revisit only if it
-  grows past what a typed function expresses clearly.
+- **The UA stylesheet is hardcoded Rust** in `css/ua.rs::ua_style`, not CSS text. *Superseded by M7:*
+  Stylo needs a real `Origin::UserAgent` sheet, so the structural half becomes a `const UA_CSS: &str`
+  parsed once and the palette-dependent half (link colours — the only place `ua_style` reads the
+  palette today) becomes a user-origin sheet rebuilt on theme change, which is already a hard
+  revision. Terminal policy that CSS cannot express stays Rust, in `css::stylo::map`.
 - **Colour model:** `ComputedStyle::color` is `Option<Rgba>` with byte alpha; background and border
   colours are `Option<Rgb>`/`BorderColor`. `None` means "the theme decides". The painter composites
   partial foreground alpha against the effective cell background, suppresses fully transparent
   glyphs without changing geometry, then **contrast-corrects** the resolved foreground — fidelity
   never outranks legibility.
+  *M7 obligation:* Stylo always computes a concrete `color`, which would replace every terminal
+  default. The `None` sentinel survives by giving the embedder-supplied `Device` default values a
+  **reserved colour** that the mapper turns back into `None`. Its only false negative is an author
+  declaring literally that RGB; the exact fallback is walking the element's rule node for an
+  author/UA-origin `color`. `background` needs no sentinel — Stylo's initial `background-color` is
+  `transparent`, which is `None` exactly.
 - **Borders are binary:** any non-zero width paints one box-drawing frame.
 - `font-weight > 500` = bold; `text-decoration` maps to underline/line-through; reverse video is a
   style bit. `font-size` computes in every frontend: terminal cells keep their one-cell appearance,
@@ -699,22 +732,85 @@ manual mouse walkthrough remain pending.
       artifacts atomically. Hard revisions cover navigation, DOM/JavaScript, viewport, theme and
       user state and reject stale output; network stylesheet/image arrivals are soft revisions whose
       coherent intermediate output may paint before one coalesced latest render. Current benchmark-
-      profile fixture measurements are 27 ms parse/discovery across 13 slices, 3 ms maximum owner
-      slice, 6 ms snapshot and 222 ms worker render (45 ms cascade, 120 ms layout, 57 ms paint).
-      The 222 ms worker and roughly 255 ms total keep this item open. Retained invalidation
-      distinguishes style, layout and paint work.
+      profile fixture measurements are 29 ms parse/discovery across 13 slices, 4 ms maximum owner
+      slice, 6 ms snapshot and 222 ms worker render (46 ms cascade, 122 ms layout, 53 ms paint).
+      The 222 ms worker and roughly 257 ms total keep this item open. Retained invalidation tracks
+      cascade and layout independently and pairs retained geometry with the style tree that produced
+      it.
       `format_inline` measurement/emission reuse, allocation-free blank cells and indexed hit
       resolution are part of the same gate. VGA presentation borrows the display list and both
-      frontends keep status-only damage independent of page image/overlay traversal. Dense painted
-      rows stay unless the fixture disproves it. Opt-in correlated timeline diagnostics are done.
-      A settled Linux-page wheel trace shows stationary-pointer hover changes currently issue hard
-      dynamic-state style invalidations and repeat the full cascade and layout; the next fix must
-      classify dynamic-selector effects so paint-only hover changes cannot trigger layout, while
-      layout-affecting selectors retain the fixed-point and hard-revision contract.
+      frontends keep status-only damage independent of page image/overlay traversal. Dynamic-state
+      result publication carries paint-change metadata instead of cloning the display list on the
+      owner sequence. Dense painted rows stay unless the fixture disproves it. Opt-in correlated
+      timeline diagnostics are done.
+      Active dynamic rules gate inert transitions from supported restyle candidates. Every supported
+      transition recascades against retained geometry; the actual old and new computed styles decide
+      whether paint sources can be restyled in place or the full-layout fixed point is required.
+      Layout boxes retain exact element or pseudo-element paint-source identity, including dormant
+      transparent fills and borders. A captured full Linux page with both external stylesheets takes
+      the retained path for link hover (566 ms cascade, 7 ms restyle, 0 ms layout, 94 ms paint); the
+      pinned HTML-only fixture measures 102 ms (42 ms cascade, 4 ms restyle, 0 ms layout, 55 ms
+      paint). Native VGA confirmation remains pending.
       The fixture is revision `1371530035`, SHA-256
       `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
 - [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
       config file · `data:` URL scheme · optional Readability-style reader view.
+
+### M7 — Stylo cascade (in progress)
+
+Replaces the custom cascade with [`stylo`](https://crates.io/crates/stylo) 0.20.0 behind the existing
+`Cascade` trait. Rationale and the reversed audit rows are above; the boundary is unchanged —
+`StyleTree` stays the contract, so `layout`, `paint` and `app` do not move. Stylo computes in CSS px
+and `css::stylo::map` converts to cells through the injected `RenderContext`, memoised on
+`Arc<ComputedValues>` pointer identity because Stylo's sharing cache gives long runs of elements one
+allocation.
+
+- [x] **S1 — build spike (passed).** `stylo` 0.20.0 sits behind the `stylo` cargo feature and
+      **builds on Rust 1.90 / Windows MSVC** with Python 3.13.15 as `python`; no Gecko, bindgen,
+      nightly or C++ toolchain, and `pool: None` means no rayon threads. Measured on the reference
+      Windows machine: **+37 transitive crates** (246 → 283); first `--features stylo` debug build
+      3 m 17 s, first release build 2 m 29 s. **Incremental cost is nil** — touching `src/lib.rs`
+      rebuilds in 32 s with the feature against ~36 s without, because stylo is a leaf that never
+      recompiles. Release binary delta is not yet measurable (1 KiB) because no code references
+      stylo and the linker drops it; **the real size delta is recorded at S4**, once the mapper
+      pulls the property tables in.
+- [ ] **S2 — interface refactor, zero behaviour change.** `StyleInput`/`StyleSession`; the retained
+      and dynamic entry points move off `BasicCascade`'s inherent impl onto the trait; session
+      ownership moves into the render worker; `RenderJob.sheets` becomes owned `SheetSource` text and
+      a prelude-only `@import` prescan replaces AST-walking discovery in `pipeline::page_load`. The
+      prescan is exact, not a heuristic: CSS requires `@import` before every other rule.
+- [ ] **S3 — DOM adapter.** The `css::stylo::dom` mirror, `TDocument`/`TNode`/`TElement`, `Device`
+      and a cell-metric `FontMetricsProvider`. The single-`allow(unsafe_code)` test lands here.
+- [ ] **S4 — cascade and mapper.** `StyloCascade` plus the full `ComputedValues` → `ComputedStyle`
+      mapping. The cascade suites run both impls in one process as a differential oracle; the
+      layout, paint and golden suites are not duplicated — the `--features stylo` gate row covers
+      them.
+- [ ] **S5 — media queries and generated content.** `MediaContext` maps onto `Device`; the terminal
+      MQ grammar retires. Counter and marker resolution stays ours, fed by Stylo's computed
+      `content`.
+- [ ] **S6 — dynamic state.** `ElementState`, snapshots and restyle hints replace
+      `css/cascade/dynamic.rs` and `css/effects.rs`. `StateDeps` retires into Stylo's invalidation
+      map, which gates per element rather than per document. Impact classification stays ours:
+      `core::style::dynamic`'s `layout_compatible_with`/`paint_compatible_with` compare the *mapped*
+      style, the only comparison that knows what survives cell rounding.
+- [ ] **S7 — flip and delete.** Stylo becomes the only cascade; the feature and the superseded `css`
+      submodules go.
+
+**Gates.** The eight standing commands, plus a ninth row for S1–S6 only:
+`cargo clippy --all-targets --features stylo -- -D warnings` and `cargo test --features stylo`.
+Adoption additionally requires: the cascade contract suite green on `StyloCascade`; golden, atlas and
+static-WPT output equivalent or re-baselined with written justification; incremental styling equal to
+a fresh full Stylo cascade across hover enter/leave, active, focus, focus-visible, focus-within,
+`:checked` sibling selectors, inherited and custom-property changes, descendant selectors and
+`::before`/`::after`; paint-only hover returning `Paint` with zero layout; the restyled-node count for
+a local hover unchanged when unrelated siblings grow 1,000 → 10,000; the full cascade on the captured
+Linux page beating 566 ms by enough to bring worker render under the 200 ms M6 target, with warmed
+release-mode repeat hover under one 16.667 ms frame at p95. The timing and node-count gates are paired
+deliberately — timing alone can be passed by a hidden full-tree traversal. No `style::` type may
+appear in `core`, `layout`, `paint`, `app` or any render job/result message.
+
+**No hybrid engine.** Full and incremental styling both go through Stylo, or neither does; failing the
+build or perf gate reverts to the retained custom cascade with the measurements as the evidence.
 
 ## Test infrastructure (standing)
 
