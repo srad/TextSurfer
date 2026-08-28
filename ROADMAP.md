@@ -848,11 +848,36 @@ static-WPT output equivalent or re-baselined with written justification; increme
 a fresh full Stylo cascade across hover enter/leave, active, focus, focus-visible, focus-within,
 `:checked` sibling selectors, inherited and custom-property changes, descendant selectors and
 `::before`/`::after`; paint-only hover returning `Paint` with zero layout; the restyled-node count for
-a local hover unchanged when unrelated siblings grow 1,000 → 10,000; the full cascade on the captured
-Linux page beating 566 ms by enough to bring worker render under the 200 ms M6 target, with warmed
-release-mode repeat hover under one 16.667 ms frame at p95. The timing and node-count gates are paired
-deliberately — timing alone can be passed by a hidden full-tree traversal. No `style::` type may
-appear in `core`, `layout`, `paint`, `app` or any render job/result message.
+a local hover unchanged when unrelated siblings grow 1,000 → 10,000; the perf target below; and
+warmed release-mode repeat hover under one 16.667 ms frame at p95. The timing and node-count gates
+are paired deliberately — timing alone can be passed by a hidden full-tree traversal. No `style::`
+type may appear in `core`, `layout`, `paint`, `app` or any render job/result message.
+
+**Perf target, re-measured (2026-08-28) — and the rationale is weaker than this entry first claimed.**
+An earlier draft said "bring worker render under the 200 ms M6 target", which misreads M6 twice: that
+200 ms bound is on *layout+paint* alone, and the pinned fixture already meets it. `benches/linux_live.rs`
+now measures the committed live-page fixture on the reference machine:
+
+| | cascade | restyle | layout | paint | worker |
+|---|---|---|---|---|---|
+| live page, first render | 457 ms | 0 | **1,798 ms** | 82 ms | 2,337 ms |
+| live page, link hover | **0** | 105 ms | 0 | 82 ms | 187 ms |
+| pinned fixture, first render | 59 ms | 0 | 144 ms | 83 ms | 287 ms |
+| pinned fixture, link hover | **0** | 36 ms | 0 | 65 ms | 101 ms |
+
+Two facts change M7's value:
+
+- **Hover no longer re-cascades at all.** The retained-restyle work (`142a2bb`) took hover cascade to
+  zero on both fixtures, so there is no cascade cost left on the interaction path for Stylo to
+  remove. The "566 ms cascade for link hover" this entry inherited described the pre-retained state.
+- **A first render is layout-bound, not cascade-bound.** On the live page the cascade is 457 ms of a
+  2,337 ms worker render — 20%; layout is 1,798 ms, 77%. A cascade that cost *nothing* would cut the
+  cold render by at most a fifth.
+
+External stylesheets do multiply the cascade ~8× (59 → 457 ms), which is exactly what Stylo's
+bucketing attacks. But it attacks the smaller half of the one path where it still applies. Whether
+that justifies the remaining S4b–S7 work is a decision to take on this evidence, not on the 566 ms
+figure this entry was opened with.
 
 **No hybrid engine.** Full and incremental styling both go through Stylo, or neither does; failing the
 build or perf gate reverts to the retained custom cascade with the measurements as the evidence.
