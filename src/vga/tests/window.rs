@@ -68,6 +68,20 @@ fn a_headless_redraw_does_not_schedule_another_redraw() {
 }
 
 #[test]
+fn shutdown_suppresses_every_later_tick() {
+    let mut app = vga(None);
+    app.begin_shutdown();
+    app.begin_shutdown();
+    assert_eq!(
+        app.tick_at(Duration::from_secs(60)),
+        crate::vga::window::Tick {
+            quit: true,
+            redraw: false,
+        }
+    );
+}
+
+#[test]
 fn selecting_a_theme_refreshes_the_headless_grid_and_requests_a_full_present() {
     let mut app = vga(None);
     drain_initial_redraw(&mut app);

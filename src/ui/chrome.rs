@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::borrow::Cow;
 
 use ratatui::Frame;
@@ -5,8 +6,6 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::Widget;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::Theme;
@@ -16,6 +15,8 @@ use crate::ui::widgets::menu::{MenuBar, MenuPopup, popup_rect};
 use crate::ui::widgets::scrollbar::{ScrollExtent, Scrollbar};
 use crate::ui::widgets::status::{StatusBar, StatusView};
 use crate::ui::widgets::tabs::{TabBar, TabChip, active_span};
+use crate::ui::widgets::text_field::TextFieldView;
+use crate::ui::widgets::text_field::{TextFieldMenu, menu_rect};
 use crate::ui::widgets::toolbar::{FIELD_TEXT, Toolbar};
 
 pub struct ChromeView<'a> {
@@ -24,9 +25,9 @@ pub struct ChromeView<'a> {
     pub theme_index: usize,
     pub can_back: bool,
     pub can_forward: bool,
-    pub address: Cow<'a, str>,
-    pub address_cursor: usize,
+    pub address: TextFieldView<'a>,
     pub address_focused: bool,
+    pub content_cursor: Option<(usize, usize)>,
     pub menu_open: bool,
     pub menu_active: usize,
     pub menu_item: usize,
@@ -36,6 +37,14 @@ pub struct ChromeView<'a> {
     pub status: StatusView<'a>,
     /// A notice in front of the page, while one is live.
     pub flash: Option<&'a str>,
+    pub text_field_menu: Option<TextFieldMenuView>,
+}
+
+#[derive(Clone, Copy)]
+pub struct TextFieldMenuView {
+    pub anchor: crate::core::geom::Point,
+    pub can_copy: bool,
+    pub can_cut: bool,
 }
 
 pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
@@ -113,7 +122,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
     }
     if let Some(rect) = layout.toolbar {
         Toolbar {
-            address: &view.address,
+            address: view.address,
             focused: view.address_focused,
             back_enabled: view.can_back,
             forward_enabled: view.can_forward,
@@ -144,6 +153,16 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
 
     compose_flash(buffer, view, area);
 
+    if let Some(menu) = view.text_field_menu {
+        TextFieldMenu {
+            anchor: menu.anchor,
+            can_copy: menu.can_copy,
+            can_cut: menu.can_cut,
+            theme: &view.theme,
+        }
+        .render(area, buffer);
+    }
+
     if view.menu_open {
         MenuPopup {
             menu: view.menu_active,
@@ -160,7 +179,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
     {
         return Some(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
     }
-    None
+    page_cursor_position(view, area)
 }
 
 pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
@@ -211,7 +230,25 @@ pub fn cursor_position(view: &ChromeView<'_>, area: Rect) -> Option<Position> {
     {
         return Some(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
     }
-    None
+    page_cursor_position(view, area)
+}
+
+fn page_cursor_position(view: &ChromeView<'_>, area: Rect) -> Option<Position> {
+    let (col, row) = view.content_cursor?;
+    let content = view.geometry.layout(area).content?;
+    let visible_row = row.checked_sub(view.content.scroll)?;
+    if col >= usize::from(content.width.saturating_sub(2))
+        || visible_row >= usize::from(content.height)
+    {
+        return None;
+    }
+    Some(Position::new(
+        content
+            .x
+            .saturating_add(1)
+            .saturating_add(u16::try_from(col).ok()?),
+        content.y.saturating_add(u16::try_from(visible_row).ok()?),
+    ))
 }
 
 pub fn compose_content_rows(
@@ -231,6 +268,7 @@ pub fn compose_content_rows(
     let lines = ContentLines {
         painted: view.content.painted,
         scroll: view.content.scroll + usize::from(start),
+        text_fields: view.content.text_fields.clone(),
     };
     Content {
         lines: &lines,
@@ -256,6 +294,9 @@ pub fn occlusion_rects(view: &ChromeView<'_>, area: Rect) -> Vec<Rect> {
     }
     if let Some(rect) = flash_position(view, area) {
         rects.push(rect);
+    }
+    if let Some(menu) = view.text_field_menu {
+        rects.push(menu_rect(area, menu.anchor));
     }
     rects
 }
@@ -287,31 +328,28 @@ fn buf_set_string(buffer: &mut Buffer, rect: Rect, col: u16, text: &str, style: 
 ///
 /// The inverse of [`address_cursor_cell`]: it walks the same widths and stops at the same
 /// visible budget, so clicking a caret's own cell puts the caret back where it was.
-pub fn address_index_at(address: &str, toolbar_width: u16, col: u16) -> usize {
-    let budget = usize::from(toolbar_width.saturating_sub(FIELD_TEXT + 1));
-    let target = usize::from(col.saturating_sub(FIELD_TEXT)).min(budget);
-    let mut width = 0usize;
-    for (index, grapheme) in address.graphemes(true).enumerate() {
-        let next = width + UnicodeWidthStr::width(grapheme);
-        if next > target || next > budget {
-            return index;
-        }
-        width = next;
-    }
-    address.graphemes(true).count()
+pub fn address_index_at(address: TextFieldView<'_>, toolbar_width: u16, col: u16) -> usize {
+    address.index_at(
+        Rect::new(
+            FIELD_TEXT,
+            0,
+            toolbar_width.saturating_sub(FIELD_TEXT + 1),
+            1,
+        ),
+        col,
+        0,
+    )
 }
 
 fn address_cursor_cell(view: &ChromeView<'_>, toolbar: Rect) -> u16 {
-    let budget = usize::from(toolbar.width.saturating_sub(FIELD_TEXT + 1));
-    let mut width = 0usize;
-    for grapheme in view.address.graphemes(true).take(view.address_cursor) {
-        let ch_width = UnicodeWidthStr::width(grapheme);
-        if width + ch_width > budget {
-            break;
-        }
-        width += ch_width;
-    }
-    toolbar.x + FIELD_TEXT + width as u16
+    view.address
+        .cursor_in(Rect::new(
+            toolbar.x + FIELD_TEXT,
+            toolbar.y,
+            toolbar.width.saturating_sub(FIELD_TEXT + 1),
+            1,
+        ))
+        .map_or(toolbar.x + FIELD_TEXT, |(col, _)| col)
 }
 
 #[cfg(test)]
@@ -472,8 +510,10 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = draft();
+        let address =
+            crate::ui::widgets::text_field::TextFieldState::with_text("https://example.com");
+        view.address = TextFieldView::new(&address);
         view.address_focused = true;
-        view.address_cursor = view.address.chars().count();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         assert_eq!(terminal.backend().cursor_position(), Position::new(43, 3));
     }
@@ -483,9 +523,10 @@ mod tests {
         let backend = TestBackend::new(40, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = draft();
-        view.address = "x".repeat(200).into();
+        let long = "x".repeat(200);
+        let address = crate::ui::widgets::text_field::TextFieldState::with_text(&long);
+        view.address = TextFieldView::new(&address);
         view.address_focused = true;
-        view.address_cursor = view.address.chars().count();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         let position = terminal.backend().cursor_position();
         assert!(position.x < 40, "cursor must stay inside the field");

@@ -17,9 +17,9 @@ pub enum Action {
     ScrollPageDown,
     ScrollTop,
     ScrollBottom,
-    ActivateLink,
-    NextLink,
-    PrevLink,
+    ActivateFocused,
+    NextFocusable,
+    PrevFocusable,
     Help,
     Back,
     Forward,
@@ -103,7 +103,7 @@ impl Keymap for DefaultKeymap {
             Key::Enter => match focus {
                 Focus::Address => Some(Action::SubmitAddress),
                 Focus::Tabs => Some(Action::FocusContent),
-                Focus::Content => Some(Action::ActivateLink),
+                Focus::Content => Some(Action::ActivateFocused),
                 Focus::Menu => None,
             },
             Key::Esc => match focus {
@@ -112,11 +112,11 @@ impl Keymap for DefaultKeymap {
             },
             Key::Tab => match focus {
                 Focus::Tabs => Some(Action::NextTab),
-                _ => Some(Action::NextLink),
+                _ => Some(Action::NextFocusable),
             },
             Key::BackTab => match focus {
                 Focus::Tabs => Some(Action::PrevTab),
-                _ => Some(Action::PrevLink),
+                _ => Some(Action::PrevFocusable),
             },
             Key::Down if plain => Some(Action::ScrollDown),
             Key::Up if plain => Some(Action::ScrollUp),
@@ -248,7 +248,7 @@ mod tests {
         );
         assert_eq!(
             DefaultKeymap.resolve(&press(Key::Enter), Focus::Content),
-            Some(Action::ActivateLink)
+            Some(Action::ActivateFocused)
         );
     }
 
@@ -272,11 +272,11 @@ mod tests {
     fn tab_navigates_links_and_cycles_tabs() {
         assert_eq!(
             DefaultKeymap.resolve(&press(Key::Tab), Focus::Content),
-            Some(Action::NextLink)
+            Some(Action::NextFocusable)
         );
         assert_eq!(
             DefaultKeymap.resolve(&press(Key::BackTab), Focus::Content),
-            Some(Action::PrevLink)
+            Some(Action::PrevFocusable)
         );
         assert_eq!(
             DefaultKeymap.resolve(&press(Key::Tab), Focus::Tabs),

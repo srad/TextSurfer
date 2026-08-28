@@ -1,11 +1,13 @@
 use crate::core::focus::Focus;
+use crate::core::form::FormSubmission;
 use crate::core::url::url_fix;
-use crate::net::{ResourceId, Submitted};
+use crate::net::{FetchRequest, ResourceId, Submitted};
 use crate::paint::DisplayList;
 use crate::pipeline::page_load::MAX_DECLARATIVE_REFRESHES;
 
 use super::super::net::{Route, route};
 use super::super::startpage::{content_for, start_page_for};
+use super::super::tab::HistoryReplay;
 use super::{App, content_viewport};
 
 enum HistoryUpdate {
@@ -15,6 +17,45 @@ enum HistoryUpdate {
 }
 
 impl App {
+    pub(super) fn submit_form_submission(&mut self, submission: FormSubmission) {
+        let (request, replay) = match submission {
+            FormSubmission::Get(url) => (FetchRequest::get(url), HistoryReplay::Get),
+            FormSubmission::PostUrlEncoded { url, body } => (
+                FetchRequest::url_encoded_post(url, body),
+                HistoryReplay::NonReplayablePost,
+            ),
+        };
+        let index = self.tabs.active_index();
+        let url = request.url.to_string();
+        if !matches!(route(&request.url), Route::Fetch) {
+            self.tabs.tabs_mut()[index].message =
+                format!("unsupported scheme: {}", request.url.scheme());
+            self.touch();
+            return;
+        }
+        let tab_id = self.tabs.tabs()[index].id;
+        let old_generation = self.tabs.tabs()[index].generation;
+        let generation = self.generation.wrapping_add(1);
+        let submitted = self
+            .net
+            .submit_request(tab_id, generation, ResourceId::DOCUMENT, request);
+        if submitted != Submitted::Queued {
+            self.tabs.tabs_mut()[index].message =
+                format!("cannot submit {url}: the network is not running");
+            self.touch();
+            return;
+        }
+        self.net.cancel(tab_id, old_generation);
+        self.images.cancel(tab_id, old_generation);
+        self.generation = generation;
+        self.repoint(index, &url, generation, content_for(&url));
+        self.tabs.tabs_mut()[index].push_history_with_replay(&url, replay);
+        let tab = &mut self.tabs.tabs_mut()[index];
+        tab.message = format!("loading {url}");
+        tab.document_pending = true;
+        self.focus = Focus::Content;
+        self.touch();
+    }
     pub fn submit_url(&mut self, url: &str) {
         let fixed = url_fix(url);
         if !fixed.is_empty() {
@@ -148,6 +189,7 @@ impl App {
         tab.base = None;
         tab.render_dirty = false;
         tab.dom_focus = None;
+        tab.text_fields.clear();
         if index == self.tabs.active_index() {
             self.pressed = None;
             self.refresh_hover();
@@ -185,6 +227,11 @@ impl App {
     }
 
     pub(super) fn reload(&mut self) {
+        if self.tabs.active().current_is_non_replayable() {
+            self.tabs.active_mut().message = "cannot reload a submitted POST".to_string();
+            self.touch();
+            return;
+        }
         let url = self.tabs.active().url.clone();
         if url.is_empty() {
             self.tabs.active_mut().message = "nothing to reload".to_string();

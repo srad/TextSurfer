@@ -103,9 +103,11 @@ pub(super) struct VgaApp {
     theme_index: usize,
     force_full_present: bool,
     presented: Option<Presented>,
+    closing: bool,
     /// The first error to escape a callback. `ApplicationHandler` cannot return one,
     /// so it is stashed here and surfaced by [`run`] after the loop exits.
     failure: Option<io::Error>,
+    clipboard: Option<arboard::Clipboard>,
 }
 
 impl VgaApp {
@@ -153,7 +155,9 @@ impl VgaApp {
             theme_index,
             force_full_present: false,
             presented: None,
+            closing: false,
             failure: None,
+            clipboard: arboard::Clipboard::new().ok(),
         })
     }
 
@@ -165,6 +169,12 @@ impl VgaApp {
     /// hanging in the channel. Splitting it out lets that be driven — and asserted —
     /// without a window.
     pub(super) fn tick_at(&mut self, now: Duration) -> Tick {
+        if self.closing {
+            return Tick {
+                quit: true,
+                redraw: false,
+            };
+        }
         let mut advanced = false;
         if let Some(input) = self.scheduler.take_due(now) {
             if let Some(size) = self.pending_size.take() {
@@ -184,6 +194,7 @@ impl VgaApp {
                 std::path::Path::new(super::capture::SCREENSHOT_DIR),
             );
         }
+        self.sync_clipboard();
         let damage = self.app.take_damage();
         let changed = !damage.is_empty();
         self.pending_damage.merge(damage);
@@ -191,8 +202,7 @@ impl VgaApp {
             self.sync_cursor_icon();
         }
         if self.app.should_quit() {
-            // Before the pool's `Drop` can join a worker parked in the fetch timeout.
-            self.app.shutdown_net();
+            self.begin_shutdown();
             return Tick {
                 quit: true,
                 redraw: false,
@@ -202,6 +212,16 @@ impl VgaApp {
             quit: false,
             redraw: !self.pending_damage.is_empty() || self.force_full_present,
         }
+    }
+
+    pub(super) fn begin_shutdown(&mut self) {
+        if self.closing {
+            return;
+        }
+        self.closing = true;
+        self.app.shutdown_net();
+        self.presented = None;
+        self.clipboard = None;
     }
 
     fn sync_theme(&mut self) {
@@ -215,6 +235,30 @@ impl VgaApp {
             .set_default_palette(self.app.theme().palette());
         self.force_full_present = true;
         self.pending_damage.merge(FrameDamage::full());
+    }
+
+    fn sync_clipboard(&mut self) {
+        use crate::ui::widgets::text_field::ClipboardAction;
+
+        let Some(request) = self.app.take_clipboard_request() else {
+            return;
+        };
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            self.app
+                .flash("system clipboard is unavailable".to_string());
+            return;
+        };
+        match request {
+            ClipboardAction::Write(text) => {
+                if let Err(error) = clipboard.set_text(text) {
+                    self.app.flash(format!("cannot write clipboard: {error}"));
+                }
+            }
+            ClipboardAction::Read => match clipboard.get_text() {
+                Ok(text) => self.app.deliver_clipboard_text(&text),
+                Err(error) => self.app.flash(format!("cannot read clipboard: {error}")),
+            },
+        }
     }
 
     /// Show the hand over links, the arrow everywhere else, and only when it changes —
@@ -242,7 +286,7 @@ impl VgaApp {
         if self.failure.is_none() {
             self.failure = Some(error);
         }
-        self.app.shutdown_net();
+        self.begin_shutdown();
         event_loop.exit();
     }
 
@@ -618,7 +662,7 @@ pub(super) fn union_damage(left: softbuffer::Rect, right: softbuffer::Rect) -> s
 
 impl ApplicationHandler for VgaApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.presented.is_some() {
+        if self.closing || self.presented.is_some() {
             return;
         }
         let (width, height) = pixel_size(self.options.cells, self.options.scale);
@@ -657,11 +701,12 @@ impl ApplicationHandler for VgaApp {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if self.closing {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => {
-                // The window's own close button never reaches `should_quit`, so the
-                // pool has to be released here too or quitting waits on a parked worker.
-                self.app.shutdown_net();
+                self.begin_shutdown();
                 event_loop.exit();
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
@@ -740,6 +785,10 @@ impl ApplicationHandler for VgaApp {
             }
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.begin_shutdown();
     }
 }
 

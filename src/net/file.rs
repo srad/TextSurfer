@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::io::{Read, Take};
 
-use super::fetch::{Fetch, FetchError, FetchRequest, FetchResponse, MAX_BODY_BYTES};
+use super::fetch::{
+    Fetch, FetchError, FetchRequest, FetchRequestKind, FetchResponse, MAX_BODY_BYTES,
+};
 
 pub struct FileFetch;
 
@@ -11,6 +13,9 @@ impl Fetch for FileFetch {
             return Err(FetchError::UnsupportedScheme(
                 request.url.scheme().to_string(),
             ));
+        }
+        if !matches!(request.kind(), FetchRequestKind::Get) {
+            return Err(FetchError::UnsupportedMethod("file".to_string()));
         }
         let path = request
             .url
@@ -49,7 +54,7 @@ mod tests {
         let mut file = NamedTempFile::new().expect("temp file");
         file.write_all(b"<h1>local</h1>").expect("write temp file");
         let url = Url::from_file_path(file.path()).expect("file url");
-        let response = FileFetch.fetch(&FetchRequest { url }).expect("fetch");
+        let response = FileFetch.fetch(&FetchRequest::get(url)).expect("fetch");
         assert_eq!(response.body, b"<h1>local</h1>");
     }
 
@@ -61,7 +66,7 @@ mod tests {
             .expect("size temp file");
         let url = Url::from_file_path(file.path()).expect("file url");
         assert_eq!(
-            FileFetch.fetch(&FetchRequest { url }),
+            FileFetch.fetch(&FetchRequest::get(url)),
             Err(FetchError::BodyTooLarge {
                 limit: MAX_BODY_BYTES
             })
@@ -74,17 +79,26 @@ mod tests {
             std::env::temp_dir().join("textsurfer-file-test-definitely-absent"),
         )
         .expect("file url");
-        let result = FileFetch.fetch(&FetchRequest { url });
+        let result = FileFetch.fetch(&FetchRequest::get(url));
         assert!(matches!(result, Err(FetchError::Network(_))));
     }
 
     #[test]
     fn non_file_scheme_is_rejected() {
         let url = Url::parse("http://example.com/").expect("url");
-        let result = FileFetch.fetch(&FetchRequest { url });
+        let result = FileFetch.fetch(&FetchRequest::get(url));
         assert_eq!(
             result,
             Err(FetchError::UnsupportedScheme("http".to_string()))
+        );
+    }
+
+    #[test]
+    fn post_to_a_file_is_rejected_without_opening_it() {
+        let url = Url::parse("file:///definitely/not/read").unwrap();
+        assert_eq!(
+            FileFetch.fetch(&FetchRequest::url_encoded_post(url, Vec::new())),
+            Err(FetchError::UnsupportedMethod("file".to_string()))
         );
     }
 }

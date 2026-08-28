@@ -272,9 +272,7 @@ mod tests {
     }
 
     fn url(path: &str) -> FetchRequest {
-        FetchRequest {
-            url: Url::parse(&format!("http://example.com{path}")).expect("url"),
-        }
+        FetchRequest::get(Url::parse(&format!("http://example.com{path}")).expect("url"))
     }
 
     fn drain_n(pool: &FetchPool, n: usize) -> Vec<FetchPayload> {

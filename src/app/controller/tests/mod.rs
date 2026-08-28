@@ -1,4 +1,5 @@
 mod delivery;
+mod forms;
 mod keys;
 mod mouse;
 mod navigation;
@@ -15,7 +16,10 @@ use crate::app::startpage::start_page;
 use crate::core::event::{Key, KeyEvent, KeyModifiers};
 use crate::core::focus::Focus;
 use crate::core::geom::Size;
-use crate::net::{FetchError, FetchPayload, FetchPoll, FetchResponse, ResourceId, Submitted};
+use crate::net::{
+    FetchError, FetchPayload, FetchPoll, FetchRequest, FetchRequestKind, FetchResponse, ResourceId,
+    Submitted,
+};
 use crate::paint::DisplayList;
 use crate::pipeline::image::{
     ImageDecodeJob, ImageDecodePayload, ImageDecodePoll, ImageDecodeQueue, ImageSubmitted,
@@ -35,6 +39,7 @@ pub(super) fn press(code: Key) -> KeyEvent {
 pub(super) struct FakeNet {
     pub(super) pending: Mutex<Vec<FetchPayload>>,
     pub(super) submitted: Mutex<Vec<(u64, Url)>>,
+    pub(super) request_kinds: Mutex<Vec<FetchRequestKind>>,
     body: Vec<u8>,
 }
 
@@ -51,6 +56,7 @@ impl FakeNet {
         Self {
             pending: Mutex::default(),
             submitted: Mutex::default(),
+            request_kinds: Mutex::default(),
             body: html.as_bytes().to_vec(),
         }
     }
@@ -87,6 +93,20 @@ impl Navigate for FakeNet {
             }),
         });
         Submitted::Queued
+    }
+
+    fn submit_request(
+        &self,
+        tab_id: u64,
+        generation: u64,
+        resource_id: ResourceId,
+        request: FetchRequest,
+    ) -> Submitted {
+        self.request_kinds
+            .lock()
+            .unwrap()
+            .push(request.kind().clone());
+        self.submit(tab_id, generation, resource_id, request.url)
     }
 
     fn poll_result(&self) -> FetchPoll {

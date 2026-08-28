@@ -6,10 +6,19 @@ use ratatui::widgets::Widget;
 use crate::core::style::CellStyle;
 use crate::paint::{DisplayList, PaintOverlay, PaintedImage, PaintedSpan};
 use crate::ui::theme::Theme;
+use crate::ui::widgets::text_field::{TextField, TextFieldView};
 
 pub struct ContentLines<'a> {
     pub painted: &'a DisplayList,
     pub scroll: usize,
+    pub text_fields: Vec<ContentTextField<'a>>,
+}
+
+#[derive(Clone, Copy)]
+pub struct ContentTextField<'a> {
+    pub rect: crate::layout::LayoutRect,
+    pub view: TextFieldView<'a>,
+    pub style: CellStyle,
 }
 
 pub struct Content<'a> {
@@ -59,6 +68,31 @@ impl Widget for Content<'_> {
             if image.revision == placement.revision {
                 render_halfblocks(placement, image, area, self.lines.scroll, self.theme, buf);
             }
+        }
+        for field in &self.lines.text_fields {
+            let Some(row) = field.rect.row.checked_sub(self.lines.scroll) else {
+                continue;
+            };
+            if row >= usize::from(area.height) || field.rect.col >= usize::from(interior) {
+                continue;
+            }
+            let rect = Rect::new(
+                area.x + 1 + field.rect.col as u16,
+                area.y + row as u16,
+                u16::try_from(field.rect.width.min(usize::from(interior) - field.rect.col))
+                    .unwrap_or(u16::MAX),
+                u16::try_from(
+                    field
+                        .rect
+                        .height
+                        .min(usize::from(area.height).saturating_sub(row)),
+                )
+                .unwrap_or(u16::MAX),
+            );
+            TextField::new(field.view)
+                .style(cell_style(field.style, self.theme))
+                .selection_style(self.theme.selected())
+                .render(rect, buf);
         }
     }
 }
@@ -145,6 +179,10 @@ fn sampled_color(
 }
 
 pub fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
+    cell_style(span.style, theme)
+}
+
+fn cell_style(style: CellStyle, theme: &Theme) -> Style {
     let CellStyle {
         fg,
         bg,
@@ -154,7 +192,7 @@ pub fn span_style(span: &PaintedSpan, theme: &Theme) -> Style {
         reverse,
         dim,
         scale: _,
-    } = span.style;
+    } = style;
     let mut style = Style::default()
         .fg(fg.map_or(theme.text, |color| {
             Color::Rgb(color.rgb.r, color.rgb.g, color.rgb.b)
@@ -194,6 +232,7 @@ mod tests {
                     lines: &ContentLines {
                         painted: &DisplayList::from_lines(lines),
                         scroll,
+                        text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
                 }
@@ -261,6 +300,7 @@ mod tests {
                     lines: &ContentLines {
                         painted: &painted,
                         scroll: 0,
+                        text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
                 }
@@ -283,6 +323,41 @@ mod tests {
         assert_eq!(loud.bg, ratatui::style::Color::Rgb(0, 128, 0));
         assert!(loud.modifier.contains(ratatui::style::Modifier::BOLD));
         insta::assert_snapshot!(crate::ui::test_util::styled_buffer_string(buffer));
+    }
+
+    #[test]
+    fn text_field_selection_uses_the_active_theme() {
+        let mut state = crate::ui::widgets::text_field::TextFieldState::with_text("ab");
+        state.select_all();
+        let painted = DisplayList::from_lines(&[String::new()]);
+        let backend = TestBackend::new(4, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                Content {
+                    lines: &ContentLines {
+                        painted: &painted,
+                        scroll: 0,
+                        text_fields: vec![ContentTextField {
+                            rect: crate::layout::LayoutRect {
+                                col: 0,
+                                row: 0,
+                                width: 2,
+                                height: 1,
+                            },
+                            view: TextFieldView::new(&state),
+                            style: CellStyle::default(),
+                        }],
+                    },
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut());
+            })
+            .unwrap();
+        let selected = DEFAULT.selected();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(1, 0)].fg, selected.fg.unwrap());
+        assert_eq!(buffer[(1, 0)].bg, selected.bg.unwrap());
     }
 
     #[test]
@@ -331,6 +406,7 @@ mod tests {
                     lines: &ContentLines {
                         painted: &painted,
                         scroll: 1,
+                        text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
                 }

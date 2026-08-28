@@ -4,6 +4,7 @@ use std::rc::Rc;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
+use crate::core::form::FormState;
 use crate::core::style::{
     ComputedStyle, CssMaxSize, CssSize, Display, DisplayInside, ListStylePosition, Marker,
     PseudoBox, PseudoElement, StyleStore, StyleTree,
@@ -11,7 +12,7 @@ use crate::core::style::{
 use crate::css::StyleSheet;
 use crate::css::parser::{StyleRule, parse_declarations};
 use crate::css::presentational::presentational_hints;
-use crate::css::selectors::{BucketKey, MatchTarget, bucket_keys, matching_specificity};
+use crate::css::selectors::{BucketKey, MatchTarget, bucket_keys, matching_specificity_with_forms};
 use crate::css::ua::{UaContext, inline_style, ua_style};
 use crate::css::variables::{Environment, contains_var, derive_environment, is_custom_name};
 
@@ -25,6 +26,7 @@ pub(super) fn cascade_document(
     sheets: &[StyleSheet],
     document: &Document,
     media: MediaContext,
+    forms: &FormState,
     bucketed: bool,
 ) -> StyleTree {
     let mut tree = StyleTree::default();
@@ -65,9 +67,10 @@ pub(super) fn cascade_document(
         );
         for rule_index in candidates.iter().copied() {
             let rule = rules[rule_index];
-            if let Some(specificity) = matching_specificity(
+            if let Some(specificity) = matching_specificity_with_forms(
                 &rule.selectors,
                 document,
+                forms,
                 id,
                 media.state,
                 MatchTarget::Element,
@@ -173,6 +176,7 @@ pub(super) fn cascade_document(
                 &rules,
                 &candidates,
                 document,
+                forms,
                 id,
                 element_media,
                 which,
@@ -192,6 +196,7 @@ pub(super) fn cascade_document(
                 &rules,
                 &candidates,
                 document,
+                forms,
                 id,
                 element_media,
                 PseudoElement::Marker,
@@ -264,6 +269,7 @@ fn cascade_pseudo(
     rules: &[&StyleRule],
     candidates: &[usize],
     document: &Document,
+    forms: &FormState,
     id: NodeId,
     media: MediaContext,
     which: PseudoElement,
@@ -278,9 +284,10 @@ fn cascade_pseudo(
     let mut order = 0usize;
     for rule_index in candidates.iter().copied() {
         let rule = rules[rule_index];
-        if let Some(specificity) = matching_specificity(
+        if let Some(specificity) = matching_specificity_with_forms(
             &rule.selectors,
             document,
+            forms,
             id,
             media.state,
             MatchTarget::Pseudo(which),

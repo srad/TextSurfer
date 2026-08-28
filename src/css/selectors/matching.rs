@@ -6,6 +6,7 @@ use selectors::matching::matches_selector;
 use selectors::parser::Selector as ParsedSelector;
 
 use crate::core::dom::{Document, DomQuirksMode, NodeId};
+use crate::core::form::FormState;
 
 use super::element::DomElement;
 use super::parser::{ParsedSelectors, TextSurferSelectorImpl};
@@ -18,6 +19,7 @@ pub enum MatchTarget {
     Pseudo(crate::core::style::PseudoElement),
 }
 
+#[cfg(test)]
 pub fn matching_specificity(
     selectors: &ParsedSelectors,
     document: &Document,
@@ -25,7 +27,18 @@ pub fn matching_specificity(
     state: DynamicState,
     target: MatchTarget,
 ) -> Option<u32> {
-    let element = DomElement::new(document, id, state);
+    matching_specificity_with_forms(selectors, document, FormState::empty(), id, state, target)
+}
+
+pub fn matching_specificity_with_forms(
+    selectors: &ParsedSelectors,
+    document: &Document,
+    forms: &FormState,
+    id: NodeId,
+    state: DynamicState,
+    target: MatchTarget,
+) -> Option<u32> {
+    let element = DomElement::new(document, forms, id, state);
     let mut caches = SelectorCaches::default();
     let quirks = match document.quirks_mode() {
         DomQuirksMode::Quirks => QuirksMode::Quirks,

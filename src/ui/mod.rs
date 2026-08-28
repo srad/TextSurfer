@@ -1,5 +1,4 @@
 pub mod chrome;
-pub mod editing;
 pub mod frame;
 pub mod keymap;
 pub mod mouse;
@@ -10,7 +9,6 @@ pub mod widgets;
 pub mod test_util;
 
 pub use chrome::ChromeView;
-pub use editing::EditBuffer;
 pub use keymap::{Action, DefaultKeymap, Keymap};
 pub use mouse::{ChromeGeometry, MouseZone};
 pub use theme::{

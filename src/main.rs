@@ -8,7 +8,8 @@ use clap::{Parser, ValueEnum};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEventKind, KeyModifiers,
 };
 
 use textsurfer::app::App;
@@ -129,6 +130,7 @@ fn main() -> io::Result<()> {
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = io::stdout().execute(DisableMouseCapture);
+        let _ = io::stdout().execute(DisableBracketedPaste);
         previous_hook(info);
     }));
     ratatui::run(|terminal| {
@@ -145,7 +147,9 @@ fn main() -> io::Result<()> {
             app.submit_url(&url);
         }
         io::stdout().execute(EnableMouseCapture)?;
+        io::stdout().execute(EnableBracketedPaste)?;
         let outcome = run(terminal, &mut app, picker);
+        io::stdout().execute(DisableBracketedPaste)?;
         io::stdout().execute(DisableMouseCapture)?;
         outcome
     })
@@ -267,6 +271,7 @@ where
     D: FnMut(&App, &FrameDamage) -> io::Result<()>,
 {
     let mut scheduler = FrameScheduler::default();
+    let mut clipboard = arboard::Clipboard::new().ok();
     loop {
         let current = now();
         if let Some(batch) = scheduler.take_due(current) {
@@ -277,6 +282,7 @@ where
         if app.take_screenshot_request() {
             save_screenshot(app);
         }
+        sync_clipboard(app, clipboard.as_mut());
         let mut damage = app.take_damage();
         if damage.is_empty() && image_work.as_ref().is_some_and(|work| work.ready()) {
             damage = FrameDamage::full();
@@ -334,10 +340,34 @@ fn push_terminal_event(scheduler: &mut FrameScheduler, event: Event, now: Durati
             phase: ResizePhase::Preview,
         }),
         Event::FocusLost => Some(InputEvent::PointerLeft),
+        Event::Paste(text) => Some(InputEvent::Paste(text)),
         _ => None,
     };
     if let Some(event) = event {
         scheduler.push(event, now);
+    }
+}
+
+fn sync_clipboard(app: &mut App, clipboard: Option<&mut arboard::Clipboard>) {
+    use textsurfer::ui::widgets::text_field::ClipboardAction;
+
+    let Some(request) = app.take_clipboard_request() else {
+        return;
+    };
+    let Some(clipboard) = clipboard else {
+        app.flash("system clipboard is unavailable".to_string());
+        return;
+    };
+    match request {
+        ClipboardAction::Write(text) => {
+            if let Err(error) = clipboard.set_text(text) {
+                app.flash(format!("cannot write clipboard: {error}"));
+            }
+        }
+        ClipboardAction::Read => match clipboard.get_text() {
+            Ok(text) => app.deliver_clipboard_text(&text),
+            Err(error) => app.flash(format!("cannot read clipboard: {error}")),
+        },
     }
 }
 

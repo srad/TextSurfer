@@ -8,6 +8,18 @@ use super::App;
 
 impl App {
     pub fn handle_key(&mut self, event: KeyEvent) {
+        if self.text_context.take().is_some() {
+            self.touch();
+            if event.code == Key::Esc {
+                return;
+            }
+        }
+        if self.handle_form_key(&event) {
+            if self.sync_dynamic_state() {
+                self.touch();
+            }
+            return;
+        }
         match DefaultKeymap.resolve(&event, self.focus) {
             Some(action) => self.apply(action),
             None => self.edit(event),
@@ -52,9 +64,9 @@ impl App {
             Action::ScrollPageUp => self.scroll(-self.page_step()),
             Action::ScrollTop => self.set_scroll(0),
             Action::ScrollBottom => self.set_scroll(usize::MAX),
-            Action::ActivateLink => self.pending("link activation arrives in M2"),
-            Action::NextLink => self.pending("tab-cycle link navigation arrives in M2"),
-            Action::PrevLink => self.pending("shift-tab link navigation arrives in M2"),
+            Action::ActivateFocused => self.activate_focused(),
+            Action::NextFocusable => self.cycle_page_focus(false),
+            Action::PrevFocusable => self.cycle_page_focus(true),
             Action::Help => self.pending("the help overlay arrives in M2"),
             Action::Back => self.go_back(),
             Action::Forward => self.go_forward(),
@@ -143,20 +155,32 @@ impl App {
     }
 
     fn edit(&mut self, event: KeyEvent) {
-        if self.focus != Focus::Address || event.modifiers.ctrl || event.modifiers.alt {
+        if self.focus != Focus::Address || event.modifiers.alt {
             return;
         }
-        match event.code {
-            Key::Char(ch) => self.address.insert(ch),
-            Key::Backspace => self.address.backspace(),
-            Key::Delete => self.address.delete(),
-            Key::Left => self.address.left(),
-            Key::Right => self.address.right(),
-            Key::Home => self.address.home(),
-            Key::End => self.address.end(),
-            _ => return,
+        let edit = self.address.handle_key(&event, false);
+        if !edit.consumed {
+            return;
         }
+        self.clipboard_request = edit.clipboard;
         self.touch();
+    }
+
+    pub fn take_clipboard_request(
+        &mut self,
+    ) -> Option<crate::ui::widgets::text_field::ClipboardAction> {
+        self.clipboard_request.take()
+    }
+
+    pub fn deliver_clipboard_text(&mut self, text: &str) {
+        if self.focus == Focus::Address {
+            let text = text.replace(['\r', '\n'], "");
+            if self.address.paste(&text) {
+                self.touch();
+            }
+        } else {
+            self.paste_form_text(text);
+        }
     }
 
     pub(super) fn pending(&mut self, notice: &str) {

@@ -4,6 +4,7 @@ pub mod menu;
 pub mod scrollbar;
 pub mod status;
 pub mod tabs;
+pub mod text_field;
 pub mod toolbar;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};

@@ -12,6 +12,17 @@ use std::sync::LazyLock;
 
 use super::dom::{Attr, Document, ElementNs, Node, NodeId, attr_value, has_attr};
 
+mod interaction;
+mod submission;
+
+#[cfg(test)]
+mod tests;
+
+pub use interaction::FormMutationError;
+pub use submission::{
+    FormError, FormSubmission, build_submission, build_submission_for_form, form_owner,
+};
+
 /// How many cells a text entry control occupies when it declares no `size`.
 pub const DEFAULT_INPUT_SIZE: usize = 20;
 /// The `cols`/`rows` a `<textarea>` occupies when it declares neither.
@@ -87,7 +98,7 @@ impl FormState {
         self.overrides.is_empty()
     }
 
-    pub fn set(&mut self, node: NodeId, value: ControlValue) {
+    pub(crate) fn set(&mut self, node: NodeId, value: ControlValue) {
         self.overrides.insert(node, value);
     }
 

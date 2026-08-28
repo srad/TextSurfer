@@ -16,6 +16,10 @@ use encoding_rs::Encoding;
 use url::Url;
 
 use crate::core::dom::{AttrNs, Node, NodeId, SharedDocument};
+use crate::core::form::{
+    FormError, FormMutationError, FormState, FormSubmission, build_submission,
+    build_submission_for_form, form_owner,
+};
 use crate::core::geom::Size;
 use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeRequest};
 use crate::core::style::{Palette, RenderContext};
@@ -134,6 +138,7 @@ enum ImageFailure {
 
 pub struct PageLoad {
     document: SharedDocument,
+    forms: FormState,
     document_url: Url,
     effective_base: Url,
     immediate_refresh: Option<Url>,
@@ -195,6 +200,7 @@ impl PageLoad {
             refresh::immediate_refresh(&outcome.document, &document_url, &effective_base);
         let mut load = Self {
             document: outcome.document,
+            forms: FormState::default(),
             document_url,
             effective_base: effective_base.clone(),
             immediate_refresh,
@@ -317,6 +323,70 @@ impl PageLoad {
     /// or what its first `<base href>` made of it.
     pub fn base_url(&self) -> &Url {
         &self.effective_base
+    }
+
+    pub fn form_state(&self) -> &FormState {
+        &self.forms
+    }
+
+    pub fn set_form_text(&mut self, node: NodeId, value: String) -> Result<(), FormMutationError> {
+        self.forms.set_text(&self.document.borrow(), node, value)
+    }
+
+    pub fn set_form_checked(
+        &mut self,
+        node: NodeId,
+        checked: bool,
+    ) -> Result<Option<RenderedPage>, FormMutationError> {
+        self.forms
+            .set_checked(&self.document.borrow(), node, checked)?;
+        Ok(self.render_after_form_mutation())
+    }
+
+    pub fn select_form_option(
+        &mut self,
+        node: NodeId,
+        index: usize,
+    ) -> Result<Option<RenderedPage>, FormMutationError> {
+        self.forms.select(&self.document.borrow(), node, index)?;
+        Ok(self.render_after_form_mutation())
+    }
+
+    pub fn reset_form(&mut self, form: NodeId) -> Option<RenderedPage> {
+        self.forms.reset_form(&self.document.borrow(), form);
+        self.render_after_form_mutation()
+    }
+
+    pub fn form_submission(&self, submitter: NodeId) -> Result<FormSubmission, FormError> {
+        build_submission(
+            &self.document.borrow(),
+            &self.forms,
+            Some(submitter),
+            &self.document_url,
+            &self.effective_base,
+        )
+    }
+
+    pub fn implicit_form_submission(&self, control: NodeId) -> Result<FormSubmission, FormError> {
+        let document = self.document.borrow();
+        let form = form_owner(&document, control).ok_or(FormError::NoFormOwner)?;
+        build_submission_for_form(
+            &document,
+            &self.forms,
+            form,
+            None,
+            &self.document_url,
+            &self.effective_base,
+        )
+    }
+
+    fn render_after_form_mutation(&mut self) -> Option<RenderedPage> {
+        self.dirty = true;
+        if !self.first_painted {
+            return None;
+        }
+        self.dirty = false;
+        Some(self.render_page())
     }
 
     pub fn immediate_refresh(&self) -> Option<&Url> {

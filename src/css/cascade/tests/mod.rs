@@ -22,7 +22,13 @@ use crate::html::{Html5everParser, HtmlParser};
 use crate::pipeline::render::embedded_style_sheets;
 
 fn apply_naive(sheets: &[StyleSheet], document: &Document, media: MediaContext) -> StyleTree {
-    super::document::cascade_document(sheets, document, media, false)
+    super::document::cascade_document(
+        sheets,
+        document,
+        media,
+        crate::core::form::FormState::empty(),
+        false,
+    )
 }
 
 #[test]

@@ -279,7 +279,7 @@ fn control_box(
             let text = if kind == ControlKind::Password && !placeholder {
                 "*".repeat(value.graphemes(true).count())
             } else {
-                collapse(&value)
+                one_line(&value)
             };
             Some(ReplacedBox {
                 text,
@@ -532,4 +532,11 @@ fn clip(value: &str, width: usize) -> String {
 /// one-line label cannot break its own box.
 fn collapse(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn one_line(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !matches!(character, '\r' | '\n'))
+        .collect()
 }

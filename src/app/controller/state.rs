@@ -1,5 +1,6 @@
 use crate::core::dom::{AttrNs, ElementNs, Node, NodeId};
 use crate::core::focus::Focus;
+use crate::core::form::{ControlKind, control_kind, is_disabled};
 use crate::core::style::Cursor;
 use crate::css::{DynamicState, FocusSource, FocusedNode};
 
@@ -95,23 +96,14 @@ impl App {
             if let Some(Node::Element { name, ns, attrs }) = document.node(node)
                 && *ns == ElementNs::Html
             {
-                let disabled = attrs
-                    .iter()
-                    .any(|attr| attr.ns == AttrNs::None && attr.name == "disabled");
                 let focusable = name == "a"
                     && attrs
                         .iter()
                         .any(|attr| attr.ns == AttrNs::None && attr.name == "href")
-                    || !disabled
-                        && match name.as_str() {
-                            "button" | "select" | "textarea" => true,
-                            "input" => !attrs.iter().any(|attr| {
-                                attr.ns == AttrNs::None
-                                    && attr.name == "type"
-                                    && attr.value.eq_ignore_ascii_case("hidden")
-                            }),
-                            _ => false,
-                        };
+                    || control_kind(&document, node).is_some_and(|kind| {
+                        !matches!(kind, ControlKind::Hidden | ControlKind::Unsupported)
+                            && !is_disabled(&document, node)
+                    });
                 if focusable {
                     return Some(node);
                 }

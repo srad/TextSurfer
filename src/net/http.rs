@@ -3,7 +3,9 @@ use std::time::Duration;
 use ureq::{Agent, ResponseExt};
 use url::Url;
 
-use super::fetch::{Fetch, FetchError, FetchRequest, FetchResponse, MAX_BODY_BYTES};
+use super::fetch::{
+    Fetch, FetchError, FetchRequest, FetchRequestKind, FetchResponse, MAX_BODY_BYTES,
+};
 
 const USER_AGENT: &str = concat!(
     "TextSurfer/",
@@ -56,8 +58,20 @@ impl Default for UreqFetch {
 
 impl Fetch for UreqFetch {
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
-        tracing::debug!(url = %diagnostic_url(&request.url), "http request started");
-        let response = match self.agent.get(request.url.as_str()).call() {
+        let (method, request_bytes) = match request.kind() {
+            FetchRequestKind::Get => ("GET", 0),
+            FetchRequestKind::UrlEncodedPost(body) => ("POST", body.len()),
+        };
+        tracing::debug!(url = %diagnostic_url(&request.url), method, request_bytes, "http request started");
+        let result = match request.kind() {
+            FetchRequestKind::Get => self.agent.get(request.url.as_str()).call(),
+            FetchRequestKind::UrlEncodedPost(body) => self
+                .agent
+                .post(request.url.as_str())
+                .header("content-type", "application/x-www-form-urlencoded")
+                .send(body.as_slice()),
+        };
+        let response = match result {
             Ok(response) => response,
             // Unreachable while `http_status_as_error` is off, and kept deliberately:
             // if that config is ever changed back, a status must not become a network
@@ -128,6 +142,8 @@ impl Fetch for UreqFetch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+    use std::sync::{Arc, Mutex};
     use ureq::Body;
 
     struct SyntheticMiddleware {
@@ -161,9 +177,7 @@ mod tests {
     #[test]
     fn fetches_through_synthetic_middleware_with_configured_headers() {
         let fetch = synthetic_fetch(200, b"<p>hi</p>".to_vec());
-        let request = FetchRequest {
-            url: Url::parse("https://example.com/hello").unwrap(),
-        };
+        let request = FetchRequest::get(Url::parse("https://example.com/hello").unwrap());
         let response = fetch.fetch(&request).unwrap();
         assert_eq!(response.body, b"<p>hi</p>");
         assert_eq!(response.final_url, request.url);
@@ -178,9 +192,7 @@ mod tests {
         // This used to assert `Err(FetchError::HttpStatus(404))`, which threw away the
         // page the server sent. A browser renders it.
         let fetch = synthetic_fetch(404, b"<h1>No such page</h1>".to_vec());
-        let request = FetchRequest {
-            url: Url::parse("https://example.com/missing").expect("url"),
-        };
+        let request = FetchRequest::get(Url::parse("https://example.com/missing").expect("url"));
         let response = fetch
             .fetch(&request)
             .expect("a 404 is a response, not an error");
@@ -193,9 +205,9 @@ mod tests {
     fn a_success_status_is_reported_as_one() {
         let fetch = synthetic_fetch(200, b"<p>ok</p>".to_vec());
         let response = fetch
-            .fetch(&FetchRequest {
-                url: Url::parse("https://example.com/").expect("url"),
-            })
+            .fetch(&FetchRequest::get(
+                Url::parse("https://example.com/").expect("url"),
+            ))
             .expect("fetch");
         assert_eq!(response.status, 200);
         assert!(response.is_success());
@@ -204,9 +216,7 @@ mod tests {
     #[test]
     fn oversized_synthetic_bodies_are_rejected() {
         let fetch = synthetic_fetch(200, vec![0; MAX_BODY_BYTES + 1]);
-        let request = FetchRequest {
-            url: Url::parse("https://example.com/large").expect("url"),
-        };
+        let request = FetchRequest::get(Url::parse("https://example.com/large").expect("url"));
         assert_eq!(
             fetch.fetch(&request),
             Err(FetchError::BodyTooLarge {
@@ -222,6 +232,64 @@ mod tests {
         assert_eq!(
             diagnostic_url(&url),
             "https://example.com/private/image.png"
+        );
+    }
+
+    type ObservedRequest = (String, Option<String>, Vec<u8>);
+
+    struct RequestCapture {
+        observed: Arc<Mutex<Option<ObservedRequest>>>,
+    }
+
+    impl ureq::middleware::Middleware for RequestCapture {
+        fn handle(
+            &self,
+            request: ureq::http::Request<ureq::SendBody>,
+            _next: ureq::middleware::MiddlewareNext,
+        ) -> Result<ureq::http::Response<Body>, ureq::Error> {
+            let method = request.method().to_string();
+            let content_type = request
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let mut body = Vec::new();
+            request
+                .into_body()
+                .into_reader()
+                .read_to_end(&mut body)
+                .expect("request body");
+            *self.observed.lock().unwrap() = Some((method, content_type, body));
+            Ok(ureq::http::Response::builder()
+                .status(200)
+                .body(Body::builder().data(Vec::new()))
+                .expect("synthetic response"))
+        }
+    }
+
+    #[test]
+    fn url_encoded_post_sends_the_method_content_type_and_exact_body() {
+        let observed = Arc::new(Mutex::new(None));
+        let agent = Agent::config_builder()
+            .middleware(RequestCapture {
+                observed: observed.clone(),
+            })
+            .build()
+            .new_agent();
+        let fetch = UreqFetch { agent };
+        fetch
+            .fetch(&FetchRequest::url_encoded_post(
+                Url::parse("https://example.com/send?token=x").unwrap(),
+                b"q=hello+world".to_vec(),
+            ))
+            .unwrap();
+        assert_eq!(
+            *observed.lock().unwrap(),
+            Some((
+                "POST".to_string(),
+                Some("application/x-www-form-urlencoded".to_string()),
+                b"q=hello+world".to_vec(),
+            ))
         );
     }
 }

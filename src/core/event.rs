@@ -64,6 +64,7 @@ pub enum ResizePhase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InputEvent {
     Key(KeyEvent),
+    Paste(String),
     Mouse(MouseEvent),
     Resize {
         size: crate::core::geom::Size,
@@ -113,6 +114,9 @@ impl InputBatch {
                 }),
                 InputEvent::Resize { size, phase },
             ) if previous_phase == phase => *previous = *size,
+            (Some(InputEvent::Paste(previous)), InputEvent::Paste(text)) => {
+                previous.push_str(text);
+            }
             _ => self.events.push(event),
         }
     }

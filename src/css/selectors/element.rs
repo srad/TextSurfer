@@ -13,14 +13,21 @@ use super::pseudo::{DynamicPseudoClass, DynamicState, SelectorPseudoElement};
 #[derive(Clone, Debug)]
 pub(super) struct DomElement<'a> {
     document: &'a Document,
+    forms: &'a FormState,
     id: NodeId,
     state: DynamicState,
 }
 
 impl<'a> DomElement<'a> {
-    pub(super) fn new(document: &'a Document, id: NodeId, state: DynamicState) -> Self {
+    pub(super) fn new(
+        document: &'a Document,
+        forms: &'a FormState,
+        id: NodeId,
+        state: DynamicState,
+    ) -> Self {
         Self {
             document,
+            forms,
             id,
             state,
         }
@@ -106,6 +113,7 @@ impl DomElement<'_> {
             if matches!(self.document.node(candidate), Some(Node::Element { .. })) {
                 return Some(Self {
                     document: self.document,
+                    forms: self.forms,
                     id: candidate,
                     state: self.state,
                 });
@@ -133,6 +141,7 @@ impl Element for DomElement<'_> {
             if matches!(self.document.node(candidate), Some(Node::Element { .. })) {
                 return Some(Self {
                     document: self.document,
+                    forms: self.forms,
                     id: candidate,
                     state: self.state,
                 });
@@ -242,7 +251,7 @@ impl Element for DomElement<'_> {
             // `:checked` is a host-language question, not an attribute question. Testing the
             // attribute on any element let `<div checked>` match and hide from a dump fixture.
             DynamicPseudoClass::Checked => {
-                self.is_checkable() && checkedness(self.document, self.id, FormState::empty())
+                self.is_checkable() && checkedness(self.document, self.id, self.forms)
             }
             // "Actually disabled" reaches through a disabled `<fieldset>` or `<optgroup>`, so the
             // attribute alone is not the answer either.

@@ -48,6 +48,7 @@ questions we were answering ad hoc.
 | [Blitz](https://github.com/DioxusLabs/blitz) | Mirrors our decomposition — DOM + style + **Taffy for boxes** + a separate text layer | Confirms the architecture; no dependency |
 | [image](https://crates.io/crates/image) 0.25.10 | Signature-based raster decoding with explicit format features and decoder limits | The shared decoder for PNG, JPEG, WebP and first-frame GIF, default features off, TextSurfer-owned budgets |
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
+| [arboard](https://crates.io/crates/arboard) 3.6.1 | Current cross-platform text clipboard access without a UI toolkit | Frontend adapters only, default features off; `app` exchanges owned clipboard requests and remains I/O-free |
 | [resvg](https://crates.io/crates/resvg) 0.48.1 | Mature SVG parsing and bounded raster output without a browser DOM | Adopt next for static SVG images behind the existing decode worker and page budgets; no custom SVG parser |
 | [tracing](https://crates.io/crates/tracing) 0.1.44 + [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3.23 | Structured, filterable diagnostics with an established subscriber ecosystem | Opt-in append-only file diagnostics; no default terminal output and no response bodies, credentials, queries or fragments |
 | Every browser since Firefox 3 | `:visited` must never be observable to page styling | `:visited` parses and never matches |
@@ -84,8 +85,8 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-27): **888 lib · 16 binary · 6 fetch-pipeline · 14
-corpus · 48 golden · 3 atlas** with the default VGA frontend, **785 lib · 15 binary · 2 atlas**
+Test counts at the last green run (2026-08-28): **910 lib · 16 binary · 6 fetch-pipeline · 14
+corpus · 48 golden · 3 atlas** with the default VGA frontend, **806 lib · 15 binary · 2 atlas**
 with `--no-default-features`; the WPT target adds 6 passing tests (5 without `vga`), plus two
 deliberately ignored entries (the child worker and the VGA reference generator).
 
@@ -112,8 +113,8 @@ before any item is marked `(done)`.
 
 1. Read this status board, then recent `git log` entries for historical context.
 2. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
-3. Resume the practical M2 path: unify the keymap, add keyboard link navigation, then basic form
-   editing and submission.
+3. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
+   editing and submission are done.
 4. Run the gates before and after; never mark `(done)` with red gates.
 5. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
@@ -396,9 +397,9 @@ repaint layer remain unimplemented.
 Started from the robustness end rather than the keyboard end, because the failure paths were what
 the browser did worst. Render robustness, the non-2xx body, the load-status line, declarative
 refresh, the designed start page, page screenshots and linear-time DOM child construction are done;
-the keyboard and forms work resumes once SVG images close. Practical page operation takes priority:
-keymap unification, keyboard link navigation, then basic form editing and submission. Help, in-page
-search, history caching and other secondary polish follow that usable browsing path.
+basic form operation is done. After SVG closes, resume keymap unification and finish keyboard link
+hints. Help, in-page search, history caching and other secondary polish follow that usable browsing
+path.
 
 - [ ] **Keymap unification** *(next after SVG; prerequisite to keyboard links)* (extends the M0
       keymap tests, same file): `Ctrl+L` (+ existing `a`)
@@ -406,15 +407,17 @@ search, history caching and other secondary polish follow that usable browsing p
       moves focus to content; new `FocusTabs` action (`F6`).
 - [ ] **`?` help overlay** *(after forms)* rendered from the keymap definition as the single source
       of truth, snapshot-tested.
-- [ ] **Keyboard link navigation** *(after keymap unification)* over the M1-B link list:
-      Tab/Shift+Tab + Enter, focused link
-      highlighted, repaint only on target change (one invalidation path, shared with M3 hover),
-      per-tab isolation; plus **link marks/hints** (lynx-style numbering) as the discoverable form.
+- [ ] **Keyboard link navigation (in progress)** *(finish after keymap unification)* over the M1-B
+      link list: Tab/Shift+Tab + Enter and focused-link scrolling are shared with the forms focus
+      ring. Remaining work: the default focused-link highlight, repaint only on target change (one
+      invalidation path shared with M3 hover), and **link marks/hints** (lynx-style numbering) as
+      the discoverable form.
 - [ ] **TabManager completion:** page titles from `document.title` with host/URL fallback; in-flight
       loads show the URL. (Ctrl+T/W/N/P cycling exists since M0.)
 - [ ] **Anchor links:** `#fragment` → scroll-to-box + status line; no URL rewrite.
-- [ ] **`target="_blank"`** links → new tab; per-tab history dedup verified by tests.
-- [ ] **In-page search:** `/` opens a prompt (reuses `EditBuffer`), `n`/`N` next/prev with
+- [x] **`target="_blank"`** links → new tab from pointer or keyboard activation; per-tab history
+      dedup is verified by tests.
+- [ ] **In-page search:** `/` opens a prompt (reuses the text-field widget), `n`/`N` next/prev with
       scroll-into-view, match highlight distinct from link focus, `x/y` counter, `Esc`/`Enter`
       closes.
 - [ ] **Rendered error pages.** *Half landed:* non-2xx responses keep the body, so a server's own
@@ -428,19 +431,17 @@ search, history caching and other secondary polish follow that usable browsing p
 - [ ] **Back/forward without refetching.** A small per-tab document cache keyed by history entry, so
       Back/Forward restore instead of re-issuing a request; the per-load pivot still applies to
       fresh navigations.
-- [ ] **Basic forms** *(after keyboard links; controls render and match selectors; nothing is
-      operable)*.
-      Target: text/search/hidden/submit, textarea, select, checkbox, radio; GET and
-      `application/x-www-form-urlencoded` POST via `url::form_urlencoded`; unsupported
-      methods/encodings render a controlled error.
-      *Landed:* `core::form` is one model — a `FormState` of **user overrides only**, every unset
-      control resolved from its content attributes, so an empty state is exactly the authored page
-      and `--dump` needs no seeding. Controls generate their rendering from `layout::replaced`.
-      Box-level replaced elements paint from their content rect and take their intrinsic size when
-      CSS gives none. `:checked` matches only checkbox/radio/option; `:disabled` reaches through a
-      disabled `<fieldset>`/`<optgroup>`.
-      *Remaining:* `FormState` mutation and the keyboard/pointer editing model; `:checked` reading
-      live state rather than attributes; `FetchRequest` method/body and entry-list serialisation.
+- [x] **Basic forms** — mixed DOM-order link/control focus; the URL bar, text/password inputs and
+      multiline textarea share one ratatui text-field widget with selection, clipboard commands,
+      pointer placement and an opaque context menu painted with the active chrome theme; selection
+      foreground/background come from that theme. A retained field owns and clears its full paint
+      area, so authored placeholder glyphs disappear as soon as the edited value is non-empty; its
+      end-of-text caret always occupies a visible blank cell rather than covering the last glyph.
+      Page-field cursor coordinates include the content frame's left rail, so the widget and native
+      caret address the same cell. Text edits repaint only their retained field rows.
+      Checkbox/radio toggles, single-select, reset and successful-control serialization are live; GET and
+      URL-encoded POST are bounded and transactional, POST history is non-replayable, and
+      validation, multiple-select, file/image inputs and non-URL-encoded encodings remain inert.
 - [x] Reload (`R`): generation++, fresh engine + document, scroll top (per-load pivot). *(M1.5)*
 - [x] Linear-time construction of new DOM children — indextree 4.9.0's `append_value` for values
       `Document` creates; existing-node attach/insert/move keep validation and checked mutations.
@@ -458,7 +459,9 @@ search, history caching and other secondary polish follow that usable browsing p
       Taffy `expect()` calls became a degraded tree; `LayoutLimits` rides the `BoxTree` and then the
       `DisplayList` rather than letting `layout` write the status bar. `FetchPool::try_recv`
       separates `Disconnected` from `Empty`, `submit` returns `Queued`/`Duplicate`/`Closed`, and all
-      four quit paths call `Navigate::shutdown`, which detaches instead of joining.
+      four quit paths call `Navigate::shutdown`, which detaches instead of joining. The VGA window
+      close path enters an irreversible closing state, releases frontend resources and performs no
+      later app ticks before the event loop returns.
 - [x] Designed start page — `about:blank` is a viewport-aware half-block scene with an exact 78×18
       default canvas that scales and centers with the content viewport. It deliberately carries no
       instructional copy; the help overlay owns the keymap reference.
@@ -495,7 +498,8 @@ buttons, and the whole terminal frontend not yet exercised by a human)**
       released around the loop plus a panic hook, since `ratatui::restore` does not clear it.
 - [x] Zone dispatch over `ChromeGeometry::target_at`: menu titles, popup rows, tab chips, the `+`
       box, toolbar buttons including dimmed states, address focus with caret placement that survives
-      a partial edit, content focus. Everything routes through the existing `Action` set — the mouse
+      a partial edit, mouse-drag range selection whose theme colors cover only the selected URL
+      segment, and content focus. Everything routes through the existing `Action` set — the mouse
       is not a second command set. Wheel scrolls only in content.
 - [x] Link activation on release against the tracked press node (WHATWG `handle_mouseup`),
       middle-click and `target="_blank"` to a new tab, `<base href>`-aware resolution, same-document
@@ -697,7 +701,7 @@ manual mouse walkthrough remain pending.
   disjoint leaf glyph cells, laminar per-row box families, engine-backed deepest-hit round trip, and
   scroll clamping as a fixed point under arbitrary key sequences. From M1-D tables: generated spans
   never overlap, and a wider viewport never increases height. Grid adds bounded declaration/layout
-  completion and auto-fill height monotonicity. `url_fix`/`EditBuffer` laws continue from M0.
+  completion and auto-fill height monotonicity. `url_fix` and text-field state laws continue from M0.
 - **Fakes everywhere:** FakeFetch, fake clock, FakeHost; no test touches the network or the real
   clock. The sole exception is the static-WPT parent supervisor's fixed wall-clock watchdog.
 - `tests/support/` holds shared corpus helpers; module-local fakes stay inline under `#[cfg(test)]`.
@@ -789,6 +793,7 @@ incrementally.
 
 ## Non-goals (locked unless a milestone re-opens them)
 
-Text selection/copy, iframes/`<frame>`, bidi/RTL/writing modes, `line-height`/fonts, border-radius,
-inline-element borders, cookies, `addEventListener` DOM events (click-only v0), top-level await,
-full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, drag input pre-M6.
+Page-content selection/copy, iframes/`<frame>`, bidi/RTL/writing modes, `line-height`/fonts,
+border-radius, inline-element borders, cookies, `addEventListener` DOM events (click-only v0),
+top-level await, full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, drag
+input pre-M6.

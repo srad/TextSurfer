@@ -24,9 +24,9 @@ pub fn draft_view() -> ChromeView<'static> {
         theme_index: DEFAULT_THEME_INDEX,
         can_back: false,
         can_forward: false,
-        address: "https://example.com".to_string().into(),
-        address_cursor: 0,
+        address: crate::ui::widgets::text_field::TextFieldView::display("https://example.com"),
         address_focused: false,
+        content_cursor: None,
         menu_open: false,
         menu_active: 0,
         menu_item: 0,
@@ -35,6 +35,7 @@ pub fn draft_view() -> ChromeView<'static> {
         content: ContentLines {
             painted: &DRAFT_CONTENT,
             scroll: 0,
+            text_fields: Vec::new(),
         },
         status: StatusView {
             url: "https://example.com".to_string().into(),
@@ -42,6 +43,7 @@ pub fn draft_view() -> ChromeView<'static> {
             hover: None,
         },
         flash: None,
+        text_field_menu: None,
     }
 }
 

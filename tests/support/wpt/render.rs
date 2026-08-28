@@ -140,7 +140,11 @@ fn visible_grid(painted: &DisplayList, columns: u16, rows: u16) -> Result<Visual
                 Style::default().fg(PAPER_WHITE.text).bg(PAPER_WHITE.bg),
             );
             Content {
-                lines: &ContentLines { painted, scroll: 0 },
+                lines: &ContentLines {
+                    painted,
+                    scroll: 0,
+                    text_fields: Vec::new(),
+                },
                 theme: &PAPER_WHITE,
             }
             .render(area, frame.buffer_mut());
@@ -384,6 +388,7 @@ fn render_pixels(
                 lines: &ContentLines {
                     painted: &painted,
                     scroll: 0,
+                    text_fields: Vec::new(),
                 },
                 theme: &PAPER_WHITE,
             }

@@ -1,6 +1,7 @@
 mod actions;
 mod delivery;
 mod flash;
+mod forms;
 mod navigation;
 mod pointer;
 mod session;
@@ -20,15 +21,15 @@ use crate::core::frame::FrameDamage;
 use crate::core::geom::{Point, Size};
 use crate::core::style::{RenderMetrics, TextRendering};
 use crate::pipeline::image::{ImageDecodePool, ImageDecodeQueue, RasterImageDecoder};
-use crate::ui::editing::EditBuffer;
 use crate::ui::mouse::ChromeGeometry;
+use crate::ui::widgets::text_field::{ClipboardAction, TextFieldState};
 
 use super::net::{Navigate, NoopNet};
 use super::startpage::start_page_for;
 use super::tabs::TabManager;
 use delivery::{apply_rendered_page, update_load_message};
 use flash::FlashNotice;
-use pointer::{HoverTarget, PressedTarget, ScrollDrag};
+use pointer::{HoverTarget, PressedTarget, ScrollDrag, TextFieldContext, TextFieldTarget};
 use viewport::content_viewport;
 
 const DEFAULT_SIZE: Size = Size { cols: 80, rows: 24 };
@@ -37,7 +38,8 @@ const STARTUP_HINT: &str = "type a URL and press Enter";
 pub struct App {
     focus: Focus,
     tabs: TabManager,
-    address: EditBuffer,
+    address: TextFieldState,
+    clipboard_request: Option<ClipboardAction>,
     damage: FrameDamage,
     quit: bool,
     generation: u64,
@@ -55,6 +57,8 @@ pub struct App {
     hover: Option<HoverTarget>,
     pressed: Option<PressedTarget>,
     scroll_drag: Option<ScrollDrag>,
+    text_context: Option<TextFieldContext>,
+    text_drag: Option<TextFieldTarget>,
     input_transaction: bool,
     dynamic_pending: bool,
     pending_resize: Option<(Size, Duration)>,
@@ -110,7 +114,8 @@ impl App {
                 start_page_for(content_viewport(geometry)),
                 STARTUP_HINT.to_string(),
             ),
-            address: EditBuffer::new(),
+            address: TextFieldState::new(),
+            clipboard_request: None,
             damage: FrameDamage::full(),
             quit: false,
             generation: 0,
@@ -128,6 +133,8 @@ impl App {
             hover: None,
             pressed: None,
             scroll_drag: None,
+            text_context: None,
+            text_drag: None,
             input_transaction: false,
             dynamic_pending: false,
             pending_resize: None,
@@ -175,6 +182,7 @@ impl App {
         for event in batch.as_slice() {
             match event {
                 InputEvent::Key(key) => self.handle_key(key.clone()),
+                InputEvent::Paste(text) => self.deliver_clipboard_text(text),
                 InputEvent::Mouse(mouse) => self.handle_mouse(*mouse),
                 InputEvent::Resize { size, phase } => match phase {
                     crate::core::event::ResizePhase::Preview => self.preview_resize(*size),

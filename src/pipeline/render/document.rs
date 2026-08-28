@@ -79,6 +79,7 @@ pub fn render_document(
         media,
         palette,
         parse_errors,
+        FormState::empty(),
         &crate::core::image::ImageResources::default(),
     )
 }
@@ -89,19 +90,20 @@ pub(crate) fn render_document_with_images(
     media: MediaContext,
     palette: Palette,
     parse_errors: usize,
+    forms: &FormState,
     images: &crate::core::image::ImageResources,
 ) -> RenderedPage {
     let css_warnings = sheets
         .iter()
         .map(|sheet| sheet.diagnostics.total())
         .sum::<usize>();
-    let styles = BasicCascade.apply(sheets, &document.borrow(), media);
+    let styles = BasicCascade.apply_with_form_state(sheets, &document.borrow(), media, forms);
     let mut painted = BasicPainter.paint(
         &TaffyLayoutEngine.layout_with_images(
             &document.borrow(),
             &styles,
             media.viewport,
-            FormState::empty(),
+            forms,
             images,
             media.cell_metric,
         ),

@@ -64,3 +64,15 @@ fn a_blank_tab_has_no_fake_history_entry() {
     tab.push_history("https://example.com");
     assert_eq!(tab.current(), Some("https://example.com"));
 }
+
+#[test]
+fn history_skips_non_replayable_post_entries() {
+    let mut tab = tab();
+    tab.push_history("https://a");
+    tab.push_history_with_replay("https://post", HistoryReplay::NonReplayablePost);
+    tab.push_history("https://b");
+    assert!(tab.back());
+    assert_eq!(tab.current(), Some("https://a"));
+    assert!(tab.forward());
+    assert_eq!(tab.current(), Some("https://b"));
+}

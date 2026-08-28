@@ -2,6 +2,7 @@
 //! attribute lookups on an arbitrary element.
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
+use crate::core::form::{ControlValue, FormState};
 use crate::core::style::Rgb;
 use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
 
@@ -91,6 +92,18 @@ fn an_options_checkedness_is_its_selects_selection_not_its_own_attribute() {
         !matches(&document, first, checked),
         "and the one it displaced is not"
     );
+}
+
+#[test]
+fn checked_selector_reads_the_live_form_state() {
+    let mut document = Document::new();
+    let checkbox = element(&mut document, None, "input", &[("type", "checkbox")]);
+    let sheet = CssparserParser.parse(&format!(":checked {{ {MARKER} }}"));
+    let mut forms = FormState::default();
+    forms.set(checkbox, ControlValue::Checked(true));
+    let styles =
+        BasicCascade.apply_with_form_state(&[sheet], &document, MediaContext::screen(), &forms);
+    assert_eq!(styles.get(checkbox).background, MATCHED);
 }
 
 /// A regression guard, not a repair: the old matcher already gated `:disabled`/`:enabled` on the

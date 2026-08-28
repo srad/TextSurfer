@@ -13,8 +13,53 @@ impl ResourceId {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FetchRequestKind {
+    Get,
+    UrlEncodedPost(Vec<u8>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchRequest {
     pub url: Url,
+    kind: FetchRequestKind,
+}
+
+impl FetchRequest {
+    pub fn get(url: Url) -> Self {
+        Self {
+            url,
+            kind: FetchRequestKind::Get,
+        }
+    }
+
+    pub fn url_encoded_post(url: Url, body: Vec<u8>) -> Self {
+        Self {
+            url,
+            kind: FetchRequestKind::UrlEncodedPost(body),
+        }
+    }
+
+    pub fn kind(&self) -> &FetchRequestKind {
+        &self.kind
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    #[test]
+    fn request_constructors_cannot_mix_get_and_post_state() {
+        let url = Url::parse("https://example.com/form").unwrap();
+        assert_eq!(
+            FetchRequest::get(url.clone()).kind(),
+            &FetchRequestKind::Get
+        );
+        assert_eq!(
+            FetchRequest::url_encoded_post(url, b"q=hello".to_vec()).kind(),
+            &FetchRequestKind::UrlEncodedPost(b"q=hello".to_vec())
+        );
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +88,8 @@ pub enum FetchError {
     HttpStatus(u16),
     #[error("unsupported scheme: {0}")]
     UnsupportedScheme(String),
+    #[error("unsupported request method for scheme: {0}")]
+    UnsupportedMethod(String),
     #[error("response body exceeds {limit} bytes")]
     BodyTooLarge { limit: usize },
 }

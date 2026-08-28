@@ -3,11 +3,13 @@ use url::Url;
 use crate::core::dom::{Node, NodeId, attr_value};
 use crate::core::event::{MouseButton, MouseEvent, MouseKind};
 use crate::core::focus::Focus;
+use crate::core::form::{ControlKind, control_kind};
 use crate::core::geom::Point;
 use crate::ui::chrome::address_index_at;
 use crate::ui::keymap::Action;
 use crate::ui::mouse::{ChromeState, ChromeTarget};
 use crate::ui::widgets::scrollbar::{ScrollExtent, ScrollbarPart};
+use crate::ui::widgets::text_field::{TextFieldMenuAction, menu_action_at};
 
 use super::App;
 
@@ -32,8 +34,44 @@ pub(super) struct ScrollDrag {
     pub(super) grab: u16,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TextFieldTarget {
+    Address,
+    Form(NodeId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TextFieldContext {
+    pub(super) target: TextFieldTarget,
+    pub(super) anchor: Point,
+}
+
 impl App {
     pub fn handle_mouse(&mut self, event: MouseEvent) {
+        if let Some(context) = self.text_context
+            && matches!(event.kind, MouseKind::Press(MouseButton::Left))
+        {
+            let bounds =
+                ratatui::layout::Rect::new(0, 0, self.geometry.size.cols, self.geometry.size.rows);
+            if let Some(action) = menu_action_at(bounds, context.anchor, event.at) {
+                self.apply_text_field_menu(context.target, action);
+                self.text_context = None;
+                self.touch();
+                return;
+            }
+            self.text_context = None;
+            self.touch();
+        }
+        if event.kind == MouseKind::Move
+            && let Some(target) = self.text_drag
+        {
+            self.pointer = Some(event.at);
+            self.drag_text_selection(target, event.at);
+            return;
+        }
+        if matches!(event.kind, MouseKind::Release(MouseButton::Left)) {
+            self.text_drag = None;
+        }
         if event.kind == MouseKind::Move && self.pointer == Some(event.at) {
             return;
         }
@@ -53,7 +91,7 @@ impl App {
         match event.kind {
             MouseKind::Move => {}
             MouseKind::Wheel { rows } => self.wheel(target, rows),
-            MouseKind::Press(button) => self.press(target, button),
+            MouseKind::Press(button) => self.press(target, button, event.at),
             MouseKind::Release(button) => self.release(target, button),
         }
         let painted_changed = self.sync_dynamic_state();
@@ -101,6 +139,7 @@ impl App {
         self.pointer = None;
         self.pressed = None;
         self.scroll_drag = None;
+        self.text_drag = None;
         self.hover = None;
         let painted_changed = self.sync_dynamic_state();
         if painted_changed {
@@ -122,12 +161,12 @@ impl App {
         )
     }
 
-    fn press(&mut self, target: ChromeTarget, button: MouseButton) {
+    fn press(&mut self, target: ChromeTarget, button: MouseButton, at: Point) {
         self.scroll_drag = None;
         match button {
             MouseButton::Back => return self.apply(Action::Back),
             MouseButton::Forward => return self.apply(Action::Forward),
-            MouseButton::Right => return,
+            MouseButton::Right => return self.open_text_field_menu(target, at),
             MouseButton::Left | MouseButton::Middle => {}
         }
         self.pressed = None;
@@ -159,7 +198,10 @@ impl App {
                 2 => self.apply(Action::Reload),
                 _ => self.apply(Action::Home),
             },
-            ChromeTarget::Address { col } => self.focus_address_at(col),
+            ChromeTarget::Address { col } => {
+                self.focus_address_at(col);
+                self.text_drag = Some(TextFieldTarget::Address);
+            }
             ChromeTarget::Content { col, row } => {
                 let node = self.hit_at(col, row);
                 let link = self.link_at(col, row).map(|link| link.node);
@@ -171,7 +213,28 @@ impl App {
                         }
                         let focus = node.and_then(|node| self.focusable_ancestor(node));
                         self.set_pointer_focus(focus);
-                        self.pressed = node.map(|node| PressedTarget { button, node, link });
+                        if let Some(focus) = focus {
+                            self.initialize_form_cursor(focus);
+                            self.position_form_cursor(
+                                focus,
+                                usize::from(col),
+                                usize::from(row).saturating_add(self.tabs.active().scroll),
+                            );
+                            let is_text = self
+                                .tabs
+                                .active()
+                                .document
+                                .as_ref()
+                                .and_then(|document| control_kind(&document.borrow(), focus))
+                                .is_some_and(ControlKind::is_text_entry);
+                            if is_text {
+                                self.text_drag = Some(TextFieldTarget::Form(focus));
+                            }
+                        }
+                        self.pressed =
+                            focus
+                                .or(node)
+                                .map(|node| PressedTarget { button, node, link });
                     }
                     MouseButton::Middle => {
                         self.pressed = link.map(|link| PressedTarget {
@@ -184,6 +247,105 @@ impl App {
                 }
             }
             ChromeTarget::MenuItem(_) | ChromeTarget::Inert => {}
+        }
+    }
+
+    fn open_text_field_menu(&mut self, target: ChromeTarget, at: Point) {
+        let field = match target {
+            ChromeTarget::Address { col } => {
+                let index = address_index_at(
+                    crate::ui::widgets::text_field::TextFieldView::new(&self.address),
+                    self.geometry.size.cols,
+                    col,
+                );
+                let keep_selection = self.focus == Focus::Address
+                    && self
+                        .address
+                        .selection()
+                        .is_some_and(|selection| selection.contains(&index));
+                if !keep_selection {
+                    self.focus_address_at(col);
+                }
+                Some(TextFieldTarget::Address)
+            }
+            ChromeTarget::Content { col, row } => {
+                let Some(node) = self
+                    .hit_at(col, row)
+                    .and_then(|node| self.focusable_ancestor(node))
+                else {
+                    return;
+                };
+                let is_text = self
+                    .tabs
+                    .active()
+                    .document
+                    .as_ref()
+                    .and_then(|document| control_kind(&document.borrow(), node))
+                    .is_some_and(ControlKind::is_text_entry);
+                if !is_text {
+                    return;
+                }
+                self.focus = Focus::Content;
+                self.set_pointer_focus(Some(node));
+                self.initialize_form_cursor(node);
+                self.position_form_context_cursor(
+                    node,
+                    usize::from(col),
+                    usize::from(row).saturating_add(self.tabs.active().scroll),
+                );
+                Some(TextFieldTarget::Form(node))
+            }
+            _ => None,
+        };
+        if let Some(target) = field {
+            self.text_context = Some(TextFieldContext { target, anchor: at });
+            self.touch();
+        }
+    }
+
+    fn apply_text_field_menu(&mut self, target: TextFieldTarget, action: TextFieldMenuAction) {
+        match target {
+            TextFieldTarget::Address => {
+                let edit = self.address.apply_menu(action);
+                self.clipboard_request = edit.clipboard;
+            }
+            TextFieldTarget::Form(node) => {
+                let edit = self
+                    .tabs
+                    .active_mut()
+                    .text_fields
+                    .get_mut(&node)
+                    .map(|field| field.apply_menu(action))
+                    .unwrap_or_default();
+                self.clipboard_request = edit.clipboard;
+                if edit.changed {
+                    self.sync_text_field_value(node);
+                }
+                self.damage_text_field(node);
+            }
+        }
+    }
+
+    fn drag_text_selection(&mut self, target: TextFieldTarget, at: Point) {
+        match target {
+            TextFieldTarget::Address => {
+                let index = address_index_at(
+                    crate::ui::widgets::text_field::TextFieldView::new(&self.address),
+                    self.geometry.size.cols,
+                    at.col,
+                );
+                self.address.set_cursor(index, true);
+                self.touch();
+            }
+            TextFieldTarget::Form(node) => {
+                let Some(view) = self.geometry.content_view() else {
+                    return;
+                };
+                let col = usize::from(at.col.saturating_sub(view.origin.col));
+                let row = usize::from(at.row.saturating_sub(view.origin.row))
+                    .saturating_add(self.tabs.active().scroll);
+                self.extend_form_selection(node, col, row);
+            }
         }
     }
 
@@ -235,17 +397,27 @@ impl App {
         let ChromeTarget::Content { col, row } = target else {
             return;
         };
-        let Some((node, href)) = self
+        if let Some((node, href)) = self
             .link_at(col, row)
             .map(|link| (link.node, link.href.clone()))
-        else {
+        {
+            if Some(node) != pressed.link {
+                return;
+            }
+            let new_tab = button == MouseButton::Middle || self.link_opens_a_new_tab(node);
+            self.activate_link(&href, new_tab);
             return;
         };
-        if Some(node) != pressed.link {
+        if button != MouseButton::Left || pressed.link.is_some() {
             return;
         }
-        let new_tab = button == MouseButton::Middle || self.link_opens_a_new_tab(node);
-        self.activate_link(&href, new_tab);
+        let released = self
+            .hit_at(col, row)
+            .and_then(|node| self.focusable_ancestor(node));
+        if released == Some(pressed.node) {
+            self.set_pointer_focus(released);
+            self.activate_focused();
+        }
     }
 
     fn wheel(&mut self, target: ChromeTarget, rows: i32) {
@@ -285,7 +457,7 @@ impl App {
         tab.painted.link_at(usize::from(col), row)
     }
 
-    fn link_opens_a_new_tab(&self, node: NodeId) -> bool {
+    pub(super) fn link_opens_a_new_tab(&self, node: NodeId) -> bool {
         let Some(document) = self.tabs.active().document.as_ref() else {
             return false;
         };
@@ -297,7 +469,7 @@ impl App {
         }
     }
 
-    fn activate_link(&mut self, href: &str, new_tab: bool) {
+    pub(super) fn activate_link(&mut self, href: &str, new_tab: bool) {
         let tab = self.tabs.active();
         let base = tab
             .base
@@ -338,10 +510,15 @@ impl App {
     fn focus_address_at(&mut self, col: u16) {
         if self.focus != Focus::Address {
             self.address.set_text(&self.tabs.active().url);
+            self.address.set_cursor(0, false);
             self.focus = Focus::Address;
         }
-        let index = address_index_at(self.address.text(), self.geometry.size.cols, col);
-        self.address.set_cursor(index);
+        let index = address_index_at(
+            crate::ui::widgets::text_field::TextFieldView::new(&self.address),
+            self.geometry.size.cols,
+            col,
+        );
+        self.address.set_cursor(index, false);
         self.touch();
     }
 }

@@ -143,6 +143,7 @@ fn styled_panel(painted: &DisplayList, width: u16, start: usize, end: usize) -> 
         lines: &ContentLines {
             painted,
             scroll: start,
+            text_fields: Vec::new(),
         },
         theme: &PAPER_WHITE,
     }
@@ -314,6 +315,7 @@ fn vga_panel(painted: &DisplayList, width: u16, start: usize, end: usize) -> ima
                 lines: &ContentLines {
                     painted,
                     scroll: start,
+                    text_fields: Vec::new(),
                 },
                 theme: &PAPER_WHITE,
             }

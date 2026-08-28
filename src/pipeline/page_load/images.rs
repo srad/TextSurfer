@@ -105,6 +105,7 @@ impl PageLoad {
                     FetchError::Network(_) => "network",
                     FetchError::HttpStatus(_) => "http_status",
                     FetchError::UnsupportedScheme(_) => "unsupported_scheme",
+                    FetchError::UnsupportedMethod(_) => "unsupported_method",
                     FetchError::BodyTooLarge { .. } => "body_too_large",
                 };
                 tracing::warn!(

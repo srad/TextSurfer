@@ -427,6 +427,79 @@ fn clicking_the_field_while_typing_keeps_the_edit() {
 }
 
 #[test]
+fn dragging_selects_address_text_and_the_context_menu_uses_that_selection() {
+    let mut app = App::new();
+    for ch in "example.com".chars() {
+        app.handle_key(super::press(Key::Char(ch)));
+    }
+    app.handle_mouse(press(MouseButton::Left, at(FIELD_TEXT + 1, 3)));
+    app.handle_mouse(moved(at(FIELD_TEXT + 4, 3)));
+    app.handle_mouse(release(MouseButton::Left, at(FIELD_TEXT + 4, 3)));
+    assert_eq!(app.address.selection(), Some(1..4));
+
+    let chrome = app.chrome_view();
+    let selected = chrome.theme.selected();
+    let backend = ratatui::backend::TestBackend::new(80, 24);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| crate::ui::chrome::draw(frame, &chrome))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(FIELD_TEXT + 1, 3)].fg, selected.fg.unwrap());
+    assert_eq!(buffer[(FIELD_TEXT + 1, 3)].bg, selected.bg.unwrap());
+    assert_ne!(buffer[(FIELD_TEXT, 3)].bg, selected.bg.unwrap());
+    assert_ne!(buffer[(FIELD_TEXT + 4, 3)].bg, selected.bg.unwrap());
+
+    app.handle_mouse(press(MouseButton::Right, at(FIELD_TEXT + 2, 3)));
+    let context = app.chrome_view().text_field_menu.expect("a context menu");
+    let rect = crate::ui::widgets::text_field::menu_rect(
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        context.anchor,
+    );
+    app.handle_mouse(press(MouseButton::Left, at(rect.x + 1, rect.y + 2)));
+    assert_eq!(
+        app.take_clipboard_request(),
+        Some(crate::ui::widgets::text_field::ClipboardAction::Write(
+            "xam".to_string()
+        ))
+    );
+}
+
+#[test]
+fn a_form_context_menu_keeps_and_copies_the_clicked_selection() {
+    let mut app = loaded("<input value=hello size=8>");
+    app.handle_key(super::press(Key::Tab));
+    app.handle_key(KeyEvent {
+        code: Key::Left,
+        modifiers: KeyModifiers {
+            shift: true,
+            ..Default::default()
+        },
+    });
+    let (col, row) = app.content_cursor().unwrap();
+    app.handle_mouse(press(
+        MouseButton::Right,
+        at(
+            ORIGIN.col + col as u16,
+            ORIGIN.row + row.saturating_sub(app.tabs.active().scroll) as u16,
+        ),
+    ));
+    let context = app.chrome_view().text_field_menu.expect("a context menu");
+    assert!(context.can_copy);
+    let rect = crate::ui::widgets::text_field::menu_rect(
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        context.anchor,
+    );
+    app.handle_mouse(press(MouseButton::Left, at(rect.x + 1, rect.y + 2)));
+    assert_eq!(
+        app.take_clipboard_request(),
+        Some(crate::ui::widgets::text_field::ClipboardAction::Write(
+            "o".to_string()
+        ))
+    );
+}
+
+#[test]
 fn menu_titles_open_and_toggle_and_items_dispatch() {
     let mut app = App::new();
     app.handle_mouse(press(MouseButton::Left, at(2, 0)));

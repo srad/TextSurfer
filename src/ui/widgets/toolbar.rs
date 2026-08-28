@@ -5,7 +5,7 @@ use ratatui::widgets::Widget;
 
 use crate::ui::theme::Theme;
 
-use super::clip_width;
+use super::text_field::{TextField, TextFieldView};
 
 pub const BUTTON_PITCH: u16 = 4;
 pub const BUTTON_COUNT: u16 = 4;
@@ -17,7 +17,7 @@ pub const FIELD_TEXT: u16 = FIELD_RAIL + 1;
 const BUTTONS: [&str; 4] = ["‹", "›", "↻", "⌂"];
 
 pub struct Toolbar<'a> {
-    pub address: &'a str,
+    pub address: TextFieldView<'a>,
     pub focused: bool,
     pub back_enabled: bool,
     pub forward_enabled: bool,
@@ -62,20 +62,25 @@ impl Widget for Toolbar<'_> {
         if rail_x >= area.right() {
             return;
         }
-        let budget = area.width.saturating_sub(FIELD_TEXT + 1);
-        let text = clip_width(self.address, budget);
-        if self.focused {
-            let interior = Rect::new(rail_x, area.y, area.width.saturating_sub(FIELD_RAIL + 1), 1);
-            buf.set_style(interior, self.theme.selected());
-        }
         let field_style = if self.focused {
-            self.theme.selected()
+            Style::default().fg(self.theme.text)
         } else {
             Style::default()
         };
         buf.set_string(area.x + FIELD_RAIL, area.y, "│", field_style);
         if rail_x + 1 < area.right() {
-            buf.set_string(area.x + FIELD_TEXT, area.y, &text, field_style);
+            TextField::new(self.address)
+                .style(field_style)
+                .selection_style(self.theme.selected())
+                .render(
+                    Rect::new(
+                        area.x + FIELD_TEXT,
+                        area.y,
+                        area.width.saturating_sub(FIELD_TEXT + 1),
+                        1,
+                    ),
+                    buf,
+                );
         }
     }
 }
@@ -93,7 +98,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 Toolbar {
-                    address,
+                    address: TextFieldView::display(address),
                     focused,
                     back_enabled: back,
                     forward_enabled: forward,
@@ -117,7 +122,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 Toolbar {
-                    address: "https://example.com",
+                    address: TextFieldView::display("https://example.com"),
                     focused: false,
                     back_enabled: false,
                     forward_enabled: true,
@@ -153,13 +158,13 @@ mod tests {
     }
 
     #[test]
-    fn focused_field_is_a_selected_bar_over_the_interior() {
+    fn focused_field_does_not_paint_unselected_text_as_selected() {
         let backend = TestBackend::new(60, 1);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
                 Toolbar {
-                    address: "https://example.com",
+                    address: TextFieldView::display("https://example.com"),
                     focused: true,
                     back_enabled: true,
                     forward_enabled: true,
@@ -170,22 +175,11 @@ mod tests {
             .unwrap();
         let cells = terminal.backend().buffer().content();
         let selected = DEFAULT.selected();
-        assert_eq!(
-            cells[23].style().bg,
-            selected.bg,
-            "field rail must be selected when focused"
-        );
-        assert_eq!(
-            cells[24].style().bg,
-            selected.bg,
-            "field text must be selected when focused"
-        );
-        assert_eq!(
-            cells[40].style().bg,
-            selected.bg,
-            "the blank field interior must be selected"
-        );
-        assert_eq!(cells[40].style().fg, selected.fg);
+        assert_ne!(cells[23].style().bg, selected.bg);
+        assert_ne!(cells[24].style().bg, selected.bg);
+        assert_ne!(cells[40].style().bg, selected.bg);
+        assert_eq!(cells[24].style().fg, Some(DEFAULT.text));
+        assert_eq!(cells[40].style().fg, Some(DEFAULT.text));
     }
 
     #[test]
@@ -195,7 +189,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 Toolbar {
-                    address: "https://example.com",
+                    address: TextFieldView::display("https://example.com"),
                     focused: false,
                     back_enabled: true,
                     forward_enabled: true,

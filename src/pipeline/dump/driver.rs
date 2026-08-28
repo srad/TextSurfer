@@ -70,7 +70,7 @@ pub fn dump_lines(
                             0,
                             generation,
                             command.resource_id,
-                            FetchRequest { url: command.url },
+                            FetchRequest::get(command.url),
                         );
                     }
                     if load.take_cancel_requested() {
@@ -116,7 +116,7 @@ pub fn dump_lines(
 }
 
 fn fetch_document(pool: &FetchPool, generation: u64, url: Url) -> io::Result<FetchResponse> {
-    let submitted = pool.submit(0, generation, ResourceId::DOCUMENT, FetchRequest { url });
+    let submitted = pool.submit(0, generation, ResourceId::DOCUMENT, FetchRequest::get(url));
     if submitted != Submitted::Queued {
         return Err(io::Error::other("the network is not running"));
     }

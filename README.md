@@ -77,15 +77,18 @@ Ready                              https://example.com
 - Static `<img src>` loads bounded PNG, JPEG, WebP and first-frame GIF without delaying first paint.
   VGA paints native RGBA pixels; the terminal selects Sixel/Kitty/iTerm2 once and falls back per
   placement to alpha-composited halfblocks
-- Form controls (text, password, checkbox, radio, buttons, select, textarea) draw stand-ins sized to
-  their CSS box, with `placeholder` dimmed and never submitted. They are not yet operable
+- Operable forms: text/password inputs and multiline textareas share the address bar's grapheme-safe
+  editor with selection, clipboard commands and an opaque themed context menu. Checkbox/radio,
+  buttons and single-select controls support reset and bounded GET or URL-encoded POST submission;
+  placeholders are dimmed, disappear on input and are never submitted
 - Bounded by construction: block nesting is capped, a layout the engine refuses degrades to a
   message instead of aborting, and `:visited` never matches so page styling cannot observe history
 
 **Chrome and interaction**
 
 - DOS/QBasic menu bar, raised tab strip with Turbo Vision `[■]` close boxes, navigation toolbar,
-  grapheme-safe address editor and a page scrollbar whose caps step, trough pages and thumb drags
+  shared grapheme-safe text-field widget for the address and page forms, and a page scrollbar whose
+  caps step, trough pages and thumb drags
 - Five session-scoped retro colour schemes in the View menu: Turbo Vision, Norton, Amber CRT, Green
   Phosphor and Paper White (which also exposes a light `prefers-color-scheme` to CSS)
 - Mouse navigation in both frontends: links activate on release over the press target, middle-click
@@ -157,6 +160,7 @@ sharing it.
 |---|---|
 | `/` | Focus address bar (typing `q` never quits while focused) |
 | `Enter` | Load address / search |
+| `Ctrl+A` / `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Select all / copy / cut / paste in the focused text field |
 | `Ctrl+T` | New tab |
 | `Ctrl+W` | Close tab |
 | `Ctrl+N` / `Ctrl+P` | Next / previous tab |
@@ -193,7 +197,8 @@ and the status line says how many of its rows were captured.
 | Click its track above / below the thumb | Pages up / down |
 | Drag the thumb | Scrolls to that position; keeps tracking off the bar, ends if the pointer leaves the window |
 | Click `[‹] [›] [↻] [⌂]` | Back, forward, reload, start page |
-| Click the address field | Focuses it and places the caret, keeping a half-typed URL |
+| Click or drag in the address or a page text field | Places the caret or selects a range |
+| Right-click an address or page text field | Opens the opaque themed cut/copy/paste/select-all menu |
 | Click a menu title or item | Opens, toggles, dispatches; a click elsewhere closes the menu |
 | Hover a link | Previews the URL in the status bar, hand cursor in the window |
 
@@ -207,7 +212,7 @@ its override key (usually `Shift`) while TextSurfer has the screen.
   pinned by SHA-256; tests never touch the network.
 - **Contract suites** — trait implementations pass capability-parameterized suites; fetch and app
   integration tests use fakes, with no real network or clock.
-- **Property tests** — `url_fix` and the grapheme-aware address buffer obey laws under proptest,
+- **Property tests** — `url_fix` and the shared grapheme-aware text-field state obey laws under proptest,
   joined by ten layout laws covering viewport monotonicity, painted-row bounds, disjoint glyph
   cells, laminar row families, deepest-hit round trips and scroll clamping.
 - **Render goldens** — fixture pages covering margins, headings, borders, links, wide characters,
@@ -243,9 +248,9 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: static SVG images and the human image smoke in VGA and terminal, then keyboard link
-navigation and basic form editing/submission so real sites become practically operable. In-page
-search and the remaining M6 performance gate follow that path.
+Next up: static SVG images and the human image smoke in VGA and terminal, then keymap unification,
+keyboard link hints and the help overlay. In-page search and the remaining M6 performance gate
+follow that path.
 
 ## Built on great libraries
 
@@ -256,7 +261,8 @@ search and the remaining M6 performance gate follow that path.
 [cssparser-color](https://github.com/servo/rust-cssparser) ·
 [selectors](https://github.com/servo/stylo) ·
 [Taffy](https://github.com/DioxusLabs/taffy) · [textwrap](https://github.com/mgeisler/textwrap) ·
-[thiserror](https://github.com/dtolnay/thiserror) · [boa_engine](https://github.com/boa-dev/boa)
+[arboard](https://github.com/1Password/arboard) · [thiserror](https://github.com/dtolnay/thiserror) ·
+[boa_engine](https://github.com/boa-dev/boa)
 (behind the `js` feature) · [winit](https://github.com/rust-windowing/winit) ·
 [softbuffer](https://github.com/rust-windowing/softbuffer) ·
 [image](https://github.com/image-rs/image) · [ratatui-image](https://github.com/benjajaja/ratatui-image) ·

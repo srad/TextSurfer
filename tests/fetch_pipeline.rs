@@ -82,7 +82,7 @@ impl Navigate for ImmediateNet {
         resource_id: ResourceId,
         url: url::Url,
     ) -> Submitted {
-        let result = self.fetch.fetch(&FetchRequest { url });
+        let result = self.fetch.fetch(&FetchRequest::get(url));
         self.pending
             .lock()
             .expect("immediate result lock")

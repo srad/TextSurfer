@@ -334,6 +334,7 @@ mod tests {
                     lines: &ContentLines {
                         painted: &page,
                         scroll: 0,
+                        text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
                 }

@@ -25,6 +25,15 @@ pub fn route(url: &Url) -> Route {
 
 pub trait Navigate: Send {
     fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) -> Submitted;
+    fn submit_request(
+        &self,
+        tab_id: u64,
+        generation: u64,
+        resource_id: ResourceId,
+        request: FetchRequest,
+    ) -> Submitted {
+        self.submit(tab_id, generation, resource_id, request.url)
+    }
     fn cancel(&self, _tab_id: u64, _generation: u64) {}
     fn poll_result(&self) -> FetchPoll;
 
@@ -47,7 +56,17 @@ impl PoolNet {
 impl Navigate for PoolNet {
     fn submit(&self, tab_id: u64, generation: u64, resource_id: ResourceId, url: Url) -> Submitted {
         self.pool
-            .submit(tab_id, generation, resource_id, FetchRequest { url })
+            .submit(tab_id, generation, resource_id, FetchRequest::get(url))
+    }
+
+    fn submit_request(
+        &self,
+        tab_id: u64,
+        generation: u64,
+        resource_id: ResourceId,
+        request: FetchRequest,
+    ) -> Submitted {
+        self.pool.submit(tab_id, generation, resource_id, request)
     }
 
     fn cancel(&self, tab_id: u64, generation: u64) {

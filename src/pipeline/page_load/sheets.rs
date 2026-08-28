@@ -16,6 +16,7 @@ impl PageLoad {
             self.media,
             self.palette,
             self.parse_errors,
+            &self.forms,
             &images,
         )
     }
