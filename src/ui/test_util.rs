@@ -41,6 +41,7 @@ pub fn draft_view() -> ChromeView<'static> {
             url: "https://example.com".to_string().into(),
             message: "Ready".to_string().into(),
             hover: None,
+            progress: None,
         },
         flash: None,
         text_field_menu: None,

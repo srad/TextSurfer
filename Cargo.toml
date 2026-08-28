@@ -23,6 +23,7 @@ url = "2.5.8"
 unicode-width = "0.2.2"
 thiserror = "2.0.20"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-chrome = "0.7.2"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
 html5ever = "0.39.0"
 encoding_rs = "0.8.35"
@@ -50,6 +51,10 @@ tempfile = "3.27.0"
 
 [[bench]]
 name = "selector_bucketing"
+harness = false
+
+[[bench]]
+name = "linux_page"
 harness = false
 
 [profile.dev]

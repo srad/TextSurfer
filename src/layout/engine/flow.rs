@@ -1176,9 +1176,11 @@ fn append_horizontal_margin(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn append_inline(
     tree: &mut BoxTree,
     pieces: &[ResolvedInlinePiece],
+    lines: Vec<Vec<Glyph>>,
     col: isize,
     row: isize,
     width: usize,
@@ -1186,7 +1188,7 @@ pub(super) fn append_inline(
     merge_base: usize,
 ) {
     let mut current_row = row;
-    for line in format_inline(pieces, width) {
+    for line in lines {
         let (line_height, _) = line_metrics(&line, pieces);
         append_inline_line(
             tree,

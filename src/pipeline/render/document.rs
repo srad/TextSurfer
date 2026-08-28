@@ -6,6 +6,7 @@ use crate::css::{BasicCascade, Cascade, ColorScheme, MediaContext, StyleSheet};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
+use std::sync::Arc;
 
 use super::RenderedPage;
 
@@ -97,11 +98,12 @@ pub(crate) fn render_document_with_images(
         .iter()
         .map(|sheet| sheet.diagnostics.total())
         .sum::<usize>();
-    let styles = BasicCascade.apply_with_form_state(sheets, &document.borrow(), media, forms);
+    let styles =
+        Arc::new(BasicCascade.apply_with_form_state(sheets, &document.borrow(), media, forms));
     let mut painted = BasicPainter.paint(
         &TaffyLayoutEngine.layout_with_images(
             &document.borrow(),
-            &styles,
+            styles.as_ref(),
             media.viewport,
             forms,
             images,

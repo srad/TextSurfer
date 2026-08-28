@@ -1,5 +1,6 @@
 use crate::core::dom::{ElementNs, SharedDocument};
 use crate::html::sink::ArenaTreeSink;
+use html5ever::driver::Parser;
 use html5ever::driver::parse_fragment_for_element;
 use html5ever::tendril::StrTendril;
 use html5ever::tendril::stream::TendrilSink;
@@ -26,6 +27,33 @@ pub trait HtmlParser: Send + Sync {
 
 pub struct Html5everParser {
     scripting: bool,
+}
+
+pub struct IncrementalHtmlParser {
+    parser: Option<Parser<ArenaTreeSink>>,
+}
+
+impl IncrementalHtmlParser {
+    pub fn new(scripting: bool) -> Self {
+        let parser = Html5everParser::new(scripting);
+        Self {
+            parser: Some(parse_document(
+                ArenaTreeSink::new(false, None),
+                parser.opts(),
+            )),
+        }
+    }
+
+    pub fn feed(&mut self, source: &str) {
+        self.parser
+            .as_mut()
+            .expect("an unfinished parser exists")
+            .process(StrTendril::from(source));
+    }
+
+    pub fn finish(&mut self) -> Option<ParseOutcome> {
+        Some(self.parser.take()?.finish())
+    }
 }
 
 impl Html5everParser {
@@ -316,6 +344,17 @@ mod tests {
             limited.document.borrow().quirks_mode(),
             DomQuirksMode::LimitedQuirks
         );
+    }
+
+    #[test]
+    fn incremental_parser_preserves_tokens_split_across_chunks() {
+        let mut parser = IncrementalHtmlParser::new(false);
+        parser.feed("<!doctype html><p id=target>Gr");
+        parser.feed("ü");
+        parser.feed("ße &amp; hello</p>");
+        let outcome = parser.finish().unwrap();
+        assert!(outcome.document.borrow().element_by_id("target").is_some());
+        assert_eq!(outcome.parse_errors, 0);
     }
 
     #[test]

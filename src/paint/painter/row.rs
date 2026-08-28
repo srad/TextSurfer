@@ -10,7 +10,7 @@ use super::contrast::{merge_style, resolve_cell_style};
 use super::{PaintedRow, PaintedSpan};
 
 pub(super) struct RowBuffer {
-    cells: Vec<String>,
+    cells: Vec<Option<String>>,
     owners: Vec<Option<usize>>,
     styles: Vec<CellStyle>,
 }
@@ -18,7 +18,7 @@ pub(super) struct RowBuffer {
 impl RowBuffer {
     pub(super) fn new(width: usize) -> Self {
         Self {
-            cells: vec![" ".to_string(); width],
+            cells: vec![None; width],
             owners: vec![None; width],
             styles: vec![CellStyle::default(); width],
         }
@@ -39,8 +39,22 @@ impl RowBuffer {
         self.styles.get(col).copied()
     }
 
+    pub(super) fn fill_style(&mut self, from: usize, width: usize, style: CellStyle) {
+        let end = from.saturating_add(width).min(self.styles.len());
+        for index in from..end {
+            clear_grapheme(&mut self.cells, &mut self.owners, index);
+            self.cells[index] = Some(" ".to_string());
+            self.owners[index] = Some(index);
+            self.styles[index] = merge_style(self.styles[index], style);
+        }
+    }
+
     fn fill_background(&mut self, from: usize, to: usize, background: Rgb) {
         for index in from..to.min(self.styles.len()) {
+            if self.owners[index].is_none() {
+                self.cells[index] = Some(" ".to_string());
+                self.owners[index] = Some(index);
+            }
             self.styles[index].bg = Some(background);
         }
     }
@@ -49,9 +63,7 @@ impl RowBuffer {
         let mut spans: Vec<PaintedSpan> = Vec::new();
         let mut last_painted = 0usize;
         for (index, cell) in self.cells.iter().enumerate() {
-            if cell.is_empty() {
-                continue;
-            }
+            let Some(cell) = cell else { continue };
             let mut text = cell.clone();
             let source_style = self.styles[index];
             let style = resolve_cell_style(source_style, palette);
@@ -117,7 +129,7 @@ pub(super) fn fill_background(
 }
 
 fn write_line(
-    cells: &mut [String],
+    cells: &mut [Option<String>],
     owners: &mut [Option<usize>],
     styles: &mut [CellStyle],
     start: usize,
@@ -128,12 +140,13 @@ fn write_line(
     for grapheme in text.graphemes(true) {
         let width = UnicodeWidthStr::width(grapheme);
         if width == 0 {
-            if let Some(owner) = col
+            if let Some(previous) = col
                 .checked_sub(1)
                 .and_then(|index| owners.get(index))
                 .copied()
                 .flatten()
-                && let Some(previous) = cells.get_mut(owner)
+                .and_then(|owner| cells.get_mut(owner))
+                .and_then(Option::as_mut)
             {
                 previous.push_str(grapheme);
             }
@@ -145,11 +158,11 @@ fn write_line(
         for target in col..col + width {
             clear_grapheme(cells, owners, target);
         }
-        cells[col] = grapheme.to_string();
+        cells[col] = Some(grapheme.to_string());
         owners[col] = Some(col);
         styles[col] = merge_style(styles[col], style);
         for offset in 1..width {
-            cells[col + offset].clear();
+            cells[col + offset] = None;
             owners[col + offset] = Some(col);
             styles[col + offset] = styles[col];
         }
@@ -157,16 +170,17 @@ fn write_line(
     }
 }
 
-fn clear_grapheme(cells: &mut [String], owners: &mut [Option<usize>], target: usize) {
+fn clear_grapheme(cells: &mut [Option<String>], owners: &mut [Option<usize>], target: usize) {
     let Some(owner) = owners.get(target).copied().flatten() else {
         return;
     };
-    let width = UnicodeWidthStr::width(cells[owner].as_str()).max(1);
-    cells[owner] = " ".to_string();
+    let width = cells[owner]
+        .as_deref()
+        .map(UnicodeWidthStr::width)
+        .unwrap_or(1)
+        .max(1);
     for index in owner..(owner + width).min(owners.len()) {
         owners[index] = None;
-        if index != owner {
-            cells[index] = " ".to_string();
-        }
+        cells[index] = None;
     }
 }

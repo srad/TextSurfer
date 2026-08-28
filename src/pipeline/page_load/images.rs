@@ -5,11 +5,12 @@ use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeError, ImageDeco
 use crate::net::http::diagnostic_url;
 use crate::net::{FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId};
 
+use super::super::render::RenderCause;
 use super::discovery::attr_value;
 use super::resource_url::normalized_url;
 use super::{
     FetchCommand, ImageEntry, ImageFailure, ImageState, MAX_IMAGE_DECODED_BYTES,
-    MAX_IMAGE_FETCH_BYTES, MAX_IMAGE_URLS, PageLoad,
+    MAX_IMAGE_FETCH_BYTES, MAX_IMAGE_URLS, PageLoad, RenderInvalidation,
 };
 
 impl PageLoad {
@@ -202,8 +203,31 @@ impl PageLoad {
             return true;
         }
         self.image_decoded_bytes += bytes;
+        let width = image.width;
+        let height = image.height;
         self.images[index].state = ImageState::Ready(image);
-        self.dirty = true;
+        let ready_images = self
+            .images
+            .iter()
+            .filter(|image| matches!(image.state, ImageState::Ready(_)))
+            .count();
+        let pending_images = self
+            .images
+            .iter()
+            .filter(|image| matches!(image.state, ImageState::Fetching | ImageState::Decoding))
+            .count();
+        tracing::trace!(
+            target: "textsurfer::perf",
+            asset_id = asset_id.0,
+            revision,
+            width,
+            height,
+            ready_images,
+            pending_images,
+            decoded_bytes = bytes,
+            "image decode invalidated layout"
+        );
+        self.invalidate_soft(RenderInvalidation::Layout, RenderCause::Image);
         true
     }
 

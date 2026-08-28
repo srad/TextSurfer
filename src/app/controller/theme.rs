@@ -47,6 +47,7 @@ impl App {
                 tab.render_dirty = true;
             }
         }
+        let _ = self.advance_render_queue();
         self.tabs.active_mut().message = format!("theme: {}", theme.name);
         self.refresh_hover();
         self.touch();

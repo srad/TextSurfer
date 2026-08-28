@@ -106,6 +106,7 @@ fn cli_parses_the_start_url_and_rejects_unknown_flags() {
     let cli = Cli::try_parse_from(["textsurfer", "--url", "https://example.com"]).unwrap();
     assert_eq!(cli.url.as_deref(), Some("https://example.com"));
     assert!(cli.log_file.is_none());
+    assert!(cli.diagnostics.is_none());
     assert_eq!(cli.js, JsMode::Auto);
     let cli =
         Cli::try_parse_from(["textsurfer", "--user-agent", "test-agent", "--js", "off"]).unwrap();
@@ -115,6 +116,21 @@ fn cli_parses_the_start_url_and_rejects_unknown_flags() {
     assert_eq!(
         cli.log_file.as_deref(),
         Some(std::path::Path::new("trace.log"))
+    );
+    let cli = Cli::try_parse_from(["textsurfer", "--diagnostics", "target/run"]).unwrap();
+    assert_eq!(
+        cli.diagnostics.as_deref(),
+        Some(std::path::Path::new("target/run"))
+    );
+    assert!(
+        Cli::try_parse_from([
+            "textsurfer",
+            "--log-file",
+            "trace.log",
+            "--diagnostics",
+            "target/run"
+        ])
+        .is_err()
     );
     let cli = Cli::try_parse_from(["textsurfer", "--dump", "--rows", "31"]).unwrap();
     assert_eq!(cli.rows, 31);
@@ -149,6 +165,70 @@ fn log_files_append_instead_of_erasing_an_earlier_run() {
     writeln!(file, "later").unwrap();
     drop(file);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "earlier\nlater\n");
+}
+
+#[test]
+fn diagnostic_paths_append_suffixes_without_replacing_extensions() {
+    assert_eq!(
+        diagnostic_paths(Path::new("target/linux.scroll")),
+        DiagnosticPaths {
+            log: PathBuf::from("target/linux.scroll.log"),
+            trace: PathBuf::from("target/linux.scroll.trace.json"),
+        }
+    );
+}
+
+#[test]
+fn diagnostic_files_are_exclusive_and_partial_creation_is_cleaned_up() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = diagnostic_paths(&directory.path().join("nested").join("capture"));
+    let (mut log, mut trace) = create_diagnostic_files(&paths).unwrap();
+    log.write_all(b"log").unwrap();
+    trace.write_all(b"trace").unwrap();
+    drop((log, trace));
+    assert_eq!(
+        create_diagnostic_files(&paths).unwrap_err().kind(),
+        io::ErrorKind::AlreadyExists
+    );
+    assert_eq!(std::fs::read(&paths.log).unwrap(), b"log");
+    assert_eq!(std::fs::read(&paths.trace).unwrap(), b"trace");
+
+    let partial = diagnostic_paths(&directory.path().join("partial"));
+    std::fs::write(&partial.trace, b"existing").unwrap();
+    assert_eq!(
+        create_diagnostic_files(&partial).unwrap_err().kind(),
+        io::ErrorKind::AlreadyExists
+    );
+    assert!(!partial.log.exists());
+    assert_eq!(std::fs::read(&partial.trace).unwrap(), b"existing");
+}
+
+#[test]
+fn diagnostics_off_initializes_no_writer() {
+    assert!(init_logging(None, None).unwrap().is_none());
+}
+
+#[test]
+fn chrome_guard_finishes_a_valid_trace_document() {
+    use tracing_subscriber::prelude::*;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("trace.json");
+    let file = std::fs::File::create(&path).unwrap();
+    let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+        .writer(file)
+        .include_args(true)
+        .build();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let dispatch = tracing::Dispatch::new(subscriber);
+    let default = tracing::dispatcher::set_default(&dispatch);
+    tracing::callsite::rebuild_interest_cache();
+    tracing::trace!(target: "textsurfer::perf", "diagnostic probe");
+    drop(default);
+    drop(dispatch);
+    drop(guard);
+    let trace = std::fs::read_to_string(path).unwrap();
+    assert!(serde_json::from_str::<serde_json::Value>(&trace).is_ok());
 }
 
 #[test]

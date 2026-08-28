@@ -12,7 +12,24 @@ pub fn decode_text(body: &[u8], header_charset: Option<&str>) -> Decoded {
     decode_inner(body, header_charset, false)
 }
 
+pub fn html_encoding(body: &[u8], header_charset: Option<&str>) -> &'static Encoding {
+    selected_encoding(body, header_charset, true).0
+}
+
 fn decode_inner(body: &[u8], header_charset: Option<&str>, html_prescan: bool) -> Decoded {
+    let (encoding, offset) = selected_encoding(body, header_charset, html_prescan);
+    let (text, _) = encoding.decode_without_bom_handling(&body[offset..]);
+    Decoded {
+        text: text.into_owned(),
+        encoding,
+    }
+}
+
+fn selected_encoding(
+    body: &[u8],
+    header_charset: Option<&str>,
+    html_prescan: bool,
+) -> (&'static Encoding, usize) {
     let (mut encoding, offset) = sniff_bom(body);
     if offset == 0 {
         let header = header_charset.and_then(|label| Encoding::for_label(label.trim().as_bytes()));
@@ -25,11 +42,7 @@ fn decode_inner(body: &[u8], header_charset: Option<&str>, html_prescan: bool) -
             .unwrap_or(UTF_8);
         encoding = post_process(encoding);
     }
-    let (text, _) = encoding.decode_without_bom_handling(&body[offset..]);
-    Decoded {
-        text: text.into_owned(),
-        encoding,
-    }
+    (encoding, offset)
 }
 
 pub fn charset_from_content_type(content_type: &str) -> Option<String> {

@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 
 use crate::core::focus::Focus;
+use crate::pipeline::render::RenderStage;
 use crate::ui::chrome::ChromeView;
 use crate::ui::chrome::TextFieldMenuView;
 use crate::ui::widgets::content::ContentLines;
-use crate::ui::widgets::status::StatusView;
+use crate::ui::widgets::status::{LoadProgress, LoadProgressAmount, StatusView};
 use crate::ui::widgets::tabs::TabChip;
 use crate::ui::widgets::text_field::TextFieldView;
 
@@ -12,6 +13,64 @@ use super::App;
 use super::pointer::TextFieldTarget;
 
 impl App {
+    pub(super) fn load_progress(&self) -> Option<LoadProgress> {
+        let active = self.tabs.active();
+        let pulse = (self.now.as_millis() / 100 % 10) as u8;
+        if active.document_pending {
+            return Some(LoadProgress {
+                phase: "fetch",
+                amount: LoadProgressAmount::Indeterminate {
+                    pulse,
+                    elapsed: None,
+                },
+            });
+        }
+        if let Some(pending) = active.pending_load.as_ref() {
+            let (completed, total) = pending.progress();
+            return Some(LoadProgress {
+                phase: "parse",
+                amount: LoadProgressAmount::Determinate { completed, total },
+            });
+        }
+        if self
+            .render_inflight
+            .is_some_and(|key| key.tab_id == active.id && key.generation == active.generation)
+        {
+            let activity = self.renders.activity().filter(|activity| {
+                activity.key.tab_id == active.id && activity.key.generation == active.generation
+            });
+            return Some(LoadProgress {
+                phase: activity.map_or("render", |activity| match activity.stage {
+                    RenderStage::Cascade => "styles",
+                    RenderStage::Layout => "layout",
+                    RenderStage::Paint => "paint",
+                }),
+                amount: LoadProgressAmount::Indeterminate {
+                    pulse,
+                    elapsed: activity.map(|activity| activity.elapsed),
+                },
+            });
+        }
+        let load = active.load.as_ref()?;
+        if load.has_render_work() {
+            return Some(LoadProgress {
+                phase: "queued",
+                amount: LoadProgressAmount::Indeterminate {
+                    pulse,
+                    elapsed: None,
+                },
+            });
+        }
+        if !load.is_settled() {
+            let (completed, total) = load.resource_progress();
+            return Some(LoadProgress {
+                phase: "resources",
+                amount: LoadProgressAmount::Items { completed, total },
+            });
+        }
+        None
+    }
+
     /// The tab strip's chips, shared by the renderer and the pointer hit test so both
     /// measure the same boxes.
     pub(super) fn tab_chips(&self) -> Vec<TabChip<'_>> {
@@ -55,6 +114,7 @@ impl App {
                 url: Cow::Borrowed(active.url.as_str()),
                 message: Cow::Borrowed(active.message.as_str()),
                 hover: self.hovered_href().map(Cow::Borrowed),
+                progress: self.load_progress(),
             },
             flash: self.flash_message(),
             text_field_menu: self.text_context.map(|context| {

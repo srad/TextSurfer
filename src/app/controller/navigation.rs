@@ -97,12 +97,14 @@ impl App {
             let tab = &mut self.tabs.tabs_mut()[index];
             tab.document_pending = false;
             tab.load = None;
+            tab.pending_load = None;
             tab.message = "automatic redirect limit reached".to_string();
             self.touch();
             return;
         }
         self.tabs.tabs_mut()[index].automatic_redirects += 1;
         self.tabs.tabs_mut()[index].load = None;
+        self.tabs.tabs_mut()[index].pending_load = None;
         self.navigate_at(index, url.as_str(), HistoryUpdate::Replace);
     }
 
@@ -126,6 +128,13 @@ impl App {
                 self.images.cancel(tab.id, tab.generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
+                tracing::trace!(
+                    target: "textsurfer::perf",
+                    tab_id = tab.id,
+                    generation,
+                    route = "start_page",
+                    "navigation started"
+                );
                 let page = start_page_for(content_viewport(self.geometry));
                 self.repoint(index, &fixed, generation, page);
                 self.update_history(index, &fixed, history);
@@ -137,6 +146,13 @@ impl App {
                 self.images.cancel(tab.id, tab.generation);
                 self.generation = self.generation.wrapping_add(1);
                 let generation = self.generation;
+                tracing::trace!(
+                    target: "textsurfer::perf",
+                    tab_id = tab.id,
+                    generation,
+                    route = "fetch",
+                    "navigation started"
+                );
                 self.repoint(index, &fixed, generation, content_for(&fixed));
                 self.update_history(index, &fixed, history);
                 let tab = &mut self.tabs.tabs_mut()[index];
@@ -185,9 +201,11 @@ impl App {
         tab.document = None;
         tab.styles = None;
         tab.load = None;
+        tab.pending_load = None;
         tab.document_pending = false;
         tab.base = None;
         tab.render_dirty = false;
+        tab.response_note = None;
         tab.dom_focus = None;
         tab.text_fields.clear();
         if index == self.tabs.active_index() {

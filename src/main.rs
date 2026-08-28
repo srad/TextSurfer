@@ -1,5 +1,5 @@
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,7 +25,12 @@ use textsurfer::pipeline::dump::dump_lines;
 use textsurfer::ui::frame::FrameComposer;
 use textsurfer::ui::mouse::WHEEL_ROWS;
 use textsurfer::ui::theme::DEFAULT;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
+
+const DIAGNOSTIC_FILTER: &str = "textsurfer=debug,textsurfer::perf=trace";
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -36,6 +41,8 @@ struct Cli {
     user_agent: Option<String>,
     #[arg(long)]
     log_file: Option<PathBuf>,
+    #[arg(long, conflicts_with = "log_file")]
+    diagnostics: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = JsMode::Auto)]
     js: JsMode,
     /// Render the page to stdout and exit instead of opening an interactive frontend.
@@ -98,7 +105,7 @@ fn frontend_choice(cli: &Cli) -> io::Result<FrontendChoice> {
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
-    init_logging(cli.log_file.as_deref())?;
+    let _diagnostics_guard = init_logging(cli.log_file.as_deref(), cli.diagnostics.as_deref())?;
     if cli.js == JsMode::On {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -155,9 +162,15 @@ fn main() -> io::Result<()> {
     })
 }
 
-fn init_logging(path: Option<&Path>) -> io::Result<()> {
-    let Some(path) = path else {
-        return Ok(());
+fn init_logging(
+    log_path: Option<&Path>,
+    diagnostic_prefix: Option<&Path>,
+) -> io::Result<Option<tracing_chrome::FlushGuard>> {
+    if let Some(prefix) = diagnostic_prefix {
+        return init_diagnostics(prefix).map(Some);
+    }
+    let Some(path) = log_path else {
+        return Ok(None);
     };
     let filter = match std::env::var("RUST_LOG") {
         Ok(value) => parse_log_filter(&value)?,
@@ -170,7 +183,8 @@ fn init_logging(path: Option<&Path>) -> io::Result<()> {
         .with_writer(Mutex::new(file))
         .with_ansi(false)
         .try_init()
-        .map_err(|error| io::Error::other(format!("cannot initialize logging: {error}")))
+        .map_err(|error| io::Error::other(format!("cannot initialize logging: {error}")))?;
+    Ok(None)
 }
 
 fn parse_log_filter(value: &str) -> io::Result<EnvFilter> {
@@ -184,6 +198,91 @@ fn parse_log_filter(value: &str) -> io::Result<EnvFilter> {
 
 fn open_log_file(path: &Path) -> io::Result<File> {
     OpenOptions::new().create(true).append(true).open(path)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DiagnosticPaths {
+    log: PathBuf,
+    trace: PathBuf,
+}
+
+fn diagnostic_paths(prefix: &Path) -> DiagnosticPaths {
+    let mut log = prefix.as_os_str().to_os_string();
+    log.push(".log");
+    let mut trace = prefix.as_os_str().to_os_string();
+    trace.push(".trace.json");
+    DiagnosticPaths {
+        log: log.into(),
+        trace: trace.into(),
+    }
+}
+
+fn create_diagnostic_files(paths: &DiagnosticPaths) -> io::Result<(File, File)> {
+    if let Some(parent) = paths.log.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+    let log = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&paths.log)
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "cannot create diagnostics log {}: {error}",
+                    paths.log.display()
+                ),
+            )
+        })?;
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&paths.trace)
+    {
+        Ok(trace) => Ok((log, trace)),
+        Err(error) => {
+            drop(log);
+            let _ = fs::remove_file(&paths.log);
+            Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "cannot create diagnostics trace {}: {error}",
+                    paths.trace.display()
+                ),
+            ))
+        }
+    }
+}
+
+fn init_diagnostics(prefix: &Path) -> io::Result<tracing_chrome::FlushGuard> {
+    let paths = diagnostic_paths(prefix);
+    let (log, trace) = create_diagnostic_files(&paths)?;
+    let filter = parse_log_filter(DIAGNOSTIC_FILTER)?;
+    let (chrome, guard) = tracing_chrome::ChromeLayerBuilder::new()
+        .writer(BufWriter::new(trace))
+        .include_args(true)
+        .build();
+    let subscriber = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(Mutex::new(log))
+                .with_ansi(false)
+                .with_filter(filter),
+        )
+        .with(chrome.with_filter(filter_fn(|metadata| {
+            metadata.target() == "textsurfer::perf"
+        })));
+    if let Err(error) = subscriber.try_init() {
+        drop(guard);
+        let _ = fs::remove_file(&paths.log);
+        let _ = fs::remove_file(&paths.trace);
+        return Err(io::Error::other(format!(
+            "cannot initialize diagnostics: {error}"
+        )));
+    }
+    Ok(guard)
 }
 
 /// Start the framebuffer frontend, or explain that it was not built in.
@@ -234,6 +333,14 @@ fn run(
         image_work,
         |app, damage| {
             let view = app.chrome_view();
+            let span = tracing::trace_span!(
+                target: "textsurfer::perf",
+                "terminal_present",
+                full = damage.content.full,
+                scroll_rows = damage.content.scroll_rows,
+                repaint = ?damage.content.repaint
+            );
+            let _guard = span.enter();
             composer.present(terminal.backend_mut(), &view, damage)
         },
     )

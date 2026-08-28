@@ -308,6 +308,7 @@ fn try_layout_flow(
     let mut table_cache = HashMap::new();
     let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
     let mut shaped_cache: HashMap<(usize, MeasureWidth), ShapedInline> = HashMap::new();
+    let mut formatted_cache = HashMap::new();
     let mut measure = |inputs,
                        index: usize,
                        style: &taffy::Style,
@@ -349,11 +350,13 @@ fn try_layout_flow(
                     AvailableSpace::MaxContent => natural as f32,
                 });
                 if let Some(block) = block.filter(|block| block.has_floats()) {
-                    let shaped = shape_inline_around_floats(
-                        pieces,
-                        measured_width.max(0.0).round() as usize,
-                        block,
-                    );
+                    let shaped = shaped_cache.entry(key).or_insert_with(|| {
+                        shape_inline_around_floats(
+                            pieces,
+                            measured_width.max(0.0).round() as usize,
+                            block,
+                        )
+                    });
                     baseline = shaped.baseline.map(|baseline| {
                         let inset = styles
                             .resolve_padding(
@@ -364,13 +367,14 @@ fn try_layout_flow(
                         baseline.saturating_add(inset) as f32
                     });
                     let height = shaped.height as f32;
-                    shaped_cache.insert(key, shaped);
                     return TaffySize {
                         width: known.width.unwrap_or(measured_width),
                         height: known.height.unwrap_or(height),
                     };
                 }
-                let lines = format_inline(pieces, measured_width.max(0.0) as usize);
+                let lines = formatted_cache
+                    .entry(key)
+                    .or_insert_with(|| format_inline(pieces, measured_width.max(0.0) as usize));
                 baseline = lines.first().map(|line| {
                     let (_, baseline) = line_metrics(line, pieces);
                     let inset = styles
@@ -385,7 +389,7 @@ fn try_layout_flow(
                     width: known.width.unwrap_or(measured_width),
                     height: known
                         .height
-                        .unwrap_or(formatted_height(&lines, pieces) as f32),
+                        .unwrap_or(formatted_height(lines, pieces) as f32),
                 }
             },
         );
@@ -657,9 +661,16 @@ fn try_layout_flow(
                     index.saturating_add(1),
                 );
             } else {
+                let lines = formatted_cache.remove(&key).unwrap_or_else(|| {
+                    format_inline(
+                        inline_cache.get(&key).expect("resolved inline"),
+                        layout_width,
+                    )
+                });
                 append_inline(
                     &mut tree,
                     inline_cache.get(&key).expect("resolved inline"),
+                    lines,
                     absolute_col.round() as isize,
                     absolute_row.round() as isize,
                     layout_width,

@@ -41,11 +41,15 @@ fn blank_launch_stays_quiescent_after_the_initial_redraw() {
 }
 
 #[test]
-fn pending_url_stays_quiescent_while_the_fetcher_has_no_result() {
+fn pending_url_animates_progress_at_ten_frames_per_second() {
     let mut app = vga(Some("https://example.com/"));
     drain_initial_redraw(&mut app);
     for step in 1..=99 {
-        assert!(!app.tick_at(Duration::from_millis(step * 50)).redraw);
+        let redraw = app.tick_at(Duration::from_millis(step * 50)).redraw;
+        assert_eq!(redraw, step % 2 == 0);
+        if redraw {
+            app.redraw().expect("progress redraw");
+        }
     }
 }
 

@@ -1,6 +1,67 @@
 use super::*;
 use crate::core::geom::Size;
-use crate::core::style::{Palette, TextRendering};
+use crate::core::style::{Palette, RenderContext, TextRendering};
+use crate::css::ColorScheme;
+use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
+use encoding_rs::UTF_8;
+use std::sync::Arc;
+use std::time::Duration;
+use url::Url;
+
+fn render_queue_contract(queue: Arc<dyn RenderQueue>) {
+    let mut load = PageLoad::new(
+        "<p>queued render</p>",
+        Url::parse("https://example.com/").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: RenderContext::terminal(Size { cols: 40, rows: 12 }),
+            palette: Palette::default(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+    );
+    load.defer_rendering();
+    assert!(load.render_if_ready(Duration::ZERO).is_none());
+    let key = RenderKey {
+        tab_id: 3,
+        generation: 5,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    assert!(matches!(
+        queue.submit(load.take_render_job(key).unwrap()),
+        RenderSubmitted::Queued
+    ));
+    let result = (0..100_000)
+        .find_map(|_| match queue.poll() {
+            RenderPoll::Ready(result) => Some(*result),
+            RenderPoll::Empty => {
+                std::thread::yield_now();
+                None
+            }
+            RenderPoll::Disconnected => panic!("render queue disconnected"),
+        })
+        .expect("render queue did not return its bounded job");
+    let page = load.apply_render_result(result).unwrap();
+    assert!(
+        page.painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("queued render"))
+    );
+    queue.shutdown();
+}
+
+#[test]
+fn inline_render_queue_passes_the_contract() {
+    render_queue_contract(Arc::new(InlineRenderQueue::default()));
+}
+
+#[test]
+fn threaded_render_queue_passes_the_contract() {
+    render_queue_contract(Arc::new(ThreadedRenderQueue::new()));
+}
 
 #[test]
 fn render_html_applies_the_same_style_discovery_rules_as_a_live_page_load() {

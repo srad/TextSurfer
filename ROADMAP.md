@@ -50,7 +50,7 @@ questions we were answering ad hoc.
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
 | [arboard](https://crates.io/crates/arboard) 3.6.1 | Current cross-platform text clipboard access without a UI toolkit | Frontend adapters only, default features off; `app` exchanges owned clipboard requests and remains I/O-free |
 | [resvg](https://crates.io/crates/resvg) 0.48.1 | Mature SVG parsing and bounded raster output without a browser DOM | Adopt next for static SVG images behind the existing decode worker and page budgets; no custom SVG parser |
-| [tracing](https://crates.io/crates/tracing) 0.1.44 + [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3.23 | Structured, filterable diagnostics with an established subscriber ecosystem | Opt-in append-only file diagnostics; no default terminal output and no response bodies, credentials, queries or fragments |
+| [tracing](https://crates.io/crates/tracing) 0.1.44 + [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3.23 + [tracing-chrome](https://crates.io/crates/tracing-chrome) 0.7.2 | Structured logs plus Chrome/Perfetto timeline spans with an explicit flush guard | Opt-in file diagnostics only; no default terminal output and no response bodies, credentials, queries, fragments or form values |
 | Every browser since Firefox 3 | `:visited` must never be observable to page styling | `:visited` parses and never matches |
 
 ## Status legend
@@ -85,8 +85,8 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-28): **910 lib · 16 binary · 6 fetch-pipeline · 14
-corpus · 48 golden · 3 atlas** with the default VGA frontend, **806 lib · 15 binary · 2 atlas**
+Test counts at the last green run (2026-08-28): **920 lib · 20 binary · 6 fetch-pipeline · 14
+corpus · 48 golden · 3 atlas** with the default VGA frontend, **816 lib · 19 binary · 2 atlas**
 with `--no-default-features`; the WPT target adds 6 passing tests (5 without `vga`), plus two
 deliberately ignored entries (the child worker and the VGA reference generator).
 
@@ -149,9 +149,11 @@ before any item is marked `(done)`.
 - `app` never imports crossterm: events arrive as `core` types, results via `deliver_fetch`, time
   is injected. It writes no files either — a screenshot key leaves a request the frontend takes,
   performs and reports back through `App::flash`.
-- DOM never crosses threads. One thread owns all mutable browser state; bounded fetch, image-decode
-  and frontend image-preparation workers receive and return only owned immutable bytes, pixels,
-  identifiers and value metadata.
+- Mutable DOM never crosses threads. One owner sequence holds browser state and JavaScript; bounded
+  fetch, image-decode and frontend image-preparation workers receive and return only owned immutable
+  bytes, pixels, identifiers and value metadata. Layout/paint may additionally receive an owned,
+  read-only render projection with no shared identity or mutation API and publishes
+  generation-tagged artifacts atomically.
 - `Document` owns DOM pre-insertion validation and hides indextree; template contents are detached
   fragments, and removal detaches rather than invalidating node handles.
 - `StyleTree` carries per-node `ComputedStyle` plus two side tables — pseudo-element boxes keyed by
@@ -210,9 +212,12 @@ before any item is marked `(done)`.
   The default user agent is `TextSurfer/<version> (+https://github.com/srad/TextSurfer)`;
   `--user-agent` remains an exact override. HTTP 429 is reported without automatic retries.
 - **Diagnostics are opt-in and file-only.** `--log-file` appends structured `tracing` events under
-  `RUST_LOG` (default `textsurfer=debug`) for fetch, queue, decode and stale-delivery decisions.
-  URLs retain origin and path but drop credentials, query and fragment; bodies and cookies are never
-  logged.
+  `RUST_LOG` (default `textsurfer=debug`). `--diagnostics <prefix>` is exclusive with it and creates
+  new `<prefix>.log` and `<prefix>.trace.json` files under the fixed
+  `textsurfer=debug,textsurfer::perf=trace` filter; existing captures are never overwritten. The
+  timeline records correlated owner, render-worker and presentation work plus typed coalesced
+  invalidation causes. URLs retain origin and path but drop credentials, query and fragment; bodies,
+  cookies and form values are never logged.
 - **Per-load pivot invariant:** any navigation ⇒ `generation++`, fresh `Document` + fresh
   `JsEngine`, scroll reset to top, stale/generation-tagged fetch results dropped.
 - JS host mutation funnel: all DOM changes through a single `MutateOp` enum ⇒ one invalidation path.
@@ -283,9 +288,9 @@ before any item is marked `(done)`.
 - Taffy owns block, flex, grid and physical float box calculation; inline formatting uses textwrap
   fragments plus Unicode cell/grapheme libraries because Taffy has no inline layout. TextSurfer
   shapes source-ordered inline content around float bands; table layout remains in-house.
-- **Incremental and multi-process rendering** (chawan's model) is deferred, not rejected: our DOM is
-  single-thread-owned and the fetch pool delivers whole bodies. Revisit if large-page latency
-  becomes a complaint.
+- **Multi-process rendering** (chawan's model) remains deferred. Interactive rendering is
+  incremental and epoch-based: input precedes bounded owner-sequence parse/cascade/snapshot work,
+  while one bounded worker lays out and paints immutable projections without owning the DOM.
 - Syscall-filter sandboxing is a **non-goal** — Windows is the primary target.
 - A Readability-style reader view is a candidate differentiator (M6), not a commitment.
 
@@ -445,9 +450,12 @@ path.
 - [x] Reload (`R`): generation++, fresh engine + document, scroll top (per-load pivot). *(M1.5)*
 - [x] Linear-time construction of new DOM children — indextree 4.9.0's `append_value` for values
       `Document` creates; existing-node attach/insert/move keep validation and checked mutations.
-- [x] Reader-facing load status — a rendered document reports that it loaded, not parse-error
-      counts or generation numbers; actionable HTTP, fetch, stylesheet and layout failures still
-      reach the status bar. *(smoke confirmed)*
+- [x] Reader-facing load status — a rendered document reports that it loaded, not
+      parse-error counts or generation numbers; actionable HTTP, fetch, stylesheet and layout
+      failures still reach the status bar. The bottom-right progress widget uses measured byte or
+      resource counts where totals are known and animated named phases for indefinite work, including
+      elapsed cascade/layout/paint time; it never presents a fabricated overall percentage. First
+      paint stops blocking on styles after 250 ms and late resources coalesce.
 - [x] Declarative refresh navigation — the first valid WHATWG `meta[http-equiv=refresh]` in document
       order, including `<noscript>` markup while scripting is disabled; zero-delay navigation through
       the per-load pivot, trampoline history entries replaced, chains capped at eight, `--dump` on
@@ -682,11 +690,29 @@ manual mouse walkthrough remain pending.
       and links. *Limits:* horizontal LTR rectangular margin boxes only; no `shape-outside`, logical
       directions/writing modes, `z-index`, deliberate negative-margin overlap, or positioned
       descendants whose containing block crosses the atomic float boundary.
-- [ ] **Perf gate:** largest corpus page layout+paint < 200 ms debug. Includes memoizing
-      `format_inline`, currently recomputed on every Taffy measure call, again for intrinsic width,
-      and again when emitting fragments; it also decides whether `DisplayList` can stay dense by row,
-      since the painter allocates one `PaintedRow` for the whole document height even when most rows
-      are empty.
+- [ ] **Perf gate (in progress):** the pinned Linux Wikipedia revision commits in <250 ms debug,
+      worker layout+paint is <200 ms, and no owner-sequence work slice exceeds 8 ms on the reference
+      Windows machine. Input, DOM and future JavaScript remain on one priority-ordered owner
+      sequence; every interactive HTML response uses incremental encoding_rs decoding and html5ever
+      parsing. Moving inline and external CSS parsing into a bounded owned-value processor remains
+      open. One bounded render worker cascades, lays out and paints before publishing revision-tagged
+      artifacts atomically. Hard revisions cover navigation, DOM/JavaScript, viewport, theme and
+      user state and reject stale output; network stylesheet/image arrivals are soft revisions whose
+      coherent intermediate output may paint before one coalesced latest render. Current benchmark-
+      profile fixture measurements are 27 ms parse/discovery across 13 slices, 3 ms maximum owner
+      slice, 6 ms snapshot and 222 ms worker render (45 ms cascade, 120 ms layout, 57 ms paint).
+      The 222 ms worker and roughly 255 ms total keep this item open. Retained invalidation
+      distinguishes style, layout and paint work.
+      `format_inline` measurement/emission reuse, allocation-free blank cells and indexed hit
+      resolution are part of the same gate. VGA presentation borrows the display list and both
+      frontends keep status-only damage independent of page image/overlay traversal. Dense painted
+      rows stay unless the fixture disproves it. Opt-in correlated timeline diagnostics are done.
+      A settled Linux-page wheel trace shows stationary-pointer hover changes currently issue hard
+      dynamic-state style invalidations and repeat the full cascade and layout; the next fix must
+      classify dynamic-selector effects so paint-only hover changes cannot trigger layout, while
+      layout-affecting selectors retain the fixed-point and hard-revision contract.
+      The fixture is revision `1371530035`, SHA-256
+      `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
 - [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
       config file · `data:` URL scheme · optional Readability-style reader view.
 

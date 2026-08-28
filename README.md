@@ -43,7 +43,8 @@ Ready                              https://example.com
   page cannot read local files through a `<link>`
 - HTTP requests identify the released TextSurfer version and project URL by default; `--user-agent`
   remains an exact override. Opt-in structured file diagnostics separate rate limits, transport
-  failures, unsupported formats and corrupt image data without writing to the terminal
+  failures, unsupported formats and corrupt image data; performance diagnostics add a correlated
+  Chrome/Perfetto timeline without writing to the terminal
 - Full HTML5 parsing via html5ever into an indextree-backed DOM (`<base href>`, quirks mode, foreign
   content, adoption agency, foster parenting, detached template fragments)
 - WHATWG encoding detection (BOM → header → `<meta charset>` prescan → UTF-8) and media-type routing:
@@ -141,6 +142,7 @@ $ cargo run --release                                  # VGA window and start pa
 $ cargo run --release -- --terminal                    # terminal compatibility frontend
 $ cargo run -- --url https://example.com               # VGA window at a URL
 $ cargo run -- --log-file textsurfer.log --url https://example.com
+$ cargo run -- --diagnostics target/diagnostics/run --url https://example.com
 $ cargo run -- --user-agent TextSurferDev/1 --js off
 $ cargo run -- --dump --cols 60 --rows 24 --url https://example.com   # render to stdout
 $ cargo run --release -- --vga-scale 2                 # 2x pixels, for HiDPI
@@ -153,6 +155,12 @@ Logging is disabled unless `--log-file` is supplied. The file is appended across
 to `textsurfer=debug`; set `RUST_LOG` to another tracing filter when needed. Diagnostic URLs omit
 credentials, query strings and fragments, but still contain hosts and paths, so inspect a log before
 sharing it.
+
+`--diagnostics <prefix>` is exclusive with `--log-file` and creates new `<prefix>.log` and
+`<prefix>.trace.json` files. It never overwrites an earlier capture. The log uses the fixed
+`textsurfer=debug,textsurfer::perf=trace` filter; open the JSON timeline in Perfetto or
+`chrome://tracing` to correlate parsing, invalidation, queueing, cascade, layout, paint, presentation
+and scrolling. Bodies, cookies and form values are not recorded.
 
 ## Key bindings
 

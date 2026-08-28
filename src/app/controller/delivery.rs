@@ -2,19 +2,22 @@ use std::time::Duration;
 
 use crate::core::geom::Size;
 use crate::core::style::RenderContext;
-use crate::net::{
-    FetchPayload, FetchPoll, ResourceId, charset_from_content_type, decode, decode_text,
-};
+use crate::net::{FetchPayload, FetchPoll, ResourceId, charset_from_content_type, decode_text};
 use crate::paint::DisplayList;
 use crate::pipeline::image::{ImageDecodeJob, ImageDecodePayload, ImageDecodePoll, ImageSubmitted};
-use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
-use crate::pipeline::render::{RenderedPage, ResponseKind, response_kind};
+use crate::pipeline::page_load::{PageLoad, PageLoadOptions, PendingPageLoad};
+use crate::pipeline::render::{
+    RenderKey, RenderPoll, RenderSubmitted, RenderedPage, ResponseKind, response_kind,
+};
 
 use super::super::tab::Tab;
 use super::App;
 
-const FETCH_RESULTS_PER_STEP: usize = 256;
-const LOAD_POLL: Duration = Duration::from_millis(50);
+const FETCH_RESULTS_PER_STEP: usize = 8;
+const LOAD_POLL: Duration = Duration::from_millis(8);
+const RENDER_POLL: Duration = Duration::from_millis(8);
+const PARSE_POLL: Duration = Duration::from_millis(1);
+const PARSE_BYTES_PER_STEP: usize = 64 * 1024;
 
 impl App {
     pub fn next_wake(&self) -> Option<Duration> {
@@ -26,8 +29,25 @@ impl App {
                 tab.document_pending || tab.load.as_ref().is_some_and(|load| !load.is_settled())
             })
             .then_some(self.now.saturating_add(LOAD_POLL));
+        let render = (self.render_inflight.is_some()
+            || self.render_retry.is_some()
+            || self
+                .tabs
+                .active()
+                .load
+                .as_ref()
+                .is_some_and(PageLoad::has_render_work))
+        .then_some(self.now.saturating_add(RENDER_POLL));
+        let parse = self
+            .tabs
+            .tabs()
+            .iter()
+            .any(|tab| tab.pending_load.is_some())
+            .then_some(self.now.saturating_add(PARSE_POLL));
         [
             load,
+            render,
+            parse,
             self.pending_resize.map(|(_, deadline)| deadline),
             self.dynamic_settle,
             self.flash_deadline(),
@@ -70,6 +90,7 @@ impl App {
         if image_decode_lost {
             self.report_image_decode_lost();
         }
+        let parsed_page_changed = self.advance_pending_parse();
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
         let display_changed = {
@@ -86,10 +107,248 @@ impl App {
                 false
             }
         };
+        let display_changed = self.advance_render_queue() || display_changed || parsed_page_changed;
         if display_changed {
             self.refresh_hover();
             self.touch();
         }
+        let progress_tick = now.as_millis() / 100;
+        if progress_tick != self.progress_tick {
+            self.progress_tick = progress_tick;
+            if self.load_progress().is_some() {
+                self.touch_status();
+            }
+        }
+    }
+
+    fn advance_pending_parse(&mut self) -> bool {
+        let active_index = self.tabs.active_index();
+        let Some(index) = self
+            .tabs
+            .tabs()
+            .iter()
+            .enumerate()
+            .find(|(index, tab)| *index == active_index && tab.pending_load.is_some())
+            .or_else(|| {
+                self.tabs
+                    .tabs()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, tab)| tab.pending_load.is_some())
+            })
+            .map(|(index, _)| index)
+        else {
+            return false;
+        };
+        self.advance_pending_parse_at(index)
+    }
+
+    fn advance_pending_parse_at(&mut self, index: usize) -> bool {
+        let active_index = self.tabs.active_index();
+        let completed = self.tabs.tabs_mut()[index]
+            .pending_load
+            .as_mut()
+            .and_then(|pending| pending.step(PARSE_BYTES_PER_STEP));
+        let Some(mut load) = completed else {
+            self.touch_status();
+            return false;
+        };
+        let tab_id = self.tabs.tabs()[index].id;
+        let generation = self.tabs.tabs()[index].generation;
+        tracing::trace!(
+            target: "textsurfer::perf",
+            tab_id,
+            generation,
+            parse_errors = load.parse_errors(),
+            stylesheets = load.external_occurrences(),
+            "document parse completed"
+        );
+        self.tabs.tabs_mut()[index].pending_load = None;
+        self.tabs.tabs_mut()[index].base = Some(load.base_url().clone());
+        if let Some(url) = load.immediate_refresh().cloned() {
+            self.tabs.tabs_mut()[index].load = Some(load);
+            self.tabs.tabs_mut()[index].message = format!("redirecting to {url}");
+            self.follow_declarative_refresh(tab_id, &url);
+            return index == active_index;
+        }
+        let commands = load.take_commands();
+        let image_commands = load.take_image_decode_commands();
+        let cancel = load.take_cancel_requested();
+        let _ = (index == active_index).then(|| load.render_if_ready(self.now));
+        self.tabs.tabs_mut()[index].load = Some(load);
+        self.tabs.tabs_mut()[index].render_dirty = index != active_index;
+        let count = self.tabs.tabs()[index]
+            .load
+            .as_ref()
+            .map_or(0, PageLoad::external_occurrences);
+        self.tabs.tabs_mut()[index].message = format!(
+            "loading {} ({count} stylesheets)",
+            self.tabs.tabs()[index].url
+        );
+        for command in commands {
+            let resource_id = command.resource_id;
+            let submitted = self
+                .net
+                .submit(tab_id, generation, resource_id, command.url);
+            if submitted == crate::net::Submitted::Closed {
+                let _ = self.deliver_fetch(FetchPayload {
+                    tab_id,
+                    generation,
+                    resource_id,
+                    result: Err(crate::net::FetchError::Network(
+                        "the network is not running".to_string(),
+                    )),
+                });
+            }
+        }
+        for request in image_commands {
+            let asset_id = request.asset_id;
+            let revision = request.revision;
+            if matches!(
+                self.images.submit(ImageDecodeJob {
+                    tab_id,
+                    generation,
+                    request,
+                }),
+                ImageSubmitted::Refused | ImageSubmitted::Closed
+            ) {
+                let _ = self.deliver_image_decode(ImageDecodePayload {
+                    tab_id,
+                    generation,
+                    asset_id,
+                    revision,
+                    result: Err(crate::core::image::ImageDecodeError::Unavailable),
+                });
+            }
+        }
+        if cancel {
+            self.net.cancel(tab_id, generation);
+        }
+        index == active_index
+    }
+
+    pub(super) fn advance_render_queue(&mut self) -> bool {
+        let mut display_changed = self.poll_render_result();
+        if self.render_inflight.is_none() {
+            let active = self.tabs.active();
+            let key = RenderKey {
+                tab_id: active.id,
+                generation: active.generation,
+                epoch: active.load.as_ref().map_or(0, PageLoad::render_epoch),
+                hard_epoch: active.load.as_ref().map_or(0, PageLoad::hard_epoch),
+            };
+            let retry = self.render_retry.take();
+            let retrying = retry.is_some();
+            let job = retry.or_else(|| {
+                self.tabs
+                    .active_mut()
+                    .load
+                    .as_mut()
+                    .and_then(|load| load.take_render_job(key))
+            });
+            if let Some(job) = job {
+                let job_key = job.key;
+                let causes = job.causes;
+                match self.renders.submit(job) {
+                    RenderSubmitted::Queued => {
+                        tracing::trace!(
+                            target: "textsurfer::perf",
+                            tab_id = job_key.tab_id,
+                            generation = job_key.generation,
+                            epoch = job_key.epoch,
+                            hard_epoch = job_key.hard_epoch,
+                            causes = %causes,
+                            retrying,
+                            "render job submitted"
+                        );
+                        self.render_inflight = Some(job_key);
+                        self.touch_status();
+                    }
+                    RenderSubmitted::Refused(job) => {
+                        tracing::trace!(
+                            target: "textsurfer::perf",
+                            tab_id = job.key.tab_id,
+                            generation = job.key.generation,
+                            epoch = job.key.epoch,
+                            causes = %job.causes,
+                            "render job refused"
+                        );
+                        self.render_retry = Some(job);
+                    }
+                    RenderSubmitted::Closed(job) => {
+                        tracing::trace!(
+                            target: "textsurfer::perf",
+                            tab_id = job.key.tab_id,
+                            generation = job.key.generation,
+                            epoch = job.key.epoch,
+                            causes = %job.causes,
+                            "render job lost"
+                        );
+                        self.report_render_lost();
+                    }
+                }
+            }
+        }
+        display_changed |= self.poll_render_result();
+        display_changed
+    }
+
+    fn poll_render_result(&mut self) -> bool {
+        let result = match self.renders.poll() {
+            RenderPoll::Ready(result) => *result,
+            RenderPoll::Empty => return false,
+            RenderPoll::Disconnected => {
+                self.report_render_lost();
+                return false;
+            }
+        };
+        if self.render_inflight == Some(result.key) {
+            self.render_inflight = None;
+        }
+        tracing::trace!(
+            target: "textsurfer::perf",
+            tab_id = result.key.tab_id,
+            generation = result.key.generation,
+            epoch = result.key.epoch,
+            hard_epoch = result.key.hard_epoch,
+            causes = %result.causes,
+            cascade_ms = result.timings.cascade.as_millis(),
+            layout_ms = result.timings.layout.as_millis(),
+            paint_ms = result.timings.paint.as_millis(),
+            "render result received"
+        );
+        let active_index = self.tabs.active_index();
+        let width = self.geometry.content_cols();
+        let rows = self.geometry.content_rows();
+        let Some((index, tab)) = self
+            .tabs
+            .find_load_mut(result.key.tab_id, result.key.generation)
+        else {
+            return false;
+        };
+        let Some(page) = tab
+            .load
+            .as_mut()
+            .and_then(|load| load.apply_render_result(result))
+        else {
+            return false;
+        };
+        apply_rendered_page(tab, page, width, rows);
+        update_load_message(tab);
+        index == active_index
+    }
+
+    fn report_render_lost(&mut self) {
+        if self.render_lost {
+            return;
+        }
+        self.render_lost = true;
+        self.render_inflight = None;
+        self.render_retry = None;
+        tracing::warn!("render worker disconnected");
+        self.tabs.active_mut().message =
+            "the renderer stopped responding - reopen TextSurfer".to_string();
+        self.touch();
     }
 
     /// Every fetch worker is gone, so nothing pending can ever complete. Say so once,
@@ -154,13 +413,14 @@ impl App {
         let mut commands = Vec::new();
         let mut image_commands = Vec::new();
         let mut cancel = false;
-        let mut declarative_refresh = None;
         let mut visible_change;
         let mut active_display_changed = false;
+        let accepted_index;
         let accepted = {
             let Some((index, tab)) = self.tabs.find_load_mut(tab_id, generation) else {
                 return false;
             };
+            accepted_index = index;
             visible_change = resource_id == ResourceId::DOCUMENT && index == active_index;
             if resource_id != ResourceId::DOCUMENT {
                 let Some(load) = tab.load.as_mut() else {
@@ -202,6 +462,7 @@ impl App {
                         // arms below rather than rendering bare.
                         let status_note =
                             (!response.is_success()).then(|| format!("HTTP {}", response.status));
+                        tab.response_note = status_note.clone();
                         let renders_body = response.is_success()
                             || (matches!(kind, ResponseKind::Html) && !response.body.is_empty());
                         if !renders_body {
@@ -221,56 +482,25 @@ impl App {
                         } else {
                             match kind {
                                 ResponseKind::Html => {
-                                    let decoded = decode(&response.body, charset.as_deref());
-                                    let mut load = PageLoad::new(
-                                        &decoded.text,
-                                        response.final_url,
-                                        decoded.encoding,
-                                        PageLoadOptions {
-                                            render: RenderContext {
-                                                viewport,
-                                                metrics: self.render_metrics,
-                                            },
-                                            palette,
-                                            scripting: false,
-                                            color_scheme,
-                                            started: self.now,
+                                    let options = PageLoadOptions {
+                                        render: RenderContext {
+                                            viewport,
+                                            metrics: self.render_metrics,
                                         },
-                                    );
-                                    tab.base = Some(load.base_url().clone());
-                                    if let Some(url) = load.immediate_refresh().cloned() {
-                                        tab.message = format!("redirecting to {url}");
-                                        tab.load = Some(load);
-                                        declarative_refresh = Some(url);
-                                    } else {
-                                        commands = load.take_commands();
-                                        image_commands = load.take_image_decode_commands();
-                                        cancel = load.take_cancel_requested();
-                                        let page = (index == active_index)
-                                            .then(|| load.render_if_ready(self.now))
-                                            .flatten();
-                                        tab.load = Some(load);
-                                        if let Some(page) = page {
-                                            apply_rendered_page(tab, page, width, rows);
-                                            update_load_message(tab);
-                                            // The server's own error page renders, but the
-                                            // reader still has to know it is one.
-                                            if let Some(note) = &status_note {
-                                                tab.message = format!("{note} - {}", tab.message);
-                                            }
-                                            active_display_changed = true;
-                                        } else {
-                                            tab.render_dirty = index != active_index;
-                                            let count = tab
-                                                .load
-                                                .as_ref()
-                                                .map_or(0, PageLoad::external_occurrences);
-                                            tab.message = format!(
-                                                "loading {} ({count} stylesheets)",
-                                                tab.url
-                                            );
-                                        }
-                                    }
+                                        palette,
+                                        scripting: false,
+                                        color_scheme,
+                                        started: self.now,
+                                    };
+                                    tab.load = None;
+                                    tab.pending_load = Some(PendingPageLoad::from_bytes(
+                                        response.body,
+                                        charset.as_deref(),
+                                        response.final_url,
+                                        options,
+                                    ));
+                                    tab.message = format!("parsing {}", tab.url);
+                                    active_display_changed = index == active_index;
                                 }
                                 ResponseKind::PlainText => {
                                     let decoded = decode_text(&response.body, charset.as_deref());
@@ -322,10 +552,6 @@ impl App {
                 true
             }
         };
-        if let Some(url) = declarative_refresh {
-            self.follow_declarative_refresh(tab_id, &url);
-            return accepted;
-        }
         let mut closed_resources = Vec::new();
         for command in commands {
             let resource_id = command.resource_id;
@@ -368,6 +594,17 @@ impl App {
         }
         if cancel {
             self.net.cancel(tab_id, generation);
+        }
+        if accepted
+            && resource_id == ResourceId::DOCUMENT
+            && self.advance_pending_parse_at(accepted_index)
+        {
+            active_display_changed = true;
+            visible_change = true;
+        }
+        if self.advance_render_queue() {
+            active_display_changed = true;
+            visible_change = true;
         }
         if active_display_changed {
             self.refresh_hover();
@@ -511,9 +748,13 @@ pub(super) fn update_load_message(tab: &mut Tab) {
     if let Some(note) = layout_note(tab) {
         notes.push(note.to_string());
     }
-    tab.message = if notes.is_empty() {
+    let message = if notes.is_empty() {
         format!("loaded {}", tab.url)
     } else {
         format!("loaded {} ({})", tab.url, notes.join(", "))
     };
+    tab.message = tab
+        .response_note
+        .as_ref()
+        .map_or(message.clone(), |note| format!("{note} - {message}"));
 }

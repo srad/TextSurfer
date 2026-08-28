@@ -181,6 +181,15 @@ impl FrameComposer {
     ) -> Result<(), B::Error> {
         let area = Rect::new(0, 0, view.geometry.size.cols, view.geometry.size.rows);
         self.resize(area);
+        let image_state_changed = !self.initialized
+            || damage.full()
+            || damage.content.full
+            || damage.content.scroll_rows != 0
+            || damage.content.repaint != RowDamage::None
+            || self
+                .image_worker
+                .as_ref()
+                .is_some_and(|worker| worker.signal.ready());
         let mut regions = Vec::new();
         let cursor = if !self.initialized || damage.full() {
             self.current.reset();
@@ -252,7 +261,8 @@ impl FrameComposer {
             }
             cursor_position(view, area)
         };
-        if self.compose_protocol_images(view)
+        if image_state_changed
+            && self.compose_protocol_images(view)
             && let Some(content) = content_rect(view, area)
             && !regions.contains(&content)
         {
@@ -347,7 +357,15 @@ impl FrameComposer {
             if placement.clip != placement.rect {
                 continue;
             }
-            if later_overlay_overlaps(view.content.painted, image_index) {
+            let viewport_end = view
+                .content
+                .scroll
+                .saturating_add(usize::from(content.height));
+            if placement.rect.row >= viewport_end
+                || placement.rect.row.saturating_add(placement.rect.height) <= view.content.scroll
+                || placement.rect.col.saturating_add(placement.rect.width)
+                    > usize::from(content.width)
+            {
                 continue;
             }
             let Some(image) = view.content.painted.image_assets.get(&placement.asset_id) else {
@@ -359,8 +377,7 @@ impl FrameComposer {
             let Ok(height) = u16::try_from(placement.rect.height) else {
                 continue;
             };
-            if placement.rect.col.saturating_add(placement.rect.width) > usize::from(content.width)
-            {
+            if later_overlay_overlaps(view.content.painted, image_index) {
                 continue;
             }
             let screen = Rect::new(

@@ -2,7 +2,7 @@ use crate::core::focus::Focus;
 
 use super::super::startpage::start_page_for;
 use super::super::tabs::FreshTab;
-use super::{App, STARTUP_HINT, apply_rendered_page, content_viewport, update_load_message};
+use super::{App, STARTUP_HINT, content_viewport};
 
 impl App {
     pub(super) fn new_tab(&mut self) {
@@ -46,19 +46,14 @@ impl App {
     }
 
     pub(super) fn activate_current(&mut self) {
-        let width = self.geometry.content_cols();
-        let rows = self.geometry.content_rows();
         let now = self.now;
         let tab = self.tabs.active_mut();
-        let page = match tab.load.as_mut() {
-            Some(load) if tab.render_dirty && load.has_painted() => Some(load.force_render()),
-            Some(load) => load.render_if_ready(now),
-            None => None,
-        };
-        if let Some(page) = page {
-            apply_rendered_page(tab, page, width, rows);
-            update_load_message(tab);
+        if let Some(load) = tab.load.as_mut() {
+            let _ = load.render_if_ready(now);
         }
-        tab.render_dirty = false;
+        if self.advance_render_queue() {
+            self.refresh_hover();
+            self.touch();
+        }
     }
 }

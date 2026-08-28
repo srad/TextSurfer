@@ -21,13 +21,18 @@ use crate::core::frame::FrameDamage;
 use crate::core::geom::{Point, Size};
 use crate::core::style::{RenderMetrics, TextRendering};
 use crate::pipeline::image::{ImageDecodePool, ImageDecodeQueue, RasterImageDecoder};
+#[cfg(test)]
+use crate::pipeline::render::InlineRenderQueue;
+#[cfg(not(test))]
+use crate::pipeline::render::ThreadedRenderQueue;
+use crate::pipeline::render::{RenderJob, RenderKey, RenderQueue};
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::widgets::text_field::{ClipboardAction, TextFieldState};
 
 use super::net::{Navigate, NoopNet};
 use super::startpage::start_page_for;
 use super::tabs::TabManager;
-use delivery::{apply_rendered_page, update_load_message};
+use delivery::apply_rendered_page;
 use flash::FlashNotice;
 use pointer::{HoverTarget, PressedTarget, ScrollDrag, TextFieldContext, TextFieldTarget};
 use viewport::content_viewport;
@@ -46,6 +51,9 @@ pub struct App {
     geometry: ChromeGeometry,
     net: Arc<dyn Navigate>,
     images: Arc<dyn ImageDecodeQueue>,
+    renders: Arc<dyn RenderQueue>,
+    render_inflight: Option<RenderKey>,
+    render_retry: Option<RenderJob>,
     menu_open: bool,
     menu_active: usize,
     menu_item: usize,
@@ -65,8 +73,10 @@ pub struct App {
     dynamic_settle: Option<Duration>,
     net_lost: bool,
     image_decode_lost: bool,
+    render_lost: bool,
     screenshot_request: bool,
     flash: Option<FlashNotice>,
+    progress_tick: u128,
 }
 
 impl Default for App {
@@ -102,10 +112,35 @@ impl App {
         )
     }
 
+    pub fn with_net_and_render_queue(
+        net: Arc<dyn Navigate>,
+        renders: Arc<dyn RenderQueue>,
+    ) -> Self {
+        Self::with_net_metrics_images_and_renders(
+            net,
+            RenderMetrics::TERMINAL,
+            Arc::new(ImageDecodePool::new(Arc::new(RasterImageDecoder))),
+            renders,
+        )
+    }
+
     pub(crate) fn with_net_metrics_and_images(
         net: Arc<dyn Navigate>,
         render_metrics: RenderMetrics,
         images: Arc<dyn ImageDecodeQueue>,
+    ) -> Self {
+        #[cfg(test)]
+        let renders: Arc<dyn RenderQueue> = Arc::new(InlineRenderQueue::default());
+        #[cfg(not(test))]
+        let renders: Arc<dyn RenderQueue> = Arc::new(ThreadedRenderQueue::new());
+        Self::with_net_metrics_images_and_renders(net, render_metrics, images, renders)
+    }
+
+    fn with_net_metrics_images_and_renders(
+        net: Arc<dyn Navigate>,
+        render_metrics: RenderMetrics,
+        images: Arc<dyn ImageDecodeQueue>,
+        renders: Arc<dyn RenderQueue>,
     ) -> Self {
         let geometry = ChromeGeometry::for_size(DEFAULT_SIZE);
         Self {
@@ -122,6 +157,9 @@ impl App {
             geometry,
             net,
             images,
+            renders,
+            render_inflight: None,
+            render_retry: None,
             menu_open: false,
             menu_active: 0,
             menu_item: 0,
@@ -141,8 +179,10 @@ impl App {
             dynamic_settle: None,
             net_lost: false,
             image_decode_lost: false,
+            render_lost: false,
             screenshot_request: false,
             flash: None,
+            progress_tick: 0,
         }
     }
 
@@ -155,6 +195,7 @@ impl App {
     pub fn shutdown_net(&self) {
         self.net.shutdown();
         self.images.shutdown();
+        self.renders.shutdown();
     }
 
     pub fn take_dirty(&mut self) -> bool {
@@ -202,6 +243,10 @@ impl App {
                     self.touch();
                 }
             }
+        }
+        if self.advance_render_queue() {
+            self.refresh_hover();
+            self.touch();
         }
     }
 

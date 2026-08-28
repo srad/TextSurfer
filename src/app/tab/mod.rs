@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use url::Url;
 
@@ -6,7 +7,7 @@ use crate::core::dom::SharedDocument;
 use crate::core::style::StyleTree;
 use crate::css::FocusedNode;
 use crate::paint::DisplayList;
-use crate::pipeline::page_load::PageLoad;
+use crate::pipeline::page_load::{PageLoad, PendingPageLoad};
 use crate::ui::widgets::text_field::TextFieldState;
 
 #[cfg(test)]
@@ -26,10 +27,12 @@ pub struct Tab {
     pub painted: DisplayList,
     pub message: String,
     pub document: Option<SharedDocument>,
-    pub styles: Option<StyleTree>,
+    pub styles: Option<Arc<StyleTree>>,
     pub load: Option<PageLoad>,
+    pub pending_load: Option<PendingPageLoad>,
     pub document_pending: bool,
     pub render_dirty: bool,
+    pub response_note: Option<String>,
     pub automatic_redirects: u8,
     pub(crate) dom_focus: Option<FocusedNode>,
     pub(crate) text_fields: HashMap<crate::core::dom::NodeId, TextFieldState>,
@@ -71,8 +74,10 @@ impl Tab {
             document: None,
             styles: None,
             load: None,
+            pending_load: None,
             document_pending: false,
             render_dirty: false,
+            response_note: None,
             automatic_redirects: 0,
             dom_focus: None,
             text_fields: HashMap::new(),

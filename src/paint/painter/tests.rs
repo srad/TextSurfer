@@ -591,7 +591,7 @@ fn topmost_paint_order_is_shared_by_hit_testing_and_link_activation() {
     let display = painted(&tree);
     assert_eq!(display.hit_test(2, 0), Some(overlay));
     assert!(display.link_at(2, 0).is_none());
-    assert_eq!(display.hit_rows.get(&0).map(Vec::len), Some(2));
+    assert_eq!(display.hit_rows.first().map(Vec::len), Some(2));
 }
 
 #[test]

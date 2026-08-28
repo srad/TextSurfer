@@ -4,7 +4,7 @@ pub mod file;
 pub mod http;
 pub mod pool;
 
-pub use encoding::{Decoded, charset_from_content_type, decode, decode_text};
+pub use encoding::{Decoded, charset_from_content_type, decode, decode_text, html_encoding};
 pub use fetch::{
     Fetch, FetchError, FetchPayload, FetchPoll, FetchRequest, FetchRequestKind, FetchResponse,
     MAX_BODY_BYTES, ResourceId, SchemeFetch, Submitted,

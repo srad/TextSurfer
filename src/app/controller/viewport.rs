@@ -109,6 +109,18 @@ impl App {
             return;
         }
         self.tabs.active_mut().scroll = next;
+        let active = self.tabs.active();
+        tracing::trace!(
+            target: "textsurfer::perf",
+            tab_id = active.id,
+            generation = active.generation,
+            from = current,
+            to = next,
+            delta,
+            max,
+            load_settled = active.load.as_ref().is_none_or(|load| load.is_settled()),
+            "page scrolled"
+        );
         self.damage.scroll(scroll_delta(current, next));
         self.refresh_hover();
     }

@@ -367,70 +367,84 @@ impl VgaApp {
         if damage.is_empty() && !self.force_full_present {
             return Ok(());
         }
+        let present_span = tracing::trace_span!(
+            target: "textsurfer::perf",
+            "vga_present",
+            full = damage.content.full,
+            scroll_rows = damage.content.scroll_rows,
+            repaint = ?damage.content.repaint,
+            forced = self.force_full_present
+        );
+        let _present_guard = present_span.enter();
         let content_changed = damage.content.full
             || damage.content.scroll_rows != 0
             || damage.content.repaint != RowDamage::None;
-        let view = self.app.chrome_view();
-        let size = self.backend.surface().size();
-        let area = ratatui::layout::Rect::new(0, 0, size.cols, size.rows);
-        let painted = view.content.painted.clone();
-        let reset_overlay = damage.content.full
-            || damage.content.repaint != RowDamage::None
-            || (damage.content.scroll_rows != 0 && !painted.images.is_empty());
-        let scaled = painted.scaled_text.clone();
-        let scroll = view.content.scroll;
-        let content = chrome::content_rect(&view, area);
-        let occlusions = chrome::occlusion_rects(&view, area)
-            .into_iter()
-            .map(layout_rect)
-            .collect::<Vec<_>>();
-        if reset_overlay {
-            self.backend.clear_scaled_overlay();
-        }
-        self.composer.present(&mut self.backend, &view, &damage)?;
-        // Only a scroll the composer actually retained leaves the rest of the band intact;
-        // a flash notice makes it repaint the whole thing, and every run has to go back.
-        let scaled = if damage.content.scroll_rows != 0
-            && !damage.content.full
-            && damage.content.repaint == RowDamage::None
-            && view.flash.is_none()
         {
-            let height = content.map_or(0, |rect| usize::from(rect.height));
-            let amount = damage.content.scroll_rows.unsigned_abs() as usize;
-            let exposed = if damage.content.scroll_rows > 0 {
-                scroll.saturating_add(height.saturating_sub(amount))..scroll.saturating_add(height)
-            } else {
-                scroll..scroll.saturating_add(amount.min(height))
-            };
-            scaled
+            let view = self.app.chrome_view();
+            let size = self.backend.surface().size();
+            let area = ratatui::layout::Rect::new(0, 0, size.cols, size.rows);
+            let painted = view.content.painted;
+            let reset_overlay = damage.content.full
+                || damage.content.repaint != RowDamage::None
+                || (damage.content.scroll_rows != 0 && !painted.images.is_empty());
+            let scroll = view.content.scroll;
+            let content = chrome::content_rect(&view, area);
+            let occlusions = chrome::occlusion_rects(&view, area)
                 .into_iter()
-                .filter(|run| {
-                    run.rect.row < exposed.end
-                        && run.rect.row.saturating_add(run.rect.height) > exposed.start
-                })
-                .collect::<Vec<_>>()
-        } else {
-            scaled
-        };
-        if content_changed && let Some(content) = content {
-            if painted.images.is_empty() {
-                self.backend.draw_scaled_text(
-                    &scaled,
-                    (content.x, content.y),
-                    scroll,
-                    layout_rect(content),
-                    &occlusions,
-                    self.app.theme().palette(),
-                );
-            } else {
-                self.backend.draw_overlays(
-                    &painted,
-                    (content.x, content.y),
-                    scroll,
-                    layout_rect(content),
-                    &occlusions,
-                    self.app.theme().palette(),
-                );
+                .map(layout_rect)
+                .collect::<Vec<_>>();
+            if reset_overlay {
+                self.backend.clear_scaled_overlay();
+            }
+            self.composer.present(&mut self.backend, &view, &damage)?;
+            if content_changed && let Some(content) = content {
+                if painted.images.is_empty() {
+                    if damage.content.scroll_rows != 0
+                        && !damage.content.full
+                        && damage.content.repaint == RowDamage::None
+                        && view.flash.is_none()
+                    {
+                        let height = usize::from(content.height);
+                        let amount = damage.content.scroll_rows.unsigned_abs() as usize;
+                        let exposed = if damage.content.scroll_rows > 0 {
+                            scroll.saturating_add(height.saturating_sub(amount))
+                                ..scroll.saturating_add(height)
+                        } else {
+                            scroll..scroll.saturating_add(amount.min(height))
+                        };
+                        for run in painted.scaled_text.iter().filter(|run| {
+                            run.rect.row < exposed.end
+                                && run.rect.row.saturating_add(run.rect.height) > exposed.start
+                        }) {
+                            self.backend.draw_scaled_text(
+                                std::slice::from_ref(run),
+                                (content.x, content.y),
+                                scroll,
+                                layout_rect(content),
+                                &occlusions,
+                                self.app.theme().palette(),
+                            );
+                        }
+                    } else {
+                        self.backend.draw_scaled_text(
+                            &painted.scaled_text,
+                            (content.x, content.y),
+                            scroll,
+                            layout_rect(content),
+                            &occlusions,
+                            self.app.theme().palette(),
+                        );
+                    }
+                } else {
+                    self.backend.draw_overlays(
+                        painted,
+                        (content.x, content.y),
+                        scroll,
+                        layout_rect(content),
+                        &occlusions,
+                        self.app.theme().palette(),
+                    );
+                }
             }
         }
         self.present()

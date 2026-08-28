@@ -1,5 +1,6 @@
 # Rust build output
 /target
+/target-verify
 
 # Insta pending snapshots (review, never commit blindly)
 *.snap.new

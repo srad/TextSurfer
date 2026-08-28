@@ -3,7 +3,8 @@ use encoding_rs::UTF_8;
 use super::*;
 use crate::core::image::ImageDecodeError;
 use crate::css::{DynamicState, FocusSource, FocusedNode};
-use crate::net::FetchError;
+use crate::net::{FetchError, FetchResponse};
+use crate::pipeline::render::RenderKey;
 use crate::ui::theme::PAPER_WHITE;
 
 fn load(source: &str) -> PageLoad {
@@ -19,6 +20,123 @@ fn load(source: &str) -> PageLoad {
             started: Duration::ZERO,
         },
     )
+}
+
+#[test]
+fn pending_documents_decode_character_boundaries_incrementally() {
+    for (body, charset, expected) in [
+        (
+            "<!doctype html><p>Grüße</p>".as_bytes().to_vec(),
+            None,
+            "Grüße",
+        ),
+        (b"\xFF\xFE<\0p\0>\0h\0i\0<\0/\0p\0>\0".to_vec(), None, "hi"),
+        (
+            b"<!doctype html><p>bad \xFF byte</p>".to_vec(),
+            Some("utf-8"),
+            "bad � byte",
+        ),
+    ] {
+        let total = body.len();
+        let mut pending = PendingPageLoad::from_bytes(
+            body,
+            charset,
+            Url::parse("https://example.com/incremental").unwrap(),
+            PageLoadOptions {
+                render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+                palette: Palette::default(),
+                scripting: false,
+                color_scheme: ColorScheme::Dark,
+                started: Duration::ZERO,
+            },
+        );
+        let mut completed = None;
+        while completed.is_none() {
+            completed = pending.step(1);
+        }
+        assert_eq!(pending.progress(), (total, total));
+        let page = completed.unwrap().force_render();
+        assert!(page.painted.text_lines().join("\n").contains(expected));
+    }
+}
+
+#[test]
+fn a_render_result_from_an_old_epoch_is_discarded() {
+    let mut load = load("<p>old layout</p>");
+    load.defer_rendering();
+    assert!(load.render_if_ready(Duration::ZERO).is_none());
+    let key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    let result = load.take_render_job(key).unwrap().execute();
+    assert!(
+        load.resize(Size { cols: 40, rows: 24 }).is_none(),
+        "deferred rendering must not publish on the owner thread"
+    );
+    assert!(load.apply_render_result(result).is_none());
+    assert!(load.has_render_work());
+}
+
+#[test]
+fn a_coherent_render_survives_a_late_stylesheet_soft_revision() {
+    let mut load = load("<link rel=stylesheet href=a.css><p>first paint</p>");
+    let command = load.take_commands().pop().unwrap();
+    load.defer_rendering();
+    assert!(load.render_if_ready(STYLESHEET_DEADLINE).is_none());
+    let key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    let result = load.take_render_job(key).unwrap().execute();
+    assert!(load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: b"p { color: red }".to_vec(),
+            content_type: Some("text/css".to_string()),
+        }),
+    ));
+    assert!(load.apply_render_result(result).is_some());
+    assert!(load.has_render_work());
+}
+
+#[test]
+fn coalesced_render_causes_follow_the_job_without_leaking_across_epochs() {
+    let mut load = load("<p>causes</p>");
+    load.defer_rendering();
+    assert!(load.render_if_ready(Duration::ZERO).is_none());
+    let initial_key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    let initial = load.take_render_job(initial_key).unwrap();
+    assert!(initial.causes.contains(RenderCause::Initial));
+    assert!(!initial.causes.contains(RenderCause::Viewport));
+
+    load.set_viewport(Size { cols: 40, rows: 24 });
+    load.invalidate_soft(RenderInvalidation::Layout, RenderCause::Image);
+    load.invalidate_soft(RenderInvalidation::Style, RenderCause::Stylesheet);
+    assert!(load.apply_render_result(initial.execute()).is_none());
+
+    let next_key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    let next = load.take_render_job(next_key).unwrap();
+    assert!(next.causes.contains(RenderCause::Viewport));
+    assert!(next.causes.contains(RenderCause::Image));
+    assert!(next.causes.contains(RenderCause::Stylesheet));
+    assert!(!next.causes.contains(RenderCause::Initial));
 }
 
 #[test]
@@ -127,8 +245,16 @@ fn a_local_page_may_still_load_its_own_local_stylesheets() {
 #[test]
 fn applicable_sheets_block_until_ready_and_nonmatching_sheets_do_not() {
     let mut matching = load("<link rel=stylesheet href='a.css'><p>x</p>");
-    assert!(matching.render_if_ready(Duration::from_secs(4)).is_none());
-    assert!(matching.render_if_ready(Duration::from_secs(5)).is_some());
+    assert!(
+        matching
+            .render_if_ready(Duration::from_millis(249))
+            .is_none()
+    );
+    assert!(
+        matching
+            .render_if_ready(Duration::from_millis(250))
+            .is_some()
+    );
 
     let mut print = load("<link rel=stylesheet media=print href='a.css'><p>x</p>");
     assert!(print.render_if_ready(Duration::ZERO).is_some());
@@ -371,7 +497,7 @@ fn deferred_color_context_marks_a_painted_page_dirty_and_noops_when_unchanged() 
     let mut load = load("<p>visible</p>");
     assert!(load.render_if_ready(Duration::ZERO).is_some());
     assert!(load.set_color_context(PAPER_WHITE.palette(), ColorScheme::Light));
-    assert!(load.dirty);
+    assert!(load.is_dirty());
     assert!(!load.set_color_context(PAPER_WHITE.palette(), ColorScheme::Light));
 }
 
@@ -598,6 +724,7 @@ fn decoded_images_replace_fallbacks_with_intrinsic_ordered_hit_geometry() {
         "<a href='/target'><img src='pixel.png' alt='fallback' style='width:32px;height:auto'></a>",
     );
     let before = load.force_render();
+    let before_styles = before.styles.clone();
     assert!(
         before
             .painted
@@ -628,6 +755,7 @@ fn decoded_images_replace_fallbacks_with_intrinsic_ordered_hit_geometry() {
         })
     ));
     let page = load.render_after_image().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before_styles, &page.styles));
     let node = *load.image_node_index.keys().next().unwrap();
     assert_eq!(
         page.styles.get(node).width,
@@ -962,7 +1090,7 @@ fn dynamic_state_restyles_only_when_author_or_ua_rules_can_observe_it() {
     let progress = (
         authored.first_painted,
         authored.final_painted,
-        authored.dirty,
+        authored.is_dirty(),
     );
     assert!(
         authored
@@ -976,7 +1104,7 @@ fn dynamic_state_restyles_only_when_author_or_ua_rules_can_observe_it() {
         (
             authored.first_painted,
             authored.final_painted,
-            authored.dirty
+            authored.is_dirty()
         ),
         progress
     );

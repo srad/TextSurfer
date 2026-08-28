@@ -447,14 +447,15 @@ impl App {
     }
 
     fn apply_form_page(&mut self, page: Option<RenderedPage>) {
-        let Some(page) = page else {
+        if let Some(page) = page {
+            let width = self.geometry.content_cols();
+            let rows = self.geometry.content_rows();
+            let tab = self.tabs.active_mut();
+            apply_rendered_page(tab, page, width, rows);
+        } else if !self.advance_render_queue() {
             return;
-        };
-        let width = self.geometry.content_cols();
-        let rows = self.geometry.content_rows();
-        let tab = self.tabs.active_mut();
-        apply_rendered_page(tab, page, width, rows);
-        tab.text_fields.clear();
+        }
+        self.tabs.active_mut().text_fields.clear();
         if self
             .tabs
             .active()

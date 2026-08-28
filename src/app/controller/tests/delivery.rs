@@ -1,5 +1,84 @@
 use super::*;
 
+struct RefuseOnceRenderQueue {
+    refused: std::sync::atomic::AtomicBool,
+    inline: crate::pipeline::render::InlineRenderQueue,
+}
+
+impl crate::pipeline::render::RenderQueue for RefuseOnceRenderQueue {
+    fn submit(
+        &self,
+        job: crate::pipeline::render::RenderJob,
+    ) -> crate::pipeline::render::RenderSubmitted {
+        if !self.refused.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            crate::pipeline::render::RenderSubmitted::Refused(job)
+        } else {
+            self.inline.submit(job)
+        }
+    }
+
+    fn poll(&self) -> crate::pipeline::render::RenderPoll {
+        self.inline.poll()
+    }
+}
+
+#[test]
+fn a_refused_render_job_is_retried_without_losing_its_invalidation() {
+    let net = Arc::new(FakeNet::default());
+    let renders = Arc::new(RefuseOnceRenderQueue {
+        refused: std::sync::atomic::AtomicBool::new(false),
+        inline: crate::pipeline::render::InlineRenderQueue::default(),
+    });
+    let mut app = App::with_net_and_render_queue(net, renders.clone());
+    app.submit_url("https://example.com/");
+    app.step(Duration::ZERO);
+    assert!(renders.refused.load(std::sync::atomic::Ordering::Acquire));
+    assert!(
+        app.tabs
+            .active()
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("hi there"))
+    );
+}
+
+#[test]
+fn a_large_document_is_parsed_across_owner_ticks() {
+    let net = Arc::new(FakeNet::default());
+    let mut app = App::with_net(net.clone());
+    app.submit_url("https://example.com/large");
+    let document = net.pending.lock().unwrap().pop().unwrap();
+    let html = format!(
+        "<!doctype html><!--{}--><p id=complete>large complete</p>",
+        "x".repeat(128 * 1024)
+    );
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/large").unwrap(),
+            status: 200,
+            body: html.into_bytes(),
+            content_type: Some("text/html".to_string()),
+        }),
+        ..document
+    }));
+    assert!(app.tabs.active().pending_load.is_some());
+    assert!(app.tabs.active().document.is_none());
+    app.step(Duration::from_millis(1));
+    assert!(app.tabs.active().pending_load.is_some());
+    app.step(Duration::from_millis(2));
+    app.step(Duration::from_millis(3));
+    assert!(app.tabs.active().pending_load.is_none());
+    assert!(
+        app.tabs
+            .active()
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line.contains("large complete"))
+    );
+}
+
 #[test]
 fn image_fetches_route_through_the_injected_decoder_by_tab_and_generation() {
     let net = Arc::new(FakeNet::default());
@@ -636,6 +715,7 @@ fn automatic_declarative_refresh_chains_are_bounded() {
     let mut app = App::with_net(fake);
     app.submit_url("https://example.com/loop");
     app.step(Duration::ZERO);
+    app.step(Duration::from_millis(1));
     assert_eq!(app.message(), "automatic redirect limit reached");
     assert!(!app.tabs.active().document_pending);
 }
@@ -661,7 +741,7 @@ fn one_step_cannot_be_starved_by_an_unending_result_source() {
 
         fn poll_result(&self) -> FetchPoll {
             let poll = self.polls.fetch_add(1, Ordering::Relaxed) + 1;
-            assert!(poll <= 256, "one app step exceeded its result budget");
+            assert!(poll <= 8, "one app step exceeded its result budget");
             FetchPoll::Ready(FetchPayload {
                 tab_id: u64::MAX,
                 generation: u64::MAX,
@@ -676,7 +756,7 @@ fn one_step_cannot_be_starved_by_an_unending_result_source() {
     });
     let mut app = App::with_net(net.clone());
     app.step(Duration::ZERO);
-    assert_eq!(net.polls.load(Ordering::Relaxed), 256);
+    assert_eq!(net.polls.load(Ordering::Relaxed), 8);
 }
 
 #[test]

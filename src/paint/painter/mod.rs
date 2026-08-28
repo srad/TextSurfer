@@ -23,7 +23,7 @@ pub use contrast::{legible_foreground, resolve_cell_style};
 pub struct DisplayList {
     pub rows: Vec<PaintedRow>,
     pub hits: Vec<HitRegion>,
-    pub hit_rows: BTreeMap<usize, Vec<usize>>,
+    pub hit_rows: Vec<Vec<usize>>,
     pub links: Vec<PaintedLink>,
     pub scaled_text: Vec<ScaledTextRun>,
     pub images: Vec<PaintedImage>,
@@ -136,7 +136,7 @@ impl DisplayList {
 
     pub fn hit_test(&self, col: usize, row: usize) -> Option<NodeId> {
         self.hit_rows
-            .get(&row)
+            .get(row)
             .into_iter()
             .flatten()
             .filter_map(|index| self.hits.get(*index))
@@ -153,7 +153,7 @@ impl DisplayList {
     pub fn link_at(&self, col: usize, row: usize) -> Option<&PaintedLink> {
         let topmost = self
             .hit_rows
-            .get(&row)
+            .get(row)
             .into_iter()
             .flatten()
             .filter_map(|index| self.hits.get(*index))
@@ -241,9 +241,9 @@ impl Painter for BasicPainter {
                     let row = rows
                         .entry(row_index)
                         .or_insert_with(|| RowBuffer::new(box_tree.width));
-                    row.write(
+                    row.fill_style(
                         rect.col,
-                        &" ".repeat(rect.width.min(box_tree.width.saturating_sub(rect.col))),
+                        rect.width.min(box_tree.width.saturating_sub(rect.col)),
                         reservation_style,
                     );
                 }
@@ -389,24 +389,35 @@ impl Painter for BasicPainter {
                 paint_order: hits.len(),
             });
         }
-        let mut hit_rows: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut hit_rows = vec![Vec::new(); box_tree.height];
         for (index, hit) in hits.iter().enumerate() {
-            for row in hit.rect.row..hit.rect.row.saturating_add(hit.rect.height) {
-                hit_rows.entry(row).or_default().push(index);
+            let end = hit
+                .rect
+                .row
+                .saturating_add(hit.rect.height)
+                .min(hit_rows.len());
+            for indices in &mut hit_rows[hit.rect.row.min(end)..end] {
+                indices.push(index);
             }
+        }
+        let mut node_hits: HashMap<NodeId, Vec<(LayoutRect, usize)>> = HashMap::new();
+        for hit in hits.iter().filter(|hit| hit.kind != HitKind::Box) {
+            node_hits
+                .entry(hit.node)
+                .or_default()
+                .push((hit.rect, hit.paint_order));
         }
         let links = box_tree
             .links
             .iter()
             .map(|link| {
-                let paint_order = hits
+                let paint_order = link
+                    .hit_nodes
                     .iter()
-                    .filter(|hit| {
-                        hit.kind != HitKind::Box
-                            && link.hit_nodes.contains(&hit.node)
-                            && link.rects.iter().any(|rect| covers(*rect, hit.rect))
-                    })
-                    .map(|hit| hit.paint_order)
+                    .filter_map(|node| node_hits.get(node))
+                    .flatten()
+                    .filter(|(hit_rect, _)| link.rects.iter().any(|rect| covers(*rect, *hit_rect)))
+                    .map(|(_, paint_order)| *paint_order)
                     .max()
                     .unwrap_or(0);
                 PaintedLink {

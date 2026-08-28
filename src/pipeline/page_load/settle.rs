@@ -4,8 +4,8 @@ use crate::core::style::Palette;
 use crate::css::ColorScheme;
 use crate::css::cascade::media_query_list_matches;
 
-use super::super::render::RenderedPage;
-use super::{FetchState, PageLoad, RootSource};
+use super::super::render::{RenderCause, RenderedPage};
+use super::{FetchState, PageLoad, RenderInvalidation, RootSource};
 
 impl PageLoad {
     pub fn set_color_context(&mut self, palette: Palette, color_scheme: ColorScheme) -> bool {
@@ -17,7 +17,7 @@ impl PageLoad {
             .media
             .with_palette(palette)
             .with_color_scheme(color_scheme);
-        self.dirty = true;
+        self.invalidate(RenderInvalidation::Style, RenderCause::Theme);
         true
     }
 
@@ -26,8 +26,7 @@ impl PageLoad {
             return None;
         }
         self.final_painted = self.applicable_graph_settled();
-        self.dirty = false;
-        Some(self.render_page())
+        self.render_or_defer()
     }
 
     pub fn render_if_ready(&mut self, now: Duration) -> Option<RenderedPage> {
@@ -38,13 +37,12 @@ impl PageLoad {
             }
             self.first_painted = true;
             self.final_painted = settled;
-            self.dirty = false;
-            return Some(self.render_page());
+            return self.render_or_defer();
         }
-        if !self.final_painted && settled && self.dirty {
+        if !self.final_painted && settled && self.is_dirty() {
             self.final_painted = true;
-            self.dirty = false;
-            return Some(self.render_page());
+            self.render_causes.insert(RenderCause::ResourceSettlement);
+            return self.render_or_defer();
         }
         None
     }
@@ -52,16 +50,18 @@ impl PageLoad {
     pub fn force_render(&mut self) -> RenderedPage {
         self.first_painted = true;
         self.final_painted = self.applicable_graph_settled();
-        self.dirty = false;
+        if self.invalidation.is_none() {
+            self.invalidation = Some(RenderInvalidation::Paint);
+            self.render_causes.insert(RenderCause::Forced);
+        }
         self.render_page()
     }
 
     pub fn render_after_image(&mut self) -> Option<RenderedPage> {
-        if !self.first_painted || !self.dirty {
+        if !self.first_painted || !self.is_dirty() {
             return None;
         }
-        self.dirty = false;
-        Some(self.render_page())
+        self.render_or_defer()
     }
 
     pub(super) fn applicable_graph_settled(&self) -> bool {

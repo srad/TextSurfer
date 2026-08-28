@@ -1,6 +1,7 @@
 mod delivery;
 mod discovery;
 mod images;
+mod pending;
 mod refresh;
 mod resource_url;
 mod settle;
@@ -10,6 +11,7 @@ mod sheets;
 mod tests;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use encoding_rs::Encoding;
@@ -24,12 +26,23 @@ use crate::core::geom::Size;
 use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeRequest};
 use crate::core::style::{Palette, RenderContext};
 use crate::css::{ColorScheme, DynamicState, MediaContext, MediaQueryList, StateDeps, StyleSheet};
-use crate::html::{Html5everParser, HtmlParser};
+use crate::html::{Html5everParser, HtmlParser, ParseOutcome};
 use crate::net::{FetchResponse, ResourceId};
 
-use super::render::RenderedPage;
+use super::render::{RenderCause, RenderCauses, RenderedPage};
+use crate::core::style::StyleTree;
+use crate::layout::BoxTree;
 
-pub const STYLESHEET_DEADLINE: Duration = Duration::from_secs(5);
+pub use pending::PendingPageLoad;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum RenderInvalidation {
+    Paint,
+    Layout,
+    Style,
+}
+
+pub const STYLESHEET_DEADLINE: Duration = Duration::from_millis(250);
 pub const MAX_EXTERNAL_OCCURRENCES: usize = 64;
 pub const MAX_IMPORT_DEPTH: usize = 8;
 pub const MAX_EXTERNAL_BYTES: usize = 32 * 1024 * 1024;
@@ -172,13 +185,82 @@ pub struct PageLoad {
     deadline: Duration,
     first_painted: bool,
     final_painted: bool,
-    dirty: bool,
+    invalidation: Option<RenderInvalidation>,
+    render_causes: RenderCauses,
+    cached_styles: Option<Arc<StyleTree>>,
+    cached_layout: Option<BoxTree>,
+    cached_css_warnings: usize,
+    deferred_rendering: bool,
+    render_epoch: u64,
+    hard_epoch: u64,
+    last_published_epoch: u64,
     state_deps: StateDeps,
 }
 
 impl PageLoad {
+    fn invalidate(&mut self, level: RenderInvalidation, cause: RenderCause) {
+        self.hard_epoch = self.hard_epoch.wrapping_add(1);
+        self.invalidate_soft(level, cause);
+    }
+
+    fn invalidate_soft(&mut self, level: RenderInvalidation, cause: RenderCause) {
+        let coalesced = self.invalidation.is_some();
+        if !coalesced {
+            self.render_epoch = self.render_epoch.wrapping_add(1);
+        }
+        self.invalidation = Some(
+            self.invalidation
+                .map_or(level, |current| current.max(level)),
+        );
+        self.render_causes.insert(cause);
+        tracing::trace!(
+            target: "textsurfer::perf",
+            epoch = self.render_epoch,
+            hard_epoch = self.hard_epoch,
+            invalidation = ?self.invalidation,
+            cause = ?cause,
+            causes = %self.render_causes,
+            coalesced,
+            "render invalidated"
+        );
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.invalidation.is_some()
+    }
+
+    pub fn defer_rendering(&mut self) {
+        self.deferred_rendering = true;
+    }
+
+    pub fn render_epoch(&self) -> u64 {
+        self.render_epoch
+    }
+
+    pub fn hard_epoch(&self) -> u64 {
+        self.hard_epoch
+    }
+
+    pub fn has_render_work(&self) -> bool {
+        self.first_painted && self.is_dirty()
+    }
+
+    fn render_or_defer(&mut self) -> Option<RenderedPage> {
+        (!self.deferred_rendering).then(|| self.render_page())
+    }
+
     pub fn new(
         source: &str,
+        document_url: Url,
+        html_encoding: &'static Encoding,
+        options: PageLoadOptions,
+    ) -> Self {
+        let outcome = Html5everParser::new(options.scripting).parse_document(source);
+        Self::from_outcome(outcome, document_url, html_encoding, options)
+    }
+
+    pub(crate) fn from_outcome(
+        outcome: ParseOutcome,
         document_url: Url,
         html_encoding: &'static Encoding,
         options: PageLoadOptions,
@@ -190,7 +272,6 @@ impl PageLoad {
             color_scheme,
             started,
         } = options;
-        let outcome = Html5everParser::new(scripting).parse_document(source);
         let effective_base = outcome
             .base_href
             .as_deref()
@@ -238,7 +319,15 @@ impl PageLoad {
             deadline: started.saturating_add(STYLESHEET_DEADLINE),
             first_painted: false,
             final_painted: false,
-            dirty: true,
+            invalidation: Some(RenderInvalidation::Style),
+            render_causes: RenderCauses::one(RenderCause::Initial),
+            cached_styles: None,
+            cached_layout: None,
+            cached_css_warnings: 0,
+            deferred_rendering: false,
+            render_epoch: 1,
+            hard_epoch: 1,
+            last_published_epoch: 0,
             state_deps: StateDeps::default(),
         };
         load.discover_document_sources(&effective_base);
@@ -266,8 +355,7 @@ impl PageLoad {
         self.set_viewport(viewport);
         if self.first_painted {
             self.final_painted = self.applicable_graph_settled();
-            self.dirty = false;
-            Some(self.render_page())
+            self.render_or_defer()
         } else {
             None
         }
@@ -276,7 +364,7 @@ impl PageLoad {
     pub fn set_viewport(&mut self, viewport: Size) {
         if self.media.viewport != viewport {
             self.media = self.media.with_viewport(viewport);
-            self.dirty = true;
+            self.invalidate(RenderInvalidation::Style, RenderCause::Viewport);
         }
     }
 
@@ -289,7 +377,8 @@ impl PageLoad {
         if !self.first_painted || !self.restyle_needed(previous, state) {
             return None;
         }
-        Some(self.render_page())
+        self.invalidate(RenderInvalidation::Style, RenderCause::DynamicState);
+        self.render_or_defer()
     }
 
     fn restyle_needed(&self, previous: DynamicState, next: DynamicState) -> bool {
@@ -381,12 +470,11 @@ impl PageLoad {
     }
 
     fn render_after_form_mutation(&mut self) -> Option<RenderedPage> {
-        self.dirty = true;
+        self.invalidate(RenderInvalidation::Style, RenderCause::FormState);
         if !self.first_painted {
             return None;
         }
-        self.dirty = false;
-        Some(self.render_page())
+        self.render_or_defer()
     }
 
     pub fn immediate_refresh(&self) -> Option<&Url> {
@@ -408,6 +496,23 @@ impl PageLoad {
                 .images
                 .iter()
                 .all(|image| matches!(image.state, ImageState::Ready(_) | ImageState::Failed))
+    }
+
+    pub fn resource_progress(&self) -> (usize, usize) {
+        let completed_fetches = self
+            .fetches
+            .iter()
+            .filter(|fetch| !matches!(fetch.state, FetchState::Pending))
+            .count();
+        let completed_images = self
+            .images
+            .iter()
+            .filter(|image| matches!(image.state, ImageState::Ready(_) | ImageState::Failed))
+            .count();
+        (
+            completed_fetches + completed_images,
+            self.fetches.len() + self.images.len(),
+        )
     }
 
     pub fn applicable_is_settled(&self) -> bool {

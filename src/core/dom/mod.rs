@@ -94,7 +94,7 @@ pub enum DomQuirksMode {
     NoQuirks,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Document {
     arena: Arena<Node>,
     roots: Vec<NodeId>,

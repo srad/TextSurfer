@@ -10,8 +10,9 @@ use crate::net::{
     FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId, charset_from_content_type,
 };
 
+use super::super::render::RenderCause;
 use super::resource_url::normalized_url;
-use super::{FetchState, MAX_EXTERNAL_BYTES, PageLoad};
+use super::{FetchState, MAX_EXTERNAL_BYTES, PageLoad, RenderInvalidation};
 
 struct EncodingRs;
 
@@ -79,7 +80,7 @@ impl PageLoad {
             }
         }
         self.process_materializations();
-        self.dirty = true;
+        self.invalidate_soft(RenderInvalidation::Style, RenderCause::Stylesheet);
         true
     }
 
@@ -196,6 +197,6 @@ impl PageLoad {
             occurrence.sheet = None;
             occurrence.imports.clear();
         }
-        self.dirty = true;
+        self.invalidate_soft(RenderInvalidation::Style, RenderCause::Stylesheet);
     }
 }
