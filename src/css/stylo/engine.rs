@@ -4,20 +4,23 @@ use style::context::{
     StyleContext, StyleSystemOptions, ThreadLocalStyleContext,
 };
 use style::dom::TElement;
+use style::driver;
 use style::selector_parser::SnapshotMap;
 use style::servo::animation::DocumentAnimationSet;
 use style::shared_lock::{SharedRwLock, StylesheetGuards};
 use style::style_resolver::{PseudoElementResolution, StyleResolverForElement};
 use style::stylist::{RuleInclusion, Stylist};
 use style::thread_state::{self, ThreadState};
+use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 
 use crate::core::geom::Size;
 use crate::core::style::CellMetric;
 
 use super::device::device;
-use super::dom::StyloElement;
+use super::dom::{StyleDom, StyloElement};
 use super::sheets;
+use super::traversal::RecalcStyle;
 
 /// The terminal has no paint worklets.
 #[derive(Debug)]
@@ -47,7 +50,6 @@ pub(super) fn mark_layout_thread() {
 pub(super) struct StyloEngine {
     lock: SharedRwLock,
     stylist: Stylist,
-    snapshots: SnapshotMap,
     painters: NoPainters,
 }
 
@@ -90,7 +92,6 @@ impl StyloEngine {
         Self {
             lock,
             stylist,
-            snapshots: SnapshotMap::new(),
             painters: NoPainters,
         }
     }
@@ -104,6 +105,7 @@ impl StyloEngine {
         f: impl FnOnce(&mut StyleContext<'_, StyloElement<'dom>>) -> R,
     ) -> R {
         let guard = self.lock.read();
+        let snapshots = SnapshotMap::new();
         let shared = SharedStyleContext {
             stylist: &self.stylist,
             visited_styles_enabled: false,
@@ -111,7 +113,7 @@ impl StyloEngine {
             guards: StylesheetGuards::same(&guard),
             current_time_for_animations: 0.0,
             traversal_flags: TraversalFlags::empty(),
-            snapshot_map: &self.snapshots,
+            snapshot_map: &snapshots,
             animations: DocumentAnimationSet::default(),
             registered_speculative_painters: &self.painters,
         };
@@ -121,6 +123,52 @@ impl StyloEngine {
             thread_local: &mut thread_local,
         };
         f(&mut context)
+    }
+
+    /// Cascade the whole tree, returning how many elements were styled.
+    pub(super) fn cascade(&self, dom: &StyleDom<'_>) -> usize {
+        self.traverse(dom, &SnapshotMap::new());
+        dom.styled_element_count()
+    }
+
+    /// Re-run the traversal against a populated snapshot map, returning how many elements Stylo
+    /// actually recomputed.
+    ///
+    /// There is no explicit invalidation call: `DomTraversal::pre_traverse` runs
+    /// `ElementData::invalidate_style_if_needed` on the root, and `note_children` runs it for every
+    /// child the traversal walks past, so the invalidator is driven for us. What the caller owes is
+    /// the snapshot bookkeeping in `super::invalidate`.
+    pub(super) fn restyle(&self, dom: &StyleDom<'_>, snapshots: &SnapshotMap) -> usize {
+        self.traverse(dom, snapshots)
+    }
+
+    /// The guard, the shared context and the traversal are all built here because each borrows the
+    /// one before it; none can be returned separately.
+    fn traverse(&self, dom: &StyleDom<'_>, snapshots: &SnapshotMap) -> usize {
+        let Some(root) = dom.root_element() else {
+            return 0;
+        };
+        let guard = self.lock.read();
+        let shared = SharedStyleContext {
+            stylist: &self.stylist,
+            visited_styles_enabled: false,
+            options: StyleSystemOptions::default(),
+            guards: StylesheetGuards::same(&guard),
+            current_time_for_animations: 0.0,
+            traversal_flags: TraversalFlags::empty(),
+            snapshot_map: snapshots,
+            animations: DocumentAnimationSet::default(),
+            registered_speculative_painters: &self.painters,
+        };
+        let token = RecalcStyle::pre_traverse(root, &shared);
+        if !token.should_traverse() {
+            // `traverse_dom` panics rather than no-opping on a token that says otherwise.
+            return 0;
+        }
+        let traversal = RecalcStyle::new(shared);
+        // `None` keeps this the sequential breadth-first walk: no rayon pool is ever built.
+        driver::traverse_dom(&traversal, token, None);
+        traversal.visited()
     }
 
     /// Resolve `element` and every unstyled ancestor above it, nearest-root first.

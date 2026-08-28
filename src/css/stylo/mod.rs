@@ -20,7 +20,9 @@
 mod device;
 mod dom;
 mod engine;
+mod invalidate;
 mod sheets;
+mod traversal;
 
 #[cfg(test)]
 mod tests;

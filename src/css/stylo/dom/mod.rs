@@ -115,6 +115,25 @@ impl<'a> StyleDom<'a> {
         None
     }
 
+    /// How many elements carry a resolved primary style.
+    ///
+    /// Reported beside a cascade timing so a fast traversal that skipped most of the tree cannot be
+    /// mistaken for a fast traversal that did the work.
+    pub(crate) fn styled_element_count(&self) -> usize {
+        self.by_dom_id
+            .values()
+            .filter_map(|node| StyloElement::new(node))
+            .filter(|element| element.primary_style().is_some())
+            .count()
+    }
+
+    /// Every mirrored element, in no particular order.
+    pub(crate) fn elements(&self) -> impl Iterator<Item = StyloElement<'a>> + '_ {
+        self.by_dom_id
+            .values()
+            .filter_map(|node| StyloElement::new(node))
+    }
+
     /// The mirrored element for a document node, if it was mirrored and is an element.
     pub(crate) fn element(&self, id: NodeId) -> Option<StyloElement<'a>> {
         self.by_dom_id
@@ -179,6 +198,24 @@ impl<'a> StyloElement<'a> {
         self.element().state.set(state);
     }
 
+    /// Tell Stylo a snapshot of this element's previous state is in the snapshot map.
+    pub(crate) fn note_snapshot(&self) {
+        let element = self.element();
+        element.has_snapshot.set(true);
+        element.handled_snapshot.set(false);
+    }
+
+    /// Forget any snapshot this element carries.
+    ///
+    /// Stylo never clears `has_snapshot` — it only ever sets `handled_snapshot` — so an embedder
+    /// that reuses a tree across restyles has to reset the pair itself. Skipping this makes the next
+    /// restyle inherit the previous one's snapshot.
+    pub(crate) fn forget_snapshot(&self) {
+        let element = self.element();
+        element.has_snapshot.set(false);
+        element.handled_snapshot.set(false);
+    }
+
     /// Safe wrappers over the `unsafe fn` items `TElement` declares.
     ///
     /// Those signatures exist for Gecko's benefit and their bodies are ordinary safe code, but
@@ -194,6 +231,11 @@ impl<'a> StyloElement<'a> {
 
     pub(crate) fn set_styles(&self, styles: style::data::ElementStyles) {
         unsafe { style::dom::TElement::ensure_data(self) }.styles = styles;
+    }
+
+    /// The `&mut ElementData` the traversal hands to `recalc_style_at`.
+    pub(crate) fn ensure_style_data(&self) -> style::data::ElementDataMut<'_> {
+        unsafe { style::dom::TElement::ensure_data(self) }
     }
 
     pub(crate) fn primary_style(&self) -> Option<ServoArc<ComputedValues>> {

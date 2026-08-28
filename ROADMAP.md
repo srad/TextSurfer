@@ -90,10 +90,11 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-28): **1,027 total** with the default VGA frontend and
-**920** with `--no-default-features`; `--features stylo` adds the 27 Stylo adapter and cascade tests
-for **1,054**. The WPT target contributes 6 passing tests (5 without `vga`), plus two deliberately
-ignored entries (the child worker and the VGA reference generator).
+Test counts at the last green run (2026-08-29): **1,027 total** with the default VGA frontend and
+**920** with `--no-default-features`; `--features stylo` adds the 33 Stylo adapter, cascade and
+invalidation tests for **1,060**. The WPT target contributes 6 passing tests (5 without `vga`).
+Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
+measurement, which reports rather than asserts.
 
 ### Open risk register
 
@@ -118,7 +119,12 @@ before any item is marked `(done)`. While M7 steps S1–S6 are open, a ninth row
 ## Session handoff
 
 1. Read this status board, then recent `git log` entries for historical context.
-2. M7 is the active item: work S1 → S7 in order, and stop at the S1 build spike if it fails.
+2. M7 is the active item. Both decisive gates have passed (cascade 457 → 27 ms, restyle 105 → 0.1 ms
+   on the live page), so the remaining risk is low and the remaining work is volume: **S4b maps 142
+   `core/style` fields out of Stylo's computed values**, and S2 · S5 · S6b · S7 are wiring and the
+   deletion of roughly 6,200 lines of custom cascade. Those four are separate only so each lands
+   with green gates and a reviewable diff; they are all blocked on the mapper and touch one seam, so
+   they can be run as a single switchover if fewer checkpoints are wanted.
 3. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
 4. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
@@ -762,12 +768,36 @@ manual mouse walkthrough remain pending.
 
 ### M7 — Stylo cascade (in progress)
 
-Replaces the custom cascade with [`stylo`](https://crates.io/crates/stylo) 0.20.0 behind the existing
-`Cascade` trait. Rationale and the reversed audit rows are above; the boundary is unchanged —
-`StyleTree` stays the contract, so `layout`, `paint` and `app` do not move. Stylo computes in CSS px
-and `css::stylo::map` converts to cells through the injected `RenderContext`, memoised on
+Replaces the custom cascade with [`stylo`](https://crates.io/crates/stylo) 0.20.0. The boundary is
+unchanged — `StyleTree` stays the contract, so `layout`, `paint` and `app` do not move. Stylo computes
+in CSS px and `css::stylo::map` converts to cells through the injected `RenderContext`, memoised on
 `Arc<ComputedValues>` pointer identity because Stylo's sharing cache gives long runs of elements one
 allocation.
+
+**Rationale, corrected against measurement (2026-08-28).** This milestone was opened on "the full
+cascade costs 566 ms on the real Wikipedia page". That is no longer the problem: the retained-restyle
+work (`142a2bb`) took hover cascade to **zero**, and a first render is layout-bound anyway (457 ms
+cascade against 1,798 ms layout). The measured case for Stylo is now a different one:
+
+- **`css/cascade/dynamic.rs:40` walks every element in the document on every dynamic-state change**,
+  which costs **105 ms per hover** on the live page — 56% of a 187 ms frame that is meant to fit in
+  16.667 ms. Stylo's invalidator visits only the elements whose selectors depend on the changed
+  state. This is the primary win, and S6 is where it lands.
+- The cold cascade, 457 ms of a 2,337 ms worker render, is the secondary win — real, but capped at a
+  fifth of that render.
+- Neither fixes hover on its own: paint is 82 ms, so a hover frame stays over budget until paint is
+  addressed too. That belongs to M6's perf gate, not here.
+
+The full measurement table is under the perf target below. The audit rows above still stand — the
+library-versus-hand-rolled argument is unaffected by which of the two costs is larger.
+
+**What is left, in proportion.** Both decisive gates have passed, so the remaining risk is low and
+the remaining work is volume. **S4b is the one large step**: 142 fields across `core/style` to map
+out of Stylo's computed values. S2, S5, S6b and S7 are wiring plus the deletion of roughly 6,200
+lines of custom cascade (`css/{ua,values,math,variables,presentational,selectors}` and
+`css/cascade/{declaration,document,dynamic,media}` and `css/effects.rs`). They are separate steps
+only so each lands with green gates and a reviewable diff; all four are blocked on the mapper and
+touch one seam, so they can run as a single switchover if fewer checkpoints are wanted.
 
 - [x] **S1 — build spike (passed).** `stylo` 0.20.0 sits behind the `stylo` cargo feature and
       **builds on Rust 1.90 / Windows MSVC** with Python 3.13.15 as `python`; no Gecko, bindgen,
@@ -817,7 +847,12 @@ allocation.
     falls back to its own constants rather than a terminal-derived value.
 - [ ] **S2 — interface refactor.** `StyleInput`/`StyleSession`; the retained and dynamic entry
       points move off `BasicCascade`'s inherent impl onto the trait. *Deferred to after S4* because
-      the second implementation is what reveals the right boundary.
+      the second implementation is what reveals the right boundary — and because of a hard blocker
+      found while planning S4: `Cascade::apply_with_form_state` takes `&[StyleSheet]`, and
+      `StyleSheet { rules, diagnostics, state_deps }` keeps **no source text**. Stylo parses CSS
+      itself, so satisfying that signature would mean re-serialising our AST back into CSS. The
+      trait cannot carry a second engine until it carries source rather than a parsed AST, which is
+      what this step is for.
       *Session ownership moves in S6, not here.* `CascadeState` is `Send` and travels in the job
       today, so nothing forces the move yet; the Stylo session is `!Send`, and `RenderQueue: Sync`
       means neither the test-only `InlineRenderQueue` nor the free `RenderJob::execute` can hold one.
@@ -826,14 +861,56 @@ allocation.
       S5, where Stylo takes over parsing — moving it earlier would relocate CSS parsing off the
       owner sequence, which is a behaviour change, not a refactor. The prescan is exact, not a
       heuristic: CSS requires `@import` before every other rule.
-- [ ] **S4 — cascade and mapper.** `StyloCascade` plus the full `ComputedValues` → `ComputedStyle`
+- [x] **S4a — whole-tree traversal (done; gate passed decisively).** `RecalcStyle` implements
+      `DomTraversal` and `StyloEngine::cascade` runs `driver::traverse_dom(_, _, None)` — the
+      sequential breadth-first walk, no rayon pool. On the committed live page, release profile,
+      reference machine:
+
+      | | custom cascade | Stylo |
+      |---|---|---|
+      | cascade | 457 ms | **26.7 ms** |
+      | stylesheet parse + rule database | (in the 41 ms parse/discovery) | 13.4 ms |
+      | mirror build | — | 8.4 ms |
+
+      **A 17× improvement on the cascade**, styling 7,789 elements out of 15,897 mirrored nodes. The
+      gate wanted cascade + mapping under ~130 ms; the cascade alone uses 27 ms of that, leaving
+      ~100 ms for the S4b mapper — a wide margin.
+      *Scope of the win, stated honestly:* this takes the live page's first render from 2,337 ms to
+      roughly 1,900 ms, because layout is 1,798 ms of it. The larger prize is still S6.
+      The measurement is `css::stylo::tests::measure_the_live_page_cascade`, `#[ignore]`d because a
+      timing assertion in a standing gate row would be flaky; its other half is
+      `benches/linux_live.rs`. It cannot be a bench: `css::stylo` is private, and benches see only
+      the public surface.
+- [ ] **S4b — mapper.** The full `ComputedValues` → `ComputedStyle`
       mapping. The cascade suites run both impls in one process as a differential oracle; the
       layout, paint and golden suites are not duplicated — the `--features stylo` gate row covers
       them.
 - [ ] **S5 — media queries and generated content.** `MediaContext` maps onto `Device`; the terminal
       MQ grammar retires. Counter and marker resolution stays ours, fed by Stylo's computed
       `content`.
-- [ ] **S6 — dynamic state.** `ElementState`, snapshots and restyle hints replace
+- [x] **S6a — invalidation measured (done; the milestone's central claim, confirmed).** Snapshot the
+      previous `ElementState`, mark the ancestor chain dirty, re-run the traversal. On the committed
+      live page, hovering a link:
+
+      | | custom engine | Stylo |
+      |---|---|---|
+      | restyle | 105 ms | **0.1 ms** |
+      | elements visited | all 7,789 | **16** |
+
+      The 16 are the 13-element hover chain plus three the invalidator found through selectors. This
+      is the difference between walking a document and consulting a dependency map, and it is what
+      M7 is now for.
+      *Read as an upper bound:* Stylo's restyle stops at `ComputedValues` while the custom path also
+      produces `ComputedStyle` and clones the whole `StyleTree` (`css/cascade/dynamic.rs:37`). S6b
+      re-measures with the mapper in place.
+      *Learned here:* Stylo never clears `has_snapshot` — only `set_handled_snapshot` is ever called
+      — so the embedder resets the snapshot bits between restyles or the next one diffs against a
+      stale snapshot. And there is **no manual invalidation call**: `DomTraversal::pre_traverse` and
+      `note_children` both run `ElementData::invalidate_style_if_needed`, so driving
+      `TreeStyleInvalidator` by hand would duplicate the engine.
+      Hover is a chain, matching `css::ua`'s `on_chain`: the link and every ancestor are hovered, so
+      all of them are snapshotted.
+- [ ] **S6b — dynamic state in production.** `ElementState`, snapshots and restyle hints replace
       `css/cascade/dynamic.rs` and `css/effects.rs`. `StateDeps` retires into Stylo's invalidation
       map, which gates per element rather than per document. Impact classification stays ours:
       `core::style::dynamic`'s `layout_compatible_with`/`paint_compatible_with` compare the *mapped*

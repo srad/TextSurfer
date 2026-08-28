@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 use app_units::Au;
 use style::context::QuirksMode;
 use style::dom::TElement;
+use stylo_dom::ElementState;
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
 use crate::core::geom::Size;
@@ -43,8 +44,10 @@ fn engine(author_css: &[&str]) -> StyloEngine {
 }
 
 /// Computed `border-top-width`, the cleanest scalar computed value Stylo exposes — a bare `Au`.
-/// Every caller pairs it with `border-top-style: solid`, because a `none` border style computes
-/// its width to zero and would mask whatever the length actually resolved to.
+///
+/// Every caller declares an explicit width. Stylo's *computed* value here is the specified length
+/// — it does not zero for `border-style: none`, which is a used-value concern the layout applies —
+/// so an element with no declaration reads as `medium`, 3px, rather than 0.
 fn border_top(element: StyloElement<'_>) -> Au {
     element
         .primary_style()
@@ -256,6 +259,249 @@ fn em_resolves_against_the_inherited_font_size() {
 
     engine.resolve_with_ancestors(paragraph);
     assert_eq!(border_top(paragraph), Au::from_px(20));
+}
+
+/// The M7 perf measurement, reported rather than asserted.
+///
+/// Run with `cargo test --features stylo --release -- --ignored --nocapture`. It is `#[ignore]`d
+/// because a timing assertion in the standing gate rows would be flaky; the gate decision is made
+/// by reading this against `benches/linux_live.rs`, which measures the same page through the custom
+/// cascade. Node counts are reported alongside because a fast traversal that skipped most of the
+/// tree is a different result from a fast traversal that did the work.
+#[test]
+#[ignore = "perf measurement, not an assertion; see benches/linux_live.rs for the other half"]
+fn measure_the_live_page_cascade() {
+    const PAGE: &str = include_str!("../../../tests/fixtures/linux-live/page.html");
+    const MODULES_CSS: &str = include_str!("../../../tests/fixtures/linux-live/modules.css");
+    const SITE_CSS: &str = include_str!("../../../tests/fixtures/linux-live/site.css");
+
+    use crate::html::HtmlParser;
+
+    let parsed = std::time::Instant::now();
+    let outcome = crate::html::Html5everParser::new(false).parse_document(PAGE);
+    let document = outcome.document.borrow();
+    let parse = parsed.elapsed();
+
+    let built = std::time::Instant::now();
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+    let build = built.elapsed();
+
+    let started = std::time::Instant::now();
+    let engine = StyloEngine::new(
+        CellMetric::DEFAULT,
+        Size {
+            cols: 120,
+            rows: 40,
+        },
+        QuirksMode::NoQuirks,
+        &[MODULES_CSS, SITE_CSS],
+    );
+    let stylist = started.elapsed();
+
+    let cascaded = std::time::Instant::now();
+    let styled = engine.cascade(&dom);
+    let cascade = cascaded.elapsed();
+
+    println!("linux-live — Stylo cascade");
+    println!(
+        "  html parse      : {:>7.1} ms",
+        parse.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  mirror build    : {:>7.1} ms",
+        build.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  stylist (parse 2 sheets + flush) : {:>7.1} ms",
+        stylist.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  cascade         : {:>7.1} ms",
+        cascade.as_secs_f64() * 1000.0
+    );
+    println!("  mirrored nodes  : {}", dom.len());
+    println!("  styled elements : {styled}");
+
+    // The hover path: what M7 is now aimed at. The custom engine walks every element in the
+    // document for this (`css/cascade/dynamic.rs:40`) and takes 105 ms on the same page.
+    let link = dom
+        .elements()
+        .find(selectors::Element::is_link)
+        .expect("the page has links");
+    let chain = super::invalidate::hover_chain(link);
+
+    let changed = std::time::Instant::now();
+    let change = super::invalidate::StateChange::apply(&dom, &chain, ElementState::HOVER);
+    let snapshot = changed.elapsed();
+
+    let restyled = std::time::Instant::now();
+    let visited = engine.restyle(&dom, change.snapshots());
+    let restyle = restyled.elapsed();
+
+    println!();
+    println!(
+        "  hover chain     : {} elements (the link and its ancestors)",
+        chain.len()
+    );
+    println!(
+        "  snapshot + reset: {:>7.1} ms",
+        snapshot.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  restyle         : {:>7.1} ms   (custom engine: 105 ms)",
+        restyle.as_secs_f64() * 1000.0
+    );
+    println!("  elements visited: {visited} of {styled}");
+    println!();
+    println!("  NOTE: no ComputedStyle mapping is included — that is S4b. The custom engine's");
+    println!("  105 ms also clones the whole StyleTree, so read this as an upper bound.");
+}
+
+/// `<html><body><a href><span/></a> <p/> …siblings… </body></html>`
+fn hover_fixture(siblings: usize) -> (Document, NodeId, NodeId, NodeId) {
+    let mut document = Document::new();
+    let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
+    let anchor = document.insert_element(
+        Some(body),
+        "a",
+        ElementNs::Html,
+        vec![Attr::plain("href", "/somewhere")],
+    );
+    let inner = document.insert_element(Some(anchor), "span", ElementNs::Html, vec![]);
+    let bystander = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
+    for _ in 0..siblings {
+        document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
+    }
+    (document, anchor, inner, bystander)
+}
+
+fn hover<'dom>(dom: &StyleDom<'dom>, engine: &StyloEngine, element: StyloElement<'dom>) -> usize {
+    let chain = crate::css::stylo::invalidate::hover_chain(element);
+    let change =
+        crate::css::stylo::invalidate::StateChange::apply(dom, &chain, ElementState::HOVER);
+    engine.restyle(dom, change.snapshots())
+}
+
+#[test]
+fn a_hover_restyles_the_hovered_element_and_leaves_its_neighbours_alone() {
+    let engine = engine(&[
+        "a { border-top-style: solid; border-top-width: 1px }",
+        "a:hover { border-top-width: 4px }",
+    ]);
+    let (document, anchor, _, bystander) = hover_fixture(0);
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+    engine.cascade(&dom);
+
+    let anchor = element(&dom, anchor);
+    let bystander = element(&dom, bystander);
+    let before_anchor = anchor.primary_style().expect("styled");
+    let before_bystander = bystander.primary_style().expect("styled");
+    assert_eq!(border_top(anchor), Au::from_px(1), "not hovered yet");
+
+    hover(&dom, &engine, anchor);
+
+    let after_anchor = anchor.primary_style().expect("styled");
+    let after_bystander = bystander.primary_style().expect("styled");
+    assert_eq!(border_top(anchor), Au::from_px(4), "the hover rule applied");
+    assert!(
+        !servo_arc::Arc::ptr_eq(&before_anchor, &after_anchor),
+        "the hovered element got a fresh style"
+    );
+    assert!(
+        servo_arc::Arc::ptr_eq(&before_bystander, &after_bystander),
+        "an unrelated sibling keeps the very same computed values"
+    );
+}
+
+/// The invalidator has to be consulted for this: a self-only shortcut would leave the `span` alone.
+#[test]
+fn a_descendant_selector_hover_restyles_the_descendant() {
+    let engine = engine(&[
+        "span { border-top-style: solid; border-top-width: 1px }",
+        "a:hover span { border-top-width: 7px }",
+    ]);
+    let (document, anchor, inner, _) = hover_fixture(0);
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+    engine.cascade(&dom);
+
+    let anchor = element(&dom, anchor);
+    let inner = element(&dom, inner);
+    assert_eq!(border_top(inner), Au::from_px(1));
+
+    hover(&dom, &engine, anchor);
+    assert_eq!(border_top(inner), Au::from_px(7));
+}
+
+/// A standing M7 adoption gate: growing unrelated siblings must not grow the restyled-node count.
+#[test]
+fn hover_locality_does_not_degrade_as_the_document_grows() {
+    let visited_for = |siblings: usize| {
+        let engine = engine(&[
+            "a { border-top-style: solid; border-top-width: 1px }",
+            "a:hover { border-top-width: 4px }",
+        ]);
+        let (document, anchor, _, _) = hover_fixture(siblings);
+        let arena = StyleArena::new();
+        let dom = mirror(&arena, &document);
+        engine.cascade(&dom);
+        hover(&dom, &engine, element(&dom, anchor))
+    };
+
+    let small = visited_for(1_000);
+    let large = visited_for(10_000);
+    assert_eq!(
+        small, large,
+        "a local hover must not restyle more elements just because the document grew"
+    );
+}
+
+#[test]
+fn one_traversal_styles_the_whole_tree() {
+    let engine = engine(&[]);
+    let (document, ids) = document(&[("p", vec![]), ("span", vec![])]);
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+
+    let styled = engine.cascade(&dom);
+    assert_eq!(styled, ids.len(), "every element resolves in one pass");
+    for id in ids {
+        assert!(element(&dom, id).primary_style().is_some());
+    }
+}
+
+#[test]
+fn a_traversal_over_an_empty_document_styles_nothing_rather_than_panicking() {
+    let engine = engine(&[]);
+    let document = Document::new();
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+
+    // `traverse_dom` panics on a token that says not to traverse, so the entry point has to check.
+    assert_eq!(engine.cascade(&dom), 0);
+}
+
+#[test]
+fn a_traversal_applies_author_rules_across_the_tree() {
+    let engine = engine(&["span { display: none }"]);
+    let (document, ids) = document(&[("p", vec![]), ("span", vec![])]);
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+    engine.cascade(&dom);
+
+    let display_none = |id| {
+        element(&dom, id)
+            .primary_style()
+            .expect("resolved")
+            .get_box()
+            .clone_display()
+            .is_none()
+    };
+    assert!(display_none(ids[3]), "<span> matched the author rule");
+    assert!(!display_none(ids[2]), "<p> did not");
 }
 
 #[test]
