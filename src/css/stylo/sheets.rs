@@ -18,6 +18,14 @@ span, a, em, strong, b, i { display: inline }
 p { margin-top: 1em; margin-bottom: 1em }
 ";
 
+/// The user-agent sheet plus the rule that seeds `ComputedStyle::color`'s "theme decides" sentinel.
+///
+/// Kept out of [`UA_CSS`] so the constant stays readable as a policy list while the sentinel stays
+/// beside the mapper constant it has to agree with.
+fn ua_css() -> String {
+    format!("{UA_CSS}html {{ color: {} }}\n", super::map::SENTINEL_CSS)
+}
+
 /// The base URL every synthetic sheet is parsed against. Sheets that come from the network carry
 /// their own; nothing here resolves a relative URL, but `Stylesheet::from_str` requires one.
 pub(super) fn base_url() -> UrlExtraData {
@@ -50,7 +58,7 @@ pub(super) fn parse(
 }
 
 pub(super) fn user_agent_sheet(lock: &SharedRwLock, quirks_mode: QuirksMode) -> DocumentStyleSheet {
-    parse(UA_CSS, Origin::UserAgent, lock, quirks_mode)
+    parse(&ua_css(), Origin::UserAgent, lock, quirks_mode)
 }
 
 pub(super) fn author_sheet(

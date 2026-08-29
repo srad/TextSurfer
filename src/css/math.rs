@@ -1,6 +1,8 @@
 use cssparser::{ParseError, Parser, ParserInput, Token};
 
-use crate::core::style::{CssCalcExpr, CssLength, CssLengthUnit, FontSize, LengthAxis};
+#[cfg(feature = "stylo")]
+use crate::core::geom::Size;
+use crate::core::style::{CellMetric, CssCalcExpr, CssLength, CssLengthUnit, FontSize, LengthAxis};
 
 use super::cascade::MediaContext;
 
@@ -38,17 +40,33 @@ impl ParsedMath {
         output_axis: LengthAxis,
         basis_axis: LengthAxis,
     ) -> Option<CssCalcExpr> {
-        let output_px = match output_axis {
-            LengthAxis::Horizontal => media.cell_metric.column_px(),
-            LengthAxis::Vertical => media.cell_metric.row_px(),
-        };
-        let basis_px = match basis_axis {
-            LengthAxis::Horizontal => media.cell_metric.column_px(),
-            LengthAxis::Vertical => media.cell_metric.row_px(),
-        };
         self.lower(
             &|length| media.resolve_fractional_cells(length, output_axis),
-            basis_px as f32 / output_px as f32,
+            percent_scale(media.cell_metric, output_axis, basis_axis),
+        )
+    }
+
+    /// [`Self::lower_cells`] for a caller that has no [`MediaContext`].
+    ///
+    /// The Stylo mapper (`css::stylo::map`) reaches this with expressions Stylo has already
+    /// computed, so the font-relative units `MediaContext` exists to resolve cannot appear. The
+    /// cell metric and viewport are the whole of what is left. Both entry points share the
+    /// percentage scale, which is the part that is easy to get wrong.
+    #[cfg(feature = "stylo")]
+    pub(in crate::css) fn lower_cells_with_metric(
+        &self,
+        cell: CellMetric,
+        viewport: Size,
+        output_axis: LengthAxis,
+        basis_axis: LengthAxis,
+    ) -> Option<CssCalcExpr> {
+        let cell_px = f64::from(match output_axis {
+            LengthAxis::Horizontal => cell.column_px(),
+            LengthAxis::Vertical => cell.row_px(),
+        });
+        self.lower(
+            &|length| (cell.css_pixels(length, viewport) / cell_px) as f32,
+            percent_scale(cell, output_axis, basis_axis),
         )
     }
 
@@ -129,11 +147,34 @@ struct Limits {
     nodes: usize,
 }
 
+/// What a percentage is multiplied by once its basis is expressed in output-axis cells.
+///
+/// A percentage resolves against a basis measured on `basis_axis` but the expression is evaluated
+/// in `output_axis` cells, so a vertical margin of `50%` — basis width, output rows — is scaled by
+/// `column_px / row_px`. Getting this wrong is invisible to the type system and off by the cell
+/// aspect ratio.
+fn percent_scale(cell: CellMetric, output_axis: LengthAxis, basis_axis: LengthAxis) -> f32 {
+    let axis_px = |axis| match axis {
+        LengthAxis::Horizontal => cell.column_px(),
+        LengthAxis::Vertical => cell.row_px(),
+    };
+    f32::from(axis_px(basis_axis)) / f32::from(axis_px(output_axis))
+}
+
 pub(super) fn parse_length_percentage(
     source: &str,
     media: MediaContext,
     axis: LengthAxis,
 ) -> Option<CssCalcExpr> {
+    parse_length_percentage_source(source)?.lower_cells(media, axis, axis)
+}
+
+/// Parse a whole `<length-percentage>` — bare length, bare percentage, or math function — without
+/// lowering it.
+///
+/// [`parse_math`] is not a substitute: it requires a function token, so it rejects the bare `10px`
+/// a Stylo `calc()` whose node collapsed to a single leaf serialises to.
+pub(in crate::css) fn parse_length_percentage_source(source: &str) -> Option<ParsedMath> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let mut limits = Limits { depth: 0, nodes: 0 };
@@ -141,7 +182,7 @@ pub(super) fn parse_length_percentage(
         return None;
     };
     parser.expect_exhausted().ok()?;
-    value.lower_cells(media, axis, axis)
+    Some(value)
 }
 
 pub(super) fn parse_length_percentage_parser(

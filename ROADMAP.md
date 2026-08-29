@@ -91,8 +91,9 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
 Test counts at the last green run (2026-08-29): **1,027 total** with the default VGA frontend and
-**920** with `--no-default-features`; `--features stylo` adds the 33 Stylo adapter, cascade and
-invalidation tests for **1,060**. The WPT target contributes 6 passing tests (5 without `vga`).
+**920** with `--no-default-features`; `--features stylo` adds the 77 Stylo adapter, cascade,
+invalidation, mapper and differential-oracle tests for **1,104**. The WPT target contributes 6
+passing tests (5 without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
 
@@ -120,11 +121,12 @@ before any item is marked `(done)`. While M7 steps S1–S6 are open, a ninth row
 
 1. Read this status board, then recent `git log` entries for historical context.
 2. M7 is the active item. Both decisive gates have passed (cascade 457 → 27 ms, restyle 105 → 0.1 ms
-   on the live page), so the remaining risk is low and the remaining work is volume: **S4b maps 142
-   `core/style` fields out of Stylo's computed values**, and S2 · S5 · S6b · S7 are wiring and the
-   deletion of roughly 6,200 lines of custom cascade. Those four are separate only so each lands
-   with green gates and a reviewable diff; they are all blocked on the mapper and touch one seam, so
-   they can be run as a single switchover if fewer checkpoints are wanted.
+   on the live page), so the remaining risk is low and the remaining work is volume: **S4b-1/2/3 map
+   `ComputedValues` onto `ComputedStyle`**, S4c ports the UA sheet and presentational hints, and
+   S2 · S5 · S6b · S7 are wiring and the deletion of roughly 6,200 lines of custom cascade. Those
+   are separate only so each lands with green gates and a reviewable diff; they are all blocked on
+   the mapper and touch one seam, so they can be run as a single switchover if fewer checkpoints are
+   wanted.
 3. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
 4. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
@@ -273,9 +275,13 @@ before any item is marked `(done)`. While M7 steps S1–S6 are open, a ninth row
   glyphs without changing geometry, then **contrast-corrects** the resolved foreground — fidelity
   never outranks legibility.
   *M7 obligation:* Stylo always computes a concrete `color`, which would replace every terminal
-  default. The `None` sentinel survives by giving the embedder-supplied `Device` default values a
-  **reserved colour** that the mapper turns back into `None`. Its only false negative is an author
-  declaring literally that RGB; the exact fallback is walking the element's rule node for an
+  default. The `None` sentinel survives as a **reserved colour** the mapper turns back into `None`,
+  declared by an `html { color: … }` rule in the UA sheet rather than by mutating the
+  embedder-supplied `Device`'s default computed values — `initial_values_with_font_override` builds
+  every other field from `get_initial_value()`, so the sheet route needs no `Arc::get_mut` and
+  reaches every element by inheritance. It also gives `BorderColor::CurrentColor` for free: a
+  resolved border colour equal to the sentinel is `currentColor`. Its only false negative is an
+  author declaring literally that RGB; the exact fallback is walking the element's rule node for an
   author/UA-origin `color`. `background` needs no sentinel — Stylo's initial `background-color` is
   `transparent`, which is `None` exactly.
 - **Borders are binary:** any non-zero width paints one box-drawing frame.
@@ -792,12 +798,13 @@ The full measurement table is under the perf target below. The audit rows above 
 library-versus-hand-rolled argument is unaffected by which of the two costs is larger.
 
 **What is left, in proportion.** Both decisive gates have passed, so the remaining risk is low and
-the remaining work is volume. **S4b is the one large step**: 142 fields across `core/style` to map
-out of Stylo's computed values. S2, S5, S6b and S7 are wiring plus the deletion of roughly 6,200
-lines of custom cascade (`css/{ua,values,math,variables,presentational,selectors}` and
-`css/cascade/{declaration,document,dynamic,media}` and `css/effects.rs`). They are separate steps
-only so each lands with green gates and a reviewable diff; all four are blocked on the mapper and
-touch one seam, so they can run as a single switchover if fewer checkpoints are wanted.
+the remaining work is volume. **S4b is the one large step**: every `ComputedStyle` field to map out
+of Stylo's computed values, split into three sub-steps. S4c ports the UA sheet and presentational
+hints. S2, S5, S6b and S7 are wiring plus the deletion of roughly 6,200 lines of custom cascade
+(`css/{ua,values,variables,selectors}` and `css/cascade/{declaration,document,dynamic,media}` and
+`css/effects.rs`; `css/math.rs` and `css/presentational/` survive). They are separate steps only so
+each lands with green gates and a reviewable diff; all are blocked on the mapper and touch one seam,
+so they can run as a single switchover if fewer checkpoints are wanted.
 
 - [x] **S1 — build spike (passed).** `stylo` 0.20.0 sits behind the `stylo` cargo feature and
       **builds on Rust 1.90 / Windows MSVC** with Python 3.13.15 as `python`; no Gecko, bindgen,
@@ -840,11 +847,55 @@ touch one seam, so they can run as a single switchover if fewer checkpoints are 
       **Also required:** `thread_state::initialize(ThreadState::LAYOUT)` on every thread touching the
       style system, or `SequentialTaskList::drop` trips a debug assertion. S4/S6 must do this on the
       render worker.
-- **M7 divergence ledger** (Stylo accepts what the custom cascade refuses; S4's differential suite
-  will extend this):
+- **M7 divergence ledger** (where Stylo and the custom cascade disagree; S4b's differential suite
+  extends this):
   - `cap`, `rcap`, `ic`, `ric` length units — absent from `CssLengthUnit`, so the custom cascade
     rejects the whole declaration. The cell metrics provider returns no cap/ic metric, so Stylo
     falls back to its own constants rather than a terminal-derived value.
+  - **`vertical-align: top | bottom` does not parse.** Stylo's shorthand expands to
+    `alignment-baseline`/`baseline-shift`/`baseline-source`, and under `default = ["servo"]`
+    `alignment-baseline` accepts only `baseline | middle | text-top | text-bottom`. Those four map
+    onto our `VerticalAlign`, and S4c re-aims the `valign` presentational hint at
+    `text-top`/`text-bottom`; author CSS loses `top`/`bottom`. Accepted regression.
+  - `min-content`/`max-content`/`fit-content`/`stretch` sizes compute in Stylo and map to `Auto`
+    (`CssMaxSize::None`), where the custom cascade dropped the declaration and kept the previous
+    value.
+  - CIE colour spaces convert to sRGB instead of being ignored — Stylo is the more correct of the
+    two.
+  - Math functions outside our `calc`/`min`/`max`/`clamp` grammar (`round()`, `mod()`, `rem()`,
+    trig, `pow()`, `hypot()`) fall back to the property's initial value rather than invalidating the
+    declaration, because by mapping time there is no declaration left to invalidate.
+  - `list-style-type` naming a `@counter-style` or a `<string>` falls back to `Disc`.
+  - `white-space-collapse: preserve-breaks | break-spaces` combined with `text-wrap-mode: nowrap`
+    has no `WhiteSpace` variant; the collapse mode wins and `nowrap` is dropped.
+  - Elements deeper than `MAX_MIRROR_DEPTH` (512) are absent from the mirror and resolve to
+    `ComputedStyle::default()` — `display: inline`. Layout's `MAX_BLOCK_DEPTH` (256) normally cuts
+    in first, so this is reachable only through deep inline or non-block nesting.
+  - Prefs default-on in stylo's servo build that this roadmap had declared out of scope:
+    `layout.css.relative-color-syntax.enabled` and `layout.css.properties-and-values.enabled`
+    (`@property`) both parse now.
+  - **Our alignment parser is looser than the spec and Stylo is not.** `css/cascade/alignment.rs`
+    guards `stretch` and `baseline` with `safety == Unsafe`, which is also the default, so it
+    accepts `unsafe stretch` and `unsafe baseline`; its `"normal"` arm is unguarded, so it accepts
+    `safe normal`. Stylo parses `<baseline-position>` and `auto | normal | stretch` before the
+    overflow position, so all three are invalid there and the declaration drops. Stylo is correct.
+  - `AlignFlags` values with no counterpart fold rather than drop: `LEFT`/`RIGHT` become
+    `Start`/`End` on the item side (matching what our own parser already did), `LAST_BASELINE`
+    becomes `Baseline`, and `align-content: baseline` — valid on the block axis — becomes `Normal`,
+    which is all Taffy's `AlignContent` can express.
+  - `CssPadding` spells zero twice: `Zero` is the enum default an undeclared edge keeps, and
+    `Cells(0)` is what resolving `padding: 0` gives. The mapper emits one spelling uniformly; the
+    two are equal in meaning (`CssPadding::cells()` returns `Some(0)` for both) but not under
+    `PartialEq`.
+- **Stylo preference obligations.** Stylo gates properties behind `stylo_static_prefs` booleans that
+  no compiler check can catch; the defaults live in `stylo_static_prefs-0.20.0/preferences.toml`.
+  **`layout.grid.enabled` defaults to `false`**, and every grid longhand plus `display: grid` is
+  gated by it, so `css::stylo::prefs` must set it before any sheet is parsed or the whole M6 Grid
+  milestone silently disappears. `counter-reset`/`counter-increment` are gated by
+  `layout.unimplemented`, also `false`; S5 owns the decision to enable that blunt pref — it also
+  ungates roughly 40 properties we ignore, including `zoom`, which does affect length computation.
+  Pin: `stylo_static_prefs` 0.20.0, matching stylo's own transitive resolution; exactly one copy may
+  be linked.
 - [ ] **S2 — interface refactor.** `StyleInput`/`StyleSession`; the retained and dynamic entry
       points move off `BasicCascade`'s inherent impl onto the trait. *Deferred to after S4* because
       the second implementation is what reveals the right boundary — and because of a hard blocker
@@ -881,10 +932,55 @@ touch one seam, so they can run as a single switchover if fewer checkpoints are 
       timing assertion in a standing gate row would be flaky; its other half is
       `benches/linux_live.rs`. It cannot be a bench: `css::stylo` is private, and benches see only
       the public surface.
-- [ ] **S4b — mapper.** The full `ComputedValues` → `ComputedStyle`
-      mapping. The cascade suites run both impls in one process as a differential oracle; the
-      layout, paint and golden suites are not duplicated — the `--features stylo` gate row covers
-      them.
+- [ ] **S4b — mapper.** The full `ComputedValues` → `ComputedStyle` mapping in `css::stylo::map`,
+      converting CSS px to cells through the injected `RenderContext` and memoised on
+      `ComputedValues` pointer identity. Three sub-steps so each lands with green gates and a
+      reviewable diff. The layout, paint and golden suites are not duplicated — the
+      `--features stylo` gate row covers them.
+      **The differential oracle is property-scoped:** a test declares CSS, runs `BasicCascade` and
+      the Stylo path in one process, and compares a named projection of `ComputedStyle`. Whole-struct
+      equality is impossible until S4c ports the UA sheet, and every property under test must be
+      declared by the test's own author CSS — a test reading an undeclared property is asserting UA
+      parity, which is S4c's job.
+      - [x] **S4b-1 — engine prerequisites, value core, scalar families (done).**
+            `css::stylo::prefs`; `Lengths` (px → cells per axis, percentages, and `calc()`
+            serialised through `ToCss` and re-parsed by `css::math`, because
+            `CalcLengthPercentage`'s node is private and probing it would lie about
+            `min`/`max`/`clamp`); colours and the `None` sentinel; the keyword and text families;
+            `style_tree`'s pre-order walk and the `ComputedValues`-pointer memo.
+            *Two rules landed here rather than in S4b-3, because they correct properties this step
+            owns:* `opacity: 0` ⇒ `visibility: hidden`, and text-decoration propagation.
+            **Contracts a future reader must honour:** the walk descends from the mirror's document
+            node — `StyleDom::elements` is unordered and `root_element` sees only the first root —
+            and it must stay pre-order, because each element's decorations fold into its
+            descendants. The memo key is the `ComputedValues` *data* pointer, never
+            `ServoArc::heap_ptr`, which is null for a static `Arc`. A percentage whose basis axis
+            differs from its output axis cannot be a bare `Percent`: it carries the column/row ratio
+            and must go through the calc store.
+      - [x] **S4b-2 — box, flex, alignment and grid families (done).** Display, sizing, edges and
+            borders, flex, box alignment, and the grid families that intern through `GridStore`.
+            On the committed live page, release profile, reference machine: **15.2 ms to map**
+            7,940 elements into 1,865 distinct styles (76.5% memo hits), for **38.4 ms cascade +
+            map** against S4a's ~130 ms budget — the custom cascade's equivalent is 457 ms.
+            **Contracts a future reader must honour:** `border-*-width` is binary, never quantised
+            — `BorderSide::width` is `usize::from(px > 0.0)`, and running Stylo's 3px `medium`
+            through `cells_from_px` would erase the frame from every box that declares a style
+            without a width. Margins and paddings resolve percentages against the **inline** axis
+            (`Axes::inline_basis`) while sizes and insets resolve against their own
+            (`Axes::same`). A bare `<track-breadth>` is not `minmax(t, t)`: the min side is `auto`
+            for `auto` *and* `<flex>`. `GridTemplateData::is_valid` moved to `core::style` because
+            both cascades need it and CSS's `<fixed-breadth>` admits `calc()` where Taffy does not.
+      - [ ] **S4b-3 — form-control policy and the remaining assembly.** The `reverse` bit that
+            `css/ua.rs::apply_form_control` sets, which has no CSS property at all and is keyed on
+            the element rather than on its computed values.
+- [ ] **S4c — UA sheet and presentational hints.** `css/ua.rs`'s structural half becomes
+      `const UA_CSS: &str`; its palette half becomes a user-origin sheet rebuilt on theme change,
+      which is already a hard revision. `css/presentational/hints.rs` moves onto
+      `TElement::synthesize_presentational_hints_for_legacy_attributes`, where `valign` emits
+      `text-top`/`text-bottom` and the link underline becomes
+      `a:link { text-decoration-line: underline }`, relying on S4b-1's decoration propagation.
+      `ComputedStyle::legacy_align` has no Stylo source and stays `LegacyAlign::None` until this
+      step. Whole-struct differential equality becomes possible here.
 - [ ] **S5 — media queries and generated content.** `MediaContext` maps onto `Device`; the terminal
       MQ grammar retires. Counter and marker resolution stays ours, fed by Stylo's computed
       `content`.
@@ -916,7 +1012,9 @@ touch one seam, so they can run as a single switchover if fewer checkpoints are 
       `core::style::dynamic`'s `layout_compatible_with`/`paint_compatible_with` compare the *mapped*
       style, the only comparison that knows what survives cell rounding.
 - [ ] **S7 — flip and delete.** Stylo becomes the only cascade; the feature and the superseded `css`
-      submodules go.
+      submodules go. **`css/math.rs` and `css/presentational/` survive** — the mapper reuses
+      `css::math`'s parser to lower Stylo's computed `calc()`, and hint synthesis is still ours;
+      only their `Declaration`-based plumbing dies.
 
 **Gates.** The eight standing commands, plus a ninth row for S1–S6 only:
 `cargo clippy --all-targets --features stylo -- -D warnings` and `cargo test --features stylo`.

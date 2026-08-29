@@ -112,6 +112,37 @@ pub struct GridTemplateData {
     pub line_names: Vec<Vec<GridIdent>>,
 }
 
+impl GridTemplateData {
+    /// A track list may hold at most one auto-repeat, and only if every one of its tracks has a
+    /// fixed component.
+    ///
+    /// Taffy discards such a list wholesale at layout time, so both cascades reject it up front
+    /// instead, which leaves the previously cascaded value in place. Note this is stricter than
+    /// CSS: `<fixed-breadth>` is a `<length-percentage>` and so includes `calc()`, which
+    /// [`GridLength::is_fixed`] excludes because Taffy's fixed-component contract cannot carry it.
+    pub(crate) fn is_valid(&self) -> bool {
+        let auto_repeats = self
+            .components
+            .iter()
+            .filter(|component| match component {
+                GridTemplateComponent::Single(_) => false,
+                GridTemplateComponent::Repeat(repeat) => repeat.count.is_auto(),
+            })
+            .count();
+        match auto_repeats {
+            0 => true,
+            1 => self.components.iter().all(|component| match component {
+                GridTemplateComponent::Single(track) => track.has_fixed_component(),
+                GridTemplateComponent::Repeat(repeat) => repeat
+                    .tracks
+                    .iter()
+                    .all(|track| track.has_fixed_component()),
+            }),
+            _ => false,
+        }
+    }
+}
+
 /// One named area of a `grid-template-areas` value, in 1-based grid line coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GridArea {

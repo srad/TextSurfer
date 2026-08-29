@@ -21,6 +21,8 @@ mod device;
 mod dom;
 mod engine;
 mod invalidate;
+mod map;
+mod prefs;
 mod sheets;
 mod traversal;
 

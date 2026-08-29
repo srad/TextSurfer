@@ -40,6 +40,7 @@ euclid = { version = "0.22.11", optional = true }
 servo_arc = { version = "0.4.3", optional = true }
 stylo = { version = "0.20.0", optional = true }
 stylo_dom = { version = "0.20.0", optional = true }
+stylo_static_prefs = { version = "0.20.0", optional = true }
 stylo_traits = { version = "0.20.0", optional = true }
 typed-arena = { version = "2.0.2", optional = true }
 web_atoms = { version = "0.2.6", optional = true }
@@ -57,6 +58,7 @@ stylo = [
     "dep:servo_arc",
     "dep:stylo",
     "dep:stylo_dom",
+    "dep:stylo_static_prefs",
     "dep:stylo_traits",
     "dep:typed-arena",
     "dep:web_atoms",

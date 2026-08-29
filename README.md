@@ -249,6 +249,7 @@ cargo test
 cargo test --features js
 cargo test --features vga
 cargo test --no-default-features
+cargo test --features stylo          # while the Stylo cascade is behind its feature
 ```
 
 No test opens a window: the framebuffer frontend is exercised headlessly, including a launch test

@@ -1,3 +1,6 @@
+mod differential;
+mod resolved;
+
 use std::sync::atomic::Ordering;
 
 use app_units::Au;
@@ -271,9 +274,9 @@ fn em_resolves_against_the_inherited_font_size() {
 #[test]
 #[ignore = "perf measurement, not an assertion; see benches/linux_live.rs for the other half"]
 fn measure_the_live_page_cascade() {
-    const PAGE: &str = include_str!("../../../tests/fixtures/linux-live/page.html");
-    const MODULES_CSS: &str = include_str!("../../../tests/fixtures/linux-live/modules.css");
-    const SITE_CSS: &str = include_str!("../../../tests/fixtures/linux-live/site.css");
+    const PAGE: &str = include_str!("../../../../tests/fixtures/linux-live/page.html");
+    const MODULES_CSS: &str = include_str!("../../../../tests/fixtures/linux-live/modules.css");
+    const SITE_CSS: &str = include_str!("../../../../tests/fixtures/linux-live/site.css");
 
     use crate::html::HtmlParser;
 
@@ -320,8 +323,37 @@ fn measure_the_live_page_cascade() {
         "  cascade         : {:>7.1} ms",
         cascade.as_secs_f64() * 1000.0
     );
+    // S4a's gate wanted cascade + mapping under ~130 ms and the cascade alone spent 27 of it. This
+    // is what tells us whether the mapper spent the rest. The distinct count is the memo working:
+    // Stylo's sharing cache hands long runs of elements one `ComputedValues`, and a mapper that
+    // defeated that sharing would show up here and nowhere else.
+    let mapped_at = std::time::Instant::now();
+    let (tree, stats) = super::map::style_tree_measured(
+        &dom,
+        crate::core::style::RenderContext::terminal(Size {
+            cols: 120,
+            rows: 40,
+        }),
+    );
+    let mapping = mapped_at.elapsed();
+
     println!("  mirrored nodes  : {}", dom.len());
     println!("  styled elements : {styled}");
+    println!(
+        "  map to cells    : {:>7.1} ms",
+        mapping.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  distinct styles : {} of {} elements ({:.1}% memo hits)",
+        stats.distinct,
+        stats.elements,
+        100.0 - (stats.distinct as f64 / stats.elements.max(1) as f64) * 100.0
+    );
+    println!(
+        "  cascade + map   : {:>7.1} ms   (S4a gate budget: ~130 ms)",
+        (cascade + mapping).as_secs_f64() * 1000.0
+    );
+    drop(tree);
 
     // The hover path: what M7 is now aimed at. The custom engine walks every element in the
     // document for this (`css/cascade/dynamic.rs:40`) and takes 105 ms on the same page.
@@ -354,8 +386,9 @@ fn measure_the_live_page_cascade() {
     );
     println!("  elements visited: {visited} of {styled}");
     println!();
-    println!("  NOTE: no ComputedStyle mapping is included — that is S4b. The custom engine's");
-    println!("  105 ms also clones the whole StyleTree, so read this as an upper bound.");
+    println!("  NOTE: the restyle figure stops at ComputedValues — it does not re-map, which S6b");
+    println!("  will. The custom engine's 105 ms also clones the whole StyleTree, so the");
+    println!("  comparison is an upper bound on the custom side and a lower bound on ours.");
 }
 
 /// `<html><body><a href><span/></a> <p/> …siblings… </body></html>`

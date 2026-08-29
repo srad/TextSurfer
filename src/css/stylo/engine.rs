@@ -79,6 +79,8 @@ impl StyloEngine {
         device: style::device::Device,
     ) -> Self {
         mark_layout_thread();
+        // Before the first `Stylesheet::from_str`: Stylo reads its preferences at parse time.
+        super::prefs::enable();
         let lock = SharedRwLock::new();
         let mut stylist = Stylist::new(device, quirks_mode);
         {

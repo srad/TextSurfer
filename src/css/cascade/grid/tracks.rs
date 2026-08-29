@@ -67,7 +67,7 @@ pub(super) fn parse_template_parser(
         components,
         line_names,
     };
-    is_valid_template(&template).then_some(template)
+    template.is_valid().then_some(template)
 }
 
 pub(super) fn parse_explicit_template_parser(
@@ -89,31 +89,6 @@ pub(super) fn parse_explicit_template_parser(
         components,
         line_names,
     })
-}
-
-/// A track list may hold at most one auto-repeat, and only if every one of its tracks has a fixed
-/// component. Taffy discards such a list wholesale at layout time; rejecting it here instead keeps
-/// the cascade honest, so an invalid declaration leaves the previously cascaded value in place.
-fn is_valid_template(template: &GridTemplateData) -> bool {
-    let auto_repeats = template
-        .components
-        .iter()
-        .filter(|component| match component {
-            GridTemplateComponent::Single(_) => false,
-            GridTemplateComponent::Repeat(repeat) => repeat.count.is_auto(),
-        })
-        .count();
-    match auto_repeats {
-        0 => true,
-        1 => template.components.iter().all(|component| match component {
-            GridTemplateComponent::Single(track) => track.has_fixed_component(),
-            GridTemplateComponent::Repeat(repeat) => repeat
-                .tracks
-                .iter()
-                .all(|track| track.has_fixed_component()),
-        }),
-        _ => false,
-    }
 }
 
 /// `Ok(None)` means "no component here", which ends the list; `None` means the input was invalid.

@@ -84,7 +84,7 @@ impl CssLength {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum LengthAxis {
     Horizontal,
     Vertical,
@@ -189,14 +189,10 @@ impl CellMetric {
         font_px: f64,
         root_font_px: f64,
     ) -> usize {
-        let cell_px = match axis {
-            LengthAxis::Horizontal => self.column_px,
-            LengthAxis::Vertical => self.row_px,
-        };
-        (self.css_pixels_with_fonts(length, viewport, font_px, root_font_px) / f64::from(cell_px))
-            .max(0.0)
-            .round()
-            .min(MAX_LAYOUT_CELLS) as usize
+        self.cells_from_px(
+            self.css_pixels_with_fonts(length, viewport, font_px, root_font_px),
+            axis,
+        )
     }
 
     pub fn resolve_signed_cells_with_fonts(
@@ -207,13 +203,35 @@ impl CellMetric {
         font_px: f64,
         root_font_px: f64,
     ) -> isize {
-        let cell_px = match axis {
-            LengthAxis::Horizontal => self.column_px,
-            LengthAxis::Vertical => self.row_px,
-        };
-        (self.css_pixels_with_fonts(length, viewport, font_px, root_font_px) / f64::from(cell_px))
+        self.signed_cells_from_px(
+            self.css_pixels_with_fonts(length, viewport, font_px, root_font_px),
+            axis,
+        )
+    }
+
+    /// Quantise an already-absolute CSS pixel length onto the axis's cell grid.
+    ///
+    /// The entry point for a style engine that resolves font- and viewport-relative units itself:
+    /// there is no `CssLength` left to resolve, only pixels to round. Negative input clamps to zero.
+    pub fn cells_from_px(self, px: f64, axis: LengthAxis) -> usize {
+        (px / f64::from(self.axis_px(axis)))
+            .max(0.0)
+            .round()
+            .min(MAX_LAYOUT_CELLS) as usize
+    }
+
+    /// [`Self::cells_from_px`] for the properties that accept a negative value.
+    pub fn signed_cells_from_px(self, px: f64, axis: LengthAxis) -> isize {
+        (px / f64::from(self.axis_px(axis)))
             .round()
             .clamp(-MAX_LAYOUT_CELLS, MAX_LAYOUT_CELLS) as isize
+    }
+
+    const fn axis_px(self, axis: LengthAxis) -> u16 {
+        match axis {
+            LengthAxis::Horizontal => self.column_px,
+            LengthAxis::Vertical => self.row_px,
+        }
     }
 }
 
