@@ -20,6 +20,7 @@ use stylo_dom::ElementState;
 use web_atoms::{LocalName, Namespace};
 
 use crate::core::dom::NodeId;
+use crate::core::form::ControlKind;
 
 /// The backing store for a [`StyleDom`].
 ///
@@ -73,6 +74,12 @@ pub(crate) struct ElementNode {
     id: Option<AtomIdent>,
     classes: Vec<AtomIdent>,
     attrs: Vec<MirrorAttr>,
+    /// What kind of form control this element is, resolved once at build time through
+    /// `core::form::control_kind` — the same answer `css::ua` gives the custom cascade.
+    ///
+    /// It has to be carried rather than recomputed because it is not a CSS question: the mapper
+    /// sees `ComputedValues`, which say nothing about the element's tag or its `type` attribute.
+    control: Option<ControlKind>,
     state: Cell<ElementState>,
     selector_flags: Cell<ElementSelectorFlags>,
     data: ElementDataWrapper,
@@ -188,6 +195,10 @@ impl<'a> StyloElement<'a> {
 
     pub(crate) fn dom_id(&self) -> Option<NodeId> {
         self.0.dom_id
+    }
+
+    pub(crate) fn control_kind(&self) -> Option<ControlKind> {
+        self.element().control
     }
 
     pub(crate) fn state(&self) -> ElementState {

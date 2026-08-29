@@ -8,7 +8,7 @@ use crate::core::dom::{Document, ElementNs, NodeId};
 use crate::core::geom::Size;
 use crate::core::style::{CalcRange, CellMetric, LengthAxis, RenderContext, StyleStore};
 
-use super::super::dom::{StyleArena, StyleDom};
+use super::super::dom::StyleArena;
 use super::super::engine::StyloEngine;
 use super::length::{Axes, Lengths, Value};
 use super::style_tree_measured;
@@ -31,7 +31,7 @@ fn computed(css: &str) -> servo_arc::Arc<ComputedValues> {
 
     let engine = StyloEngine::new(CellMetric::DEFAULT, VIEWPORT, QuirksMode::NoQuirks, &[css]);
     let arena = StyleArena::new();
-    let dom = StyleDom::build(&arena, &document, style::shared_lock::SharedRwLock::new());
+    let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
     dom.element(div)
         .expect("the div is mirrored")
@@ -48,7 +48,7 @@ fn mapped(css: &str) -> (crate::core::style::StyleTree, NodeId) {
 
     let engine = StyloEngine::new(CellMetric::DEFAULT, VIEWPORT, QuirksMode::NoQuirks, &[css]);
     let arena = StyleArena::new();
-    let dom = StyleDom::build(&arena, &document, style::shared_lock::SharedRwLock::new());
+    let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
     (style_tree_measured(&dom, context()).0, div)
 }
@@ -278,7 +278,7 @@ fn elements_sharing_computed_values_are_mapped_once() {
         &["div { color: red }"],
     );
     let arena = StyleArena::new();
-    let dom = StyleDom::build(&arena, &document, style::shared_lock::SharedRwLock::new());
+    let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
 
     let (_, stats) = style_tree_measured(&dom, context());
@@ -317,7 +317,7 @@ fn every_styled_element_reaches_the_tree() {
         &["html, body, div, span, p { color: #ff0000 }"],
     );
     let arena = StyleArena::new();
-    let dom = StyleDom::build(&arena, &document, style::shared_lock::SharedRwLock::new());
+    let dom = engine.mirror(&arena, &document);
     let styled = engine.cascade(&dom);
 
     let (tree, stats) = style_tree_measured(&dom, context());

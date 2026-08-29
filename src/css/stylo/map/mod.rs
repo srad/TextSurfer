@@ -32,6 +32,7 @@ pub(super) use color::SENTINEL_CSS;
 
 use super::dom::StyleDom;
 use length::Lengths;
+use policy::ElementPolicy;
 
 /// Map every styled element of `dom` into a [`StyleTree`].
 ///
@@ -74,7 +75,13 @@ pub(super) fn style_tree_measured(
         if let Some(element) = node.as_element()
             && let Some(values) = element.primary_style()
         {
-            let style = mapper.style(&values, inherited);
+            let style = mapper.style(
+                &values,
+                ElementPolicy {
+                    decorations: inherited,
+                    control: element.control_kind(),
+                },
+            );
             descend = inherited | text::decorations(&values);
             elements += 1;
             if let Some(id) = element.dom_id() {
@@ -117,11 +124,11 @@ impl Mapper {
         }
     }
 
-    /// The mapped style, plus the two bits that cannot be memoised.
+    /// The mapped style, plus the bits that cannot be memoised.
     fn style(
         &mut self,
         values: &ServoArc<ComputedValues>,
-        inherited: TextDecorationLine,
+        element: ElementPolicy,
     ) -> ComputedStyle {
         let mut style = match self.memo.get(&ByPtr(values.clone())) {
             Some(cached) => *cached,
@@ -131,7 +138,8 @@ impl Mapper {
                 mapped
             }
         };
-        policy::inherit_decorations(&mut style, inherited);
+        policy::inherit_decorations(&mut style, element.decorations);
+        policy::form_control(&mut style, element.control);
         style
     }
 

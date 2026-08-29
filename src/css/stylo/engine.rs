@@ -14,11 +14,12 @@ use style::thread_state::{self, ThreadState};
 use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 
+use crate::core::dom::Document;
 use crate::core::geom::Size;
 use crate::core::style::CellMetric;
 
 use super::device::device;
-use super::dom::{StyleDom, StyloElement};
+use super::dom::{StyleArena, StyleDom, StyloElement};
 use super::sheets;
 use super::traversal::RecalcStyle;
 
@@ -96,6 +97,27 @@ impl StyloEngine {
             stylist,
             painters: NoPainters,
         }
+    }
+
+    /// Mirror `document` for this engine.
+    ///
+    /// The only way to build a mirror that will be cascaded, because two invariants tie the mirror
+    /// to the engine and neither can be checked at a call site:
+    ///
+    /// - **One lock.** An element's `style` attribute is a `Locked<PropertyDeclarationBlock>`, and
+    ///   `Locked::read_with` asserts — in every profile, not just debug — that the guard came from
+    ///   the same `SharedRwLock`. Stylo reads it through `guards.author` while collecting rules and
+    ///   again in the style sharing cache's `have_same_style_attribute`, which every same-tag
+    ///   sibling pair reaches, so a mirror built with its own lock panics on the first such page.
+    /// - **One order.** [`Self::with_metrics`] enables Stylo's preferences, and Stylo reads them at
+    ///   *parse* time. A mirror built before the engine parses its style attributes with the
+    ///   defaults, which silently drops every grid longhand.
+    pub(super) fn mirror<'a>(
+        &self,
+        arena: &'a StyleArena<'a>,
+        document: &Document,
+    ) -> StyleDom<'a> {
+        StyleDom::build(arena, document, self.lock.clone())
     }
 
     /// Run `f` with a fully assembled style context.

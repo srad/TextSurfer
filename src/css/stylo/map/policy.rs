@@ -1,6 +1,32 @@
 use style::values::computed::text::TextDecorationLine;
 
+use crate::core::form::ControlKind;
 use crate::core::style::{ComputedStyle, Visibility};
+
+/// The two things one element contributes that its `ComputedValues` cannot.
+///
+/// Bundled rather than passed as a pair of arguments so a call site cannot silently swap them, and
+/// so the next per-element rule has somewhere to go.
+#[derive(Clone, Copy, Default)]
+pub(super) struct ElementPolicy {
+    pub(super) decorations: TextDecorationLine,
+    pub(super) control: Option<ControlKind>,
+}
+
+/// A form control renders as a bracketed stand-in, and `reverse` is what tells it from body text.
+///
+/// `css::ua::apply_form_control` documents why the emphasis is a style bit rather than a colour, and
+/// is the other half of this rule: everything else it does — `white-space: pre`, the cursor, the
+/// centred label, `display: none` for a hidden input — is expressible in CSS and belongs to the
+/// user-agent sheet at S4c. `reverse` is not, and never will be.
+///
+/// Outside the memo, because it is keyed on the element rather than on its computed values: two
+/// `<input>`s differing only in `type` share one `ComputedValues` — no sheet mentions the attribute,
+/// so Stylo's sharing cache hands them one allocation — while differing here.
+pub(super) fn form_control(style: &mut ComputedStyle, control: Option<ControlKind>) {
+    // A hidden input is submitted and never rendered, so there is no stand-in to distinguish.
+    style.reverse = control.is_some_and(|kind| kind != ControlKind::Hidden);
+}
 
 /// `opacity: 0` computes to `visibility: hidden`.
 ///

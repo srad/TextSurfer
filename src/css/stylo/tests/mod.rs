@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 use app_units::Au;
 use style::context::QuirksMode;
-use style::dom::TElement;
+use style::dom::{TDocument, TElement, TNode};
 use stylo_dom::ElementState;
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
@@ -13,7 +13,7 @@ use crate::core::geom::Size;
 use crate::core::style::{CellMetric, LengthAxis};
 
 use super::device::{CellFontMetrics, device_with_metrics};
-use super::dom::{StyleArena, StyleDom, StyloElement};
+use super::dom::{StyleArena, StyleDom, StyloElement, StyloNode};
 use super::engine::{StyloEngine, mark_layout_thread};
 
 const VIEWPORT: Size = Size { cols: 80, rows: 24 };
@@ -29,8 +29,14 @@ fn document(body: &[(&str, Vec<Attr>)]) -> (Document, Vec<NodeId>) {
     (document, ids)
 }
 
-fn mirror<'a>(arena: &'a StyleArena<'a>, document: &Document) -> StyleDom<'a> {
-    StyleDom::build(arena, document, style::shared_lock::SharedRwLock::new())
+/// Mirror through the engine, never `StyleDom::build`, so every test here inherits the engine's
+/// lock and its preferences. [`StyloEngine::mirror`] says why both matter.
+fn mirror<'a>(
+    engine: &StyloEngine,
+    arena: &'a StyleArena<'a>,
+    document: &Document,
+) -> StyleDom<'a> {
+    engine.mirror(arena, document)
 }
 
 fn element<'a>(dom: &StyleDom<'a>, id: NodeId) -> StyloElement<'a> {
@@ -63,8 +69,9 @@ fn border_top(element: StyloElement<'_>) -> Au {
 fn element_data_is_allocated_lazily() {
     mark_layout_thread();
     let (document, ids) = document(&[]);
+    let engine = engine(&[]);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
     let html = element(&dom, ids[0]);
 
     assert!(!TElement::has_data(&html));
@@ -85,9 +92,9 @@ fn element_data_is_allocated_lazily() {
 #[test]
 fn resolving_a_child_whose_parent_is_unstyled_does_not_panic() {
     let (document, ids) = document(&[("p", vec![])]);
-    let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
     let engine = engine(&[]);
+    let arena = StyleArena::new();
+    let dom = mirror(&engine, &arena, &document);
     let paragraph = element(&dom, ids[2]);
 
     engine.resolve_with_ancestors(paragraph);
@@ -97,15 +104,15 @@ fn resolving_a_child_whose_parent_is_unstyled_does_not_panic() {
 #[test]
 fn the_user_agent_sheet_reaches_the_cascade() {
     let (document, ids) = document(&[("p", vec![]), ("span", vec![])]);
-    let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
     let engine = engine(&[]);
+    let arena = StyleArena::new();
+    let dom = mirror(&engine, &arena, &document);
 
     let mut head_document = Document::new();
     let html = head_document.insert_element(None, "html", ElementNs::Html, vec![]);
     let head = head_document.insert_element(Some(html), "head", ElementNs::Html, vec![]);
     let head_arena = StyleArena::new();
-    let head_dom = mirror(&head_arena, &head_document);
+    let head_dom = mirror(&engine, &head_arena, &head_document);
     let head_element = element(&head_dom, head);
     engine.resolve_with_ancestors(head_element);
     assert!(
@@ -136,9 +143,9 @@ fn the_user_agent_sheet_reaches_the_cascade() {
 #[test]
 fn an_author_rule_beats_the_user_agent_sheet() {
     let (document, ids) = document(&[("p", vec![])]);
-    let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
     let engine = engine(&["p { display: none }"]);
+    let arena = StyleArena::new();
+    let dom = mirror(&engine, &arena, &document);
     let paragraph = element(&dom, ids[2]);
 
     engine.resolve_with_ancestors(paragraph);
@@ -155,9 +162,9 @@ fn an_author_rule_beats_the_user_agent_sheet() {
 #[test]
 fn higher_specificity_wins_within_the_author_origin() {
     let (document, ids) = document(&[("p", vec![Attr::plain("id", "x")])]);
-    let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
     let engine = engine(&["p { display: block } p#x { display: none }"]);
+    let arena = StyleArena::new();
+    let dom = mirror(&engine, &arena, &document);
     let paragraph = element(&dom, ids[2]);
 
     engine.resolve_with_ancestors(paragraph);
@@ -194,7 +201,7 @@ fn ex_and_ch_resolve_to_half_the_font_size_through_the_provider() {
 
     let (document, ids) = document(&[("p", vec![])]);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
     let paragraph = element(&dom, ids[2]);
     engine.resolve_with_ancestors(paragraph);
 
@@ -214,7 +221,7 @@ fn ex_and_ch_track_the_font_size_rather_than_the_cell_width() {
     ]);
     let (document, ids) = document(&[("p", vec![]), ("span", vec![])]);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
 
     for id in [ids[2], ids[3]] {
         let styled = element(&dom, id);
@@ -257,7 +264,7 @@ fn em_resolves_against_the_inherited_font_size() {
     ]);
     let (document, ids) = document(&[("p", vec![])]);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
     let paragraph = element(&dom, ids[2]);
 
     engine.resolve_with_ancestors(paragraph);
@@ -285,11 +292,8 @@ fn measure_the_live_page_cascade() {
     let document = outcome.document.borrow();
     let parse = parsed.elapsed();
 
-    let built = std::time::Instant::now();
-    let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
-    let build = built.elapsed();
-
+    // The engine first, and not only for tidiness: it owns the lock the mirror's style attributes
+    // are wrapped in, and it enables the preferences Stylo reads while parsing them.
     let started = std::time::Instant::now();
     let engine = StyloEngine::new(
         CellMetric::DEFAULT,
@@ -301,6 +305,11 @@ fn measure_the_live_page_cascade() {
         &[MODULES_CSS, SITE_CSS],
     );
     let stylist = started.elapsed();
+
+    let built = std::time::Instant::now();
+    let arena = StyleArena::new();
+    let dom = mirror(&engine, &arena, &document);
+    let build = built.elapsed();
 
     let cascaded = std::time::Instant::now();
     let styled = engine.cascade(&dom);
@@ -357,10 +366,8 @@ fn measure_the_live_page_cascade() {
 
     // The hover path: what M7 is now aimed at. The custom engine walks every element in the
     // document for this (`css/cascade/dynamic.rs:40`) and takes 105 ms on the same page.
-    let link = dom
-        .elements()
-        .find(selectors::Element::is_link)
-        .expect("the page has links");
+    //
+    let (_, link) = deepest_link(dom.document().as_node(), 0).expect("the page has links");
     let chain = super::invalidate::hover_chain(link);
 
     let changed = std::time::Instant::now();
@@ -392,6 +399,29 @@ fn measure_the_live_page_cascade() {
 }
 
 /// `<html><body><a href><span/></a> <p/> …siblings… </body></html>`
+/// The most deeply nested link, ties going to the first in document order.
+///
+/// Deterministic, which `StyleDom::elements` is not — it iterates a `HashMap`, so an arbitrary pick
+/// gives a different ancestor chain on every run and no two measurements can be compared. Deepest
+/// rather than first because the ancestor chain is what a hover snapshots: the first link in a
+/// document is often a skip-link three elements from the root, which would flatter the number.
+fn deepest_link<'dom>(node: StyloNode<'dom>, depth: usize) -> Option<(usize, StyloElement<'dom>)> {
+    let mut best = node
+        .as_element()
+        .filter(selectors::Element::is_link)
+        .map(|element| (depth, element));
+    let mut child = node.first_child();
+    while let Some(node) = child {
+        if let Some(found) = deepest_link(node, depth + 1)
+            && best.is_none_or(|(best, _)| found.0 > best)
+        {
+            best = Some(found);
+        }
+        child = node.next_sibling();
+    }
+    best
+}
+
 fn hover_fixture(siblings: usize) -> (Document, NodeId, NodeId, NodeId) {
     let mut document = Document::new();
     let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
@@ -425,7 +455,7 @@ fn a_hover_restyles_the_hovered_element_and_leaves_its_neighbours_alone() {
     ]);
     let (document, anchor, _, bystander) = hover_fixture(0);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
     engine.cascade(&dom);
 
     let anchor = element(&dom, anchor);
@@ -458,7 +488,7 @@ fn a_descendant_selector_hover_restyles_the_descendant() {
     ]);
     let (document, anchor, inner, _) = hover_fixture(0);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
     engine.cascade(&dom);
 
     let anchor = element(&dom, anchor);
@@ -479,7 +509,7 @@ fn hover_locality_does_not_degrade_as_the_document_grows() {
         ]);
         let (document, anchor, _, _) = hover_fixture(siblings);
         let arena = StyleArena::new();
-        let dom = mirror(&arena, &document);
+        let dom = mirror(&engine, &arena, &document);
         engine.cascade(&dom);
         hover(&dom, &engine, element(&dom, anchor))
     };
@@ -497,7 +527,7 @@ fn one_traversal_styles_the_whole_tree() {
     let engine = engine(&[]);
     let (document, ids) = document(&[("p", vec![]), ("span", vec![])]);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
 
     let styled = engine.cascade(&dom);
     assert_eq!(styled, ids.len(), "every element resolves in one pass");
@@ -511,7 +541,7 @@ fn a_traversal_over_an_empty_document_styles_nothing_rather_than_panicking() {
     let engine = engine(&[]);
     let document = Document::new();
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
 
     // `traverse_dom` panics on a token that says not to traverse, so the entry point has to check.
     assert_eq!(engine.cascade(&dom), 0);
@@ -522,7 +552,7 @@ fn a_traversal_applies_author_rules_across_the_tree() {
     let engine = engine(&["span { display: none }"]);
     let (document, ids) = document(&[("p", vec![]), ("span", vec![])]);
     let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
+    let dom = mirror(&engine, &arena, &document);
     engine.cascade(&dom);
 
     let display_none = |id| {
@@ -540,9 +570,9 @@ fn a_traversal_applies_author_rules_across_the_tree() {
 #[test]
 fn resolving_an_ancestor_chain_styles_every_element_once() {
     let (document, ids) = document(&[("p", vec![])]);
-    let arena = StyleArena::new();
-    let dom = mirror(&arena, &document);
     let engine = engine(&[]);
+    let arena = StyleArena::new();
+    let dom = mirror(&engine, &arena, &document);
     let paragraph = element(&dom, ids[2]);
 
     engine.resolve_with_ancestors(paragraph);

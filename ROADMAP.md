@@ -91,8 +91,8 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
 Test counts at the last green run (2026-08-29): **1,027 total** with the default VGA frontend and
-**920** with `--no-default-features`; `--features stylo` adds the 77 Stylo adapter, cascade,
-invalidation, mapper and differential-oracle tests for **1,104**. The WPT target contributes 6
+**920** with `--no-default-features`; `--features stylo` adds the 90 Stylo adapter, cascade,
+invalidation, mapper and differential-oracle tests for **1,117**. The WPT target contributes 6
 passing tests (5 without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -120,13 +120,13 @@ before any item is marked `(done)`. While M7 steps S1–S6 are open, a ninth row
 ## Session handoff
 
 1. Read this status board, then recent `git log` entries for historical context.
-2. M7 is the active item. Both decisive gates have passed (cascade 457 → 27 ms, restyle 105 → 0.1 ms
-   on the live page), so the remaining risk is low and the remaining work is volume: **S4b-1/2/3 map
-   `ComputedValues` onto `ComputedStyle`**, S4c ports the UA sheet and presentational hints, and
-   S2 · S5 · S6b · S7 are wiring and the deletion of roughly 6,200 lines of custom cascade. Those
-   are separate only so each lands with green gates and a reviewable diff; they are all blocked on
-   the mapper and touch one seam, so they can be run as a single switchover if fewer checkpoints are
-   wanted.
+2. M7 is the active item. Both decisive gates have passed (cascade 457 → 21 ms, restyle 105 → 0.1 ms
+   on the live page) and **S4b is done — `ComputedStyle` is fully mapped but for `legacy_align`**.
+   What is left is volume, not risk: **S4c** ports the UA sheet, the presentational hints and the
+   rest of `apply_form_control`, and S2 · S5 · S6b · S7 are wiring plus the deletion of roughly
+   6,200 lines of custom cascade. Those are separate only so each lands with green gates and a
+   reviewable diff; they touch one seam, so they can be run as a single switchover if fewer
+   checkpoints are wanted.
 3. Add bounded static SVG rasterization, then smoke M6 images in both frontends.
 4. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
@@ -797,14 +797,15 @@ cascade against 1,798 ms layout). The measured case for Stylo is now a different
 The full measurement table is under the perf target below. The audit rows above still stand — the
 library-versus-hand-rolled argument is unaffected by which of the two costs is larger.
 
-**What is left, in proportion.** Both decisive gates have passed, so the remaining risk is low and
-the remaining work is volume. **S4b is the one large step**: every `ComputedStyle` field to map out
-of Stylo's computed values, split into three sub-steps. S4c ports the UA sheet and presentational
-hints. S2, S5, S6b and S7 are wiring plus the deletion of roughly 6,200 lines of custom cascade
+**What is left, in proportion.** Both decisive gates have passed and S4b — the one large step, every
+`ComputedStyle` field mapped out of Stylo's computed values — is done, so the risk is low and the
+remaining work is volume. **S4c is now the largest**: the UA sheet, the presentational hints
+and the rest of the form-control policy, after which whole-struct differential equality becomes
+possible. S2, S5, S6b and S7 are wiring plus the deletion of roughly 6,200 lines of custom cascade
 (`css/{ua,values,variables,selectors}` and `css/cascade/{declaration,document,dynamic,media}` and
 `css/effects.rs`; `css/math.rs` and `css/presentational/` survive). They are separate steps only so
-each lands with green gates and a reviewable diff; all are blocked on the mapper and touch one seam,
-so they can run as a single switchover if fewer checkpoints are wanted.
+each lands with green gates and a reviewable diff; all touch one seam, so they can run as a single
+switchover if fewer checkpoints are wanted.
 
 - [x] **S1 — build spike (passed).** `stylo` 0.20.0 sits behind the `stylo` cargo feature and
       **builds on Rust 1.90 / Windows MSVC** with Python 3.13.15 as `python`; no Gecko, bindgen,
@@ -887,6 +888,15 @@ so they can run as a single switchover if fewer checkpoints are wanted.
     `Cells(0)` is what resolving `padding: 0` gives. The mapper emits one spelling uniformly; the
     two are equal in meaning (`CssPadding::cells()` returns `Some(0)` for both) but not under
     `PartialEq`.
+  - A `style` attribute parses under the document's quirks mode, so unitless lengths are lengths in
+    a quirks document; `css::parser::parse_declarations` is quirks-unaware and rejects them. Stylo
+    is correct. Every other parser divergence in this ledger now reaches inline styles too, which it
+    could not while the mirror was dropping them.
+  - **`:checked`, `:disabled` and `:enabled` never match.** The mirror seeds `ElementState::empty()`
+    and nothing fills it, while `BasicCascade` answers all three through `core::form` — reaching
+    through a disabled `<fieldset>` or `<optgroup>` for `:disabled`, and through `FormState`
+    overrides for `:checked`. **S6b owns the fix**, because seeding needs `StyleDom::build` to take
+    the `FormState` that step introduces anyway.
 - **Stylo preference obligations.** Stylo gates properties behind `stylo_static_prefs` booleans that
   no compiler check can catch; the defaults live in `stylo_static_prefs-0.20.0/preferences.toml`.
   **`layout.grid.enabled` defaults to `false`**, and every grid longhand plus `display: grid` is
@@ -932,16 +942,17 @@ so they can run as a single switchover if fewer checkpoints are wanted.
       timing assertion in a standing gate row would be flaky; its other half is
       `benches/linux_live.rs`. It cannot be a bench: `css::stylo` is private, and benches see only
       the public surface.
-- [ ] **S4b — mapper.** The full `ComputedValues` → `ComputedStyle` mapping in `css::stylo::map`,
-      converting CSS px to cells through the injected `RenderContext` and memoised on
-      `ComputedValues` pointer identity. Three sub-steps so each lands with green gates and a
-      reviewable diff. The layout, paint and golden suites are not duplicated — the
-      `--features stylo` gate row covers them.
+- [x] **S4b — mapper (done).** The full `ComputedValues` → `ComputedStyle` mapping in
+      `css::stylo::map`, converting CSS px to cells through the injected `RenderContext` and
+      memoised on `ComputedValues` pointer identity. The layout, paint and golden suites are not
+      duplicated — the `--features stylo` gate row covers them.
       **The differential oracle is property-scoped:** a test declares CSS, runs `BasicCascade` and
       the Stylo path in one process, and compares a named projection of `ComputedStyle`. Whole-struct
       equality is impossible until S4c ports the UA sheet, and every property under test must be
       declared by the test's own author CSS — a test reading an undeclared property is asserting UA
-      parity, which is S4c's job.
+      parity, which is S4c's job. `tests/differential/controls.rs` is the one exception and not a
+      loophole: `reverse` has no CSS property in either engine, so it cannot inherit a UA-sheet
+      disagreement.
       - [x] **S4b-1 — engine prerequisites, value core, scalar families (done).**
             `css::stylo::prefs`; `Lengths` (px → cells per axis, percentages, and `calc()`
             serialised through `ToCss` and re-parsed by `css::math`, because
@@ -959,9 +970,12 @@ so they can run as a single switchover if fewer checkpoints are wanted.
             and must go through the calc store.
       - [x] **S4b-2 — box, flex, alignment and grid families (done).** Display, sizing, edges and
             borders, flex, box alignment, and the grid families that intern through `GridStore`.
-            On the committed live page, release profile, reference machine: **15.2 ms to map**
-            7,940 elements into 1,865 distinct styles (76.5% memo hits), for **38.4 ms cascade +
-            map** against S4a's ~130 ms budget — the custom cascade's equivalent is 457 ms.
+            On the committed live page, release profile, reference machine: **14.1 ms to map**
+            7,895 elements into 1,844 distinct styles (76.6% memo hits), for **34.6 ms cascade +
+            map** against S4a's ~130 ms budget — the custom cascade's equivalent is 457 ms. (The
+            element count fell from 7,940 when S4b-3 taught the mirror to read `style` attributes:
+            Stylo does not traverse into a `display: none` subtree, and the page hides eleven of
+            them inline.)
             **Contracts a future reader must honour:** `border-*-width` is binary, never quantised
             — `BorderSide::width` is `usize::from(px > 0.0)`, and running Stylo's 3px `medium`
             through `cells_from_px` would erase the frame from every box that declares a style
@@ -970,9 +984,22 @@ so they can run as a single switchover if fewer checkpoints are wanted.
             (`Axes::same`). A bare `<track-breadth>` is not `minmax(t, t)`: the min side is `auto`
             for `auto` *and* `<flex>`. `GridTemplateData::is_valid` moved to `core::style` because
             both cascades need it and CSS's `<fixed-breadth>` admits `calc()` where Taffy does not.
-      - [ ] **S4b-3 — form-control policy and the remaining assembly.** The `reverse` bit that
-            `css/ua.rs::apply_form_control` sets, which has no CSS property at all and is keyed on
-            the element rather than on its computed values.
+      - [x] **S4b-3 — form-control policy and the remaining cascade inputs (done).** `reverse`, the
+            one mapped value with no CSS property behind it, is applied outside the memo from the
+            mirror's `ControlKind`; the mirror now also carries every element's `style` attribute,
+            which it had been dropping silently. `ComputedStyle` is fully mapped but for
+            `legacy_align`, which is S4c's.
+            **Contracts a future reader must honour:** the mirror and the engine share one
+            `SharedRwLock` and the mirror is built *second* — `StyloEngine::mirror` is the only
+            constructor that guarantees both, and `StyleDom::build` is for mirror-only tests. Each
+            matters for a reason no call site shows: `Locked::read_with` asserts on a foreign guard
+            in every profile, and the sharing cache's `have_same_style_attribute` reaches it for
+            every same-tag sibling pair; and `prefs::enable` runs in the engine's constructor while
+            Stylo reads preferences at *parse* time, so a mirror built first drops every gated
+            property an author wrote inline. Inline blocks are interned by source text, because
+            `StyleSource` equality and the rule tree's key are both `Arc::ptr_eq` — a block per
+            element is a rule node per element, 290 where 41 will do on the live page — and the
+            shared block must never be mutated in place.
 - [ ] **S4c — UA sheet and presentational hints.** `css/ua.rs`'s structural half becomes
       `const UA_CSS: &str`; its palette half becomes a user-origin sheet rebuilt on theme change,
       which is already a hard revision. `css/presentational/hints.rs` moves onto
@@ -981,6 +1008,14 @@ so they can run as a single switchover if fewer checkpoints are wanted.
       `a:link { text-decoration-line: underline }`, relying on S4b-1's decoration propagation.
       `ComputedStyle::legacy_align` has no Stylo source and stays `LegacyAlign::None` until this
       step. Whole-struct differential equality becomes possible here.
+      **Inherited from S4b-3, written down so it is not rediscovered:** every part of
+      `css/ua.rs::apply_form_control` except `reverse` is still unported, and every part of it is
+      expressible in CSS — `white-space: pre` on all controls, `cursor: text` on the text-entry ones
+      and `pointer` on the rest, `text-align: center` on everything that is not text entry,
+      `display: block` for `<textarea>`, and `display: none` for `input[type=hidden]`, `<option>`,
+      `<optgroup>` and `<datalist>`. The `<input>` type-state table's "missing or unknown is text"
+      rule needs the text-entry styling as the `input` default with each known non-text type
+      overriding it, since CSS cannot enumerate unknown values.
 - [ ] **S5 — media queries and generated content.** `MediaContext` maps onto `Device`; the terminal
       MQ grammar retires. Counter and marker resolution stays ours, fed by Stylo's computed
       `content`.
@@ -991,11 +1026,13 @@ so they can run as a single switchover if fewer checkpoints are wanted.
       | | custom engine | Stylo |
       |---|---|---|
       | restyle | 105 ms | **0.1 ms** |
-      | elements visited | all 7,789 | **16** |
+      | elements visited | all 7,895 | **26** |
 
-      The 16 are the 13-element hover chain plus three the invalidator found through selectors. This
-      is the difference between walking a document and consulting a dependency map, and it is what
-      M7 is now for.
+      The 26 are the hovered link's own ancestor chain. This is the difference between walking a
+      document and consulting a dependency map, and it is what M7 is now for.
+      *The link is the deepest one in the document, chosen in document order.* S4b-3 changed that:
+      it had been the first `StyleDom::elements` yielded, which iterates a `HashMap`, so the chain
+      length — and therefore the headline number — differed on every run.
       *Read as an upper bound:* Stylo's restyle stops at `ComputedValues` while the custom path also
       produces `ComputedStyle` and clones the whole `StyleTree` (`css/cascade/dynamic.rs:37`). S6b
       re-measures with the mapper in place.
@@ -1011,10 +1048,15 @@ so they can run as a single switchover if fewer checkpoints are wanted.
       map, which gates per element rather than per document. Impact classification stays ours:
       `core::style::dynamic`'s `layout_compatible_with`/`paint_compatible_with` compare the *mapped*
       style, the only comparison that knows what survives cell rounding.
+      **Also seeds the static half of `ElementState` at mirror build**, which nothing does today:
+      `StyleDom::build` takes a `FormState` and fills `:checked`, `:disabled` and `:enabled` from
+      `core::form`, so those selectors stop silently failing to match (divergence ledger above).
 - [ ] **S7 — flip and delete.** Stylo becomes the only cascade; the feature and the superseded `css`
       submodules go. **`css/math.rs` and `css/presentational/` survive** — the mapper reuses
       `css::math`'s parser to lower Stylo's computed `calc()`, and hint synthesis is still ours;
-      only their `Declaration`-based plumbing dies.
+      only their `Declaration`-based plumbing dies. `css::ua::inline_style` needs a new home in the
+      same edit: the mirror calls it so the two cascades cannot disagree on what a `style` attribute
+      is, and deleting `css/ua.rs` around it would take the Stylo path's inline styles with it.
 
 **Gates.** The eight standing commands, plus a ninth row for S1–S6 only:
 `cargo clippy --all-targets --features stylo -- -D warnings` and `cargo test --features stylo`.

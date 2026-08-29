@@ -6,6 +6,7 @@ use style::values::AtomIdent;
 use stylo_dom::ElementState;
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
+use crate::core::form::ControlKind;
 
 use super::{StyleArena, StyleDom, StyloElement};
 
@@ -29,7 +30,11 @@ fn fixture() -> (Document, NodeId, NodeId, NodeId) {
     (document, html, first, second)
 }
 
+/// These tests never cascade, so a lock of their own is safe — `StyloEngine::mirror` is what the
+/// rest of the crate uses. Preferences still have to be on: Stylo reads them while parsing a
+/// `style` attribute, and a gated property would otherwise vanish here and nowhere else.
 fn mirror<'a>(arena: &'a StyleArena<'a>, document: &Document) -> StyleDom<'a> {
+    super::super::prefs::enable();
     StyleDom::build(arena, document, SharedRwLock::new())
 }
 
@@ -322,6 +327,80 @@ fn opaque_identity_is_stable_and_distinct_per_element() {
         TElement::as_node(&root).opaque(),
         TElement::as_node(&first).opaque()
     );
+}
+
+fn styled(document: &mut Document, parent: NodeId, inline: &str) -> NodeId {
+    document.insert_element(
+        Some(parent),
+        "div",
+        ElementNs::Html,
+        vec![Attr::plain("style", inline)],
+    )
+}
+
+/// `StyleSource`'s equality and the rule tree's key are both `Arc::ptr_eq`, so a block per element
+/// is a rule node per element. Interning by source text is what keeps a page that repeats one
+/// `style="…"` sixty times to a single rule node.
+#[test]
+fn identical_style_attributes_share_one_declaration_block() {
+    let mut document = Document::new();
+    let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let first = styled(&mut document, html, "color: red");
+    let second = styled(&mut document, html, "color: red");
+    let other = styled(&mut document, html, "color: blue");
+
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+    let block = |id| {
+        TElement::style_attribute(&element(&dom, id)).map(|borrowed| std::ptr::from_ref(&*borrowed))
+    };
+
+    assert!(block(first).is_some());
+    assert_eq!(block(first), block(second), "one block, two elements");
+    assert_ne!(block(first), block(other));
+}
+
+/// An attribute that declares nothing is stored as nothing: it is what `BasicCascade` sees, and it
+/// keeps the element shareable with its attribute-less siblings.
+#[test]
+fn a_style_attribute_that_declares_nothing_is_not_mirrored_at_all() {
+    let mut document = Document::new();
+    let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let empty = styled(&mut document, html, "");
+    let junk = styled(&mut document, html, ";;; not-a-property: 1");
+    let real = styled(&mut document, html, "color: red");
+
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+
+    assert!(TElement::style_attribute(&element(&dom, empty)).is_none());
+    assert!(TElement::style_attribute(&element(&dom, junk)).is_none());
+    assert!(TElement::style_attribute(&element(&dom, real)).is_some());
+}
+
+/// The mapper reads this rather than the tag, because `ComputedValues` say nothing about either.
+#[test]
+fn the_mirror_carries_each_elements_control_kind() {
+    let mut document = Document::new();
+    let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let field = document.insert_element(Some(html), "input", ElementNs::Html, vec![]);
+    let hidden = document.insert_element(
+        Some(html),
+        "input",
+        ElementNs::Html,
+        vec![Attr::plain("type", "hidden")],
+    );
+    let plain = document.insert_element(Some(html), "div", ElementNs::Html, vec![]);
+
+    let arena = StyleArena::new();
+    let dom = mirror(&arena, &document);
+
+    assert_eq!(element(&dom, field).control_kind(), Some(ControlKind::Text));
+    assert_eq!(
+        element(&dom, hidden).control_kind(),
+        Some(ControlKind::Hidden)
+    );
+    assert_eq!(element(&dom, plain).control_kind(), None);
 }
 
 #[test]
