@@ -12,8 +12,10 @@ use style::context::{QuirksMode, SharedStyleContext};
 use style::data::{ElementData, ElementDataMut, ElementDataRef};
 use style::dom::{LayoutIterator, NodeInfo, OpaqueNode, TDocument, TElement, TNode, TShadowRoot};
 use style::properties::PropertyDeclarationBlock;
+use style::rule_tree::{CascadeLevel, CascadeOrigin};
 use style::selector_parser::{AttrValue, Lang, NonTSPseudoClass, PseudoElement, SelectorImpl};
 use style::shared_lock::{Locked, SharedRwLock};
+use style::stylesheets::layer_rule::LayerOrder;
 use style::stylist::CascadeData;
 use style::values::{AtomIdent, GenericAtomIdent};
 use style::{Atom, CaseSensitivityExt, LocalName as StyleLocalName, Namespace as StyleNamespace};
@@ -302,7 +304,7 @@ impl SelectorsElement for StyloElement<'_> {
             && element
                 .attrs
                 .iter()
-                .any(|attr| attr.name.as_ref() == "href")
+                .any(|attr| attr.namespace == ns!() && attr.name.as_ref() == "href")
     }
 
     fn is_html_slot_element(&self) -> bool {
@@ -563,10 +565,17 @@ impl<'a> TElement for StyloElement<'a> {
     fn synthesize_presentational_hints_for_legacy_attributes<V>(
         &self,
         _visited_handling: VisitedHandlingMode,
-        _hints: &mut V,
+        hints: &mut V,
     ) where
         V: Push<ApplicableDeclarationBlock>,
     {
+        if let Some(declarations) = self.element().presentational_hints.clone() {
+            hints.push(ApplicableDeclarationBlock::from_declarations(
+                declarations,
+                CascadeLevel::new(CascadeOrigin::PresHints),
+                LayerOrder::root(),
+            ));
+        }
     }
 
     fn local_name(&self) -> &LocalName {

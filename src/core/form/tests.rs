@@ -128,3 +128,29 @@ fn typed_mutations_enforce_control_rules_and_radio_groups() {
         Some(1)
     );
 }
+
+#[test]
+fn input_type_states_distinguish_unknown_values_from_known_unsupported_states() {
+    for value in [
+        None,
+        Some(""),
+        Some("text"),
+        Some("SEARCH"),
+        Some("unknown"),
+    ] {
+        assert_eq!(input_kind(value), ControlKind::Text, "{value:?}");
+    }
+    for value in [
+        "file",
+        "image",
+        "color",
+        "range",
+        "date",
+        "time",
+        "month",
+        "week",
+        "datetime-local",
+    ] {
+        assert_eq!(input_kind(Some(value)), ControlKind::Unsupported, "{value}");
+    }
+}

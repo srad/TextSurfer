@@ -16,7 +16,7 @@ use style::traversal_flags::TraversalFlags;
 
 use crate::core::dom::Document;
 use crate::core::geom::Size;
-use crate::core::style::CellMetric;
+use crate::core::style::{CellMetric, Palette};
 
 use super::device::device;
 use super::dom::{StyleArena, StyleDom, StyloElement};
@@ -63,11 +63,13 @@ impl StyloEngine {
         metric: CellMetric,
         viewport: Size,
         quirks_mode: QuirksMode,
+        palette: Palette,
         author_css: &[&str],
     ) -> Self {
         Self::with_metrics(
             viewport,
             quirks_mode,
+            palette,
             author_css,
             device(metric, viewport, quirks_mode),
         )
@@ -76,6 +78,7 @@ impl StyloEngine {
     pub(super) fn with_metrics(
         _viewport: Size,
         quirks_mode: QuirksMode,
+        palette: Palette,
         author_css: &[&str],
         device: style::device::Device,
     ) -> Self {
@@ -87,6 +90,7 @@ impl StyloEngine {
         {
             let guard = lock.read();
             stylist.append_stylesheet(sheets::user_agent_sheet(&lock, quirks_mode), &guard);
+            stylist.append_stylesheet(sheets::user_sheet(palette, &lock, quirks_mode), &guard);
             for css in author_css {
                 stylist.append_stylesheet(sheets::author_sheet(css, &lock, quirks_mode), &guard);
             }

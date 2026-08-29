@@ -1,14 +1,12 @@
 //! The user-agent stylesheet, hardcoded as Rust rather than CSS text (locked in ROADMAP.md). A
 //! policy table keyed on element name, not cascade logic.
 
-use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId, attr_value};
+use crate::core::dom::{AttrNs, Document, ElementNs, Node, NodeId};
 use crate::core::form::{ControlKind, control_kind};
 use crate::core::style::{
     BorderSpacing, ComputedStyle, CssMargin, Cursor, Display, FontSize, ListStyleType, Palette,
     Rgba, TextAlign, VerticalAlign, WhiteSpace,
 };
-
-use super::values::parse_list_style_type;
 
 #[derive(Clone, Copy)]
 pub(super) struct UaContext {
@@ -142,12 +140,6 @@ pub(super) fn ua_style(
     }
     if name == "ol" {
         style.list_style_type = ListStyleType::Decimal;
-    }
-    if matches!(name.as_str(), "ol" | "ul" | "menu" | "li")
-        && let Some(value) = attr_value(attrs, "type")
-        && let Some(list_type) = parse_html_list_type(value)
-    {
-        style.list_style_type = list_type;
     }
     if name == "table" {
         style.border_spacing = BorderSpacing::new(1, 0);
@@ -304,17 +296,6 @@ fn nested_bullet_type(document: &Document, id: NodeId) -> ListStyleType {
         0 => ListStyleType::Disc,
         1 => ListStyleType::Circle,
         _ => ListStyleType::Square,
-    }
-}
-
-fn parse_html_list_type(value: &str) -> Option<ListStyleType> {
-    match value.trim() {
-        "1" => Some(ListStyleType::Decimal),
-        "a" => Some(ListStyleType::LowerAlpha),
-        "A" => Some(ListStyleType::UpperAlpha),
-        "i" => Some(ListStyleType::LowerRoman),
-        "I" => Some(ListStyleType::UpperRoman),
-        other => parse_list_style_type(other),
     }
 }
 

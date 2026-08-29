@@ -26,7 +26,9 @@ use style::dom::{TDocument, TNode};
 use style::properties::ComputedValues;
 use style::values::computed::text::TextDecorationLine;
 
-use crate::core::style::{ComputedStyle, LengthAxis, RenderContext, StyleStore, StyleTree};
+use crate::core::style::{
+    ComputedStyle, LegacyAlign, LengthAxis, RenderContext, StyleStore, StyleTree,
+};
 
 pub(super) use color::SENTINEL_CSS;
 
@@ -69,20 +71,32 @@ pub(super) fn style_tree_measured(
     // element's decorations into its descendants, so a parent must be mapped before its children.
     // Starting at the document node rather than `root_element` also covers a document with more
     // than one root.
-    let mut stack = vec![(dom.document().as_node(), TextDecorationLine::empty())];
-    while let Some((node, inherited)) = stack.pop() {
-        let mut descend = inherited;
+    let mut stack = vec![(
+        dom.document().as_node(),
+        TextDecorationLine::empty(),
+        LegacyAlign::None,
+    )];
+    while let Some((node, inherited_decorations, inherited_align)) = stack.pop() {
+        let mut descend_decorations = inherited_decorations;
+        let mut descend_align = inherited_align;
         if let Some(element) = node.as_element()
             && let Some(values) = element.primary_style()
         {
+            let legacy_align = if element.has_author_text_align(&values) {
+                LegacyAlign::None
+            } else {
+                element.legacy_align().unwrap_or(inherited_align)
+            };
             let style = mapper.style(
                 &values,
                 ElementPolicy {
-                    decorations: inherited,
+                    decorations: inherited_decorations,
                     control: element.control_kind(),
+                    legacy_align,
                 },
             );
-            descend = inherited | text::decorations(&values);
+            descend_decorations = inherited_decorations | text::decorations(&values);
+            descend_align = legacy_align;
             elements += 1;
             if let Some(id) = element.dom_id() {
                 tree.insert(id, style);
@@ -93,7 +107,7 @@ pub(super) fn style_tree_measured(
         let mut children = Vec::new();
         let mut child = node.first_child();
         while let Some(node) = child {
-            children.push((node, descend));
+            children.push((node, descend_decorations, descend_align));
             child = node.next_sibling();
         }
         stack.extend(children.into_iter().rev());
@@ -140,6 +154,7 @@ impl Mapper {
         };
         policy::inherit_decorations(&mut style, element.decorations);
         policy::form_control(&mut style, element.control);
+        policy::legacy_align(&mut style, element.legacy_align);
         style
     }
 

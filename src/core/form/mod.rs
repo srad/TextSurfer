@@ -145,8 +145,8 @@ fn input_kind(type_attr: Option<&str>) -> ControlKind {
         "reset" => ControlKind::Reset,
         "button" => ControlKind::Button,
         "text" | "search" | "url" | "tel" | "email" | "number" => ControlKind::Text,
-        // file, image, color, range, date, time, month, week, datetime-local
-        _ if !value.trim().is_empty() => ControlKind::Unsupported,
+        "file" | "image" | "color" | "range" | "date" | "time" | "month" | "week"
+        | "datetime-local" => ControlKind::Unsupported,
         _ => ControlKind::Text,
     }
 }

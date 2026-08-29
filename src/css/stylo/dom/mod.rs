@@ -13,7 +13,8 @@ use selectors::matching::ElementSelectorFlags;
 use servo_arc::Arc as ServoArc;
 use style::context::QuirksMode;
 use style::data::ElementDataWrapper;
-use style::properties::{ComputedValues, PropertyDeclarationBlock};
+use style::properties::{ComputedValues, LonghandId, PropertyDeclarationBlock};
+use style::rule_tree::CascadeOrigin;
 use style::shared_lock::{Locked, SharedRwLock};
 use style::values::{AtomIdent, AtomString};
 use stylo_dom::ElementState;
@@ -21,6 +22,7 @@ use web_atoms::{LocalName, Namespace};
 
 use crate::core::dom::NodeId;
 use crate::core::form::ControlKind;
+use crate::core::style::LegacyAlign;
 
 /// The backing store for a [`StyleDom`].
 ///
@@ -89,6 +91,8 @@ pub(crate) struct ElementNode {
     /// the moment a child is resolved before its parent.
     allocated: Cell<bool>,
     style_attribute: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+    presentational_hints: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+    legacy_align: Option<LegacyAlign>,
     children_to_process: Cell<isize>,
     dirty_descendants: Cell<bool>,
     has_snapshot: Cell<bool>,
@@ -199,6 +203,38 @@ impl<'a> StyloElement<'a> {
 
     pub(crate) fn control_kind(&self) -> Option<ControlKind> {
         self.element().control
+    }
+
+    pub(crate) fn legacy_align(&self) -> Option<LegacyAlign> {
+        self.element().legacy_align
+    }
+
+    pub(crate) fn has_author_text_align(&self, values: &ComputedValues) -> bool {
+        let Some(rules) = values.rules.as_ref() else {
+            return false;
+        };
+        let document = match &self
+            .0
+            .owner_document()
+            .expect("an element has an owner document")
+            .kind
+        {
+            NodeKind::Document(document) => document,
+            _ => unreachable!("an element's owner document is a document node"),
+        };
+        let guard = document.lock.read();
+        rules.self_and_ancestors().any(|node| {
+            node.cascade_level().origin() == CascadeOrigin::Author
+                && node.style_source().is_some_and(|source| {
+                    source
+                        .read(&guard)
+                        .declarations()
+                        .iter()
+                        .any(|declaration| {
+                            declaration.id().as_longhand() == Some(LonghandId::TextAlign)
+                        })
+                })
+        })
     }
 
     pub(crate) fn state(&self) -> ElementState {

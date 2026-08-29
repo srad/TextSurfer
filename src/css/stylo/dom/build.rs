@@ -14,6 +14,8 @@ use web_atoms::{LocalName, Namespace, ns};
 
 use crate::core::dom::{Attr, AttrNs, Document, DomQuirksMode, ElementNs, Node, NodeId};
 use crate::core::form::{ControlKind, control_kind};
+use crate::core::style::LegacyAlign;
+use crate::css::presentational::synthesized_hints;
 use crate::css::ua::inline_style;
 
 use super::{DocumentNode, ElementNode, MirrorAttr, NodeKind, StyleArena, StyleDom, StyleNode};
@@ -32,6 +34,7 @@ struct Build<'d> {
     lock: SharedRwLock,
     quirks_mode: QuirksMode,
     inline: HashMap<&'d str, Option<ServoArc<Locked<PropertyDeclarationBlock>>>>,
+    hints: HashMap<String, Option<ServoArc<Locked<PropertyDeclarationBlock>>>>,
 }
 
 impl<'d> Build<'d> {
@@ -70,6 +73,45 @@ impl<'d> Build<'d> {
         self.inline.insert(css, block.clone());
         block
     }
+
+    fn presentational_hints(
+        &mut self,
+        source: NodeId,
+    ) -> (
+        Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+        Option<LegacyAlign>,
+    ) {
+        let hints = synthesized_hints(self.document, source);
+        let legacy_align = hints.legacy_align;
+        let css = hints
+            .declarations
+            .into_iter()
+            .map(|hint| {
+                let value = match (hint.name.as_str(), hint.value.as_str()) {
+                    ("vertical-align", "top") => "text-top",
+                    ("vertical-align", "bottom") => "text-bottom",
+                    _ => hint.value.as_str(),
+                };
+                format!("{}:{value};", hint.name)
+            })
+            .collect::<String>();
+        if css.is_empty() {
+            return (None, legacy_align);
+        }
+        if let Some(interned) = self.hints.get(&css) {
+            return (interned.clone(), legacy_align);
+        }
+        let block = parse_style_attribute(
+            &css,
+            &super::super::sheets::base_url(),
+            None,
+            self.quirks_mode,
+            CssRuleType::Style,
+        );
+        let block = (!block.is_empty()).then(|| ServoArc::new(self.lock.wrap(block)));
+        self.hints.insert(css, block.clone());
+        (block, legacy_align)
+    }
 }
 
 impl<'a> StyleDom<'a> {
@@ -107,6 +149,7 @@ impl<'a> StyleDom<'a> {
             lock,
             quirks_mode,
             inline: HashMap::new(),
+            hints: HashMap::new(),
         };
         for source in document.roots() {
             dom.append_subtree(arena, &mut build, *source, root, 0);
@@ -131,13 +174,18 @@ impl<'a> StyleDom<'a> {
             return;
         };
         let kind = match node {
-            Node::Element { name, ns, attrs } => NodeKind::Element(element_node(
-                name,
-                *ns,
-                attrs,
-                control_kind(document, source),
-                build.inline_style(source),
-            )),
+            Node::Element { name, ns, attrs } => {
+                let (presentational_hints, legacy_align) = build.presentational_hints(source);
+                NodeKind::Element(element_node(
+                    name,
+                    *ns,
+                    attrs,
+                    control_kind(document, source),
+                    build.inline_style(source),
+                    presentational_hints,
+                    legacy_align,
+                ))
+            }
             Node::Text { .. } => NodeKind::Text,
             // Comments, PIs, doctypes and fragments never match a selector and never inherit, so
             // the mirror leaves them out entirely rather than carrying dead nodes through every
@@ -195,6 +243,8 @@ fn element_node(
     attrs: &[Attr],
     control: Option<ControlKind>,
     style_attribute: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+    presentational_hints: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+    legacy_align: Option<LegacyAlign>,
 ) -> ElementNode {
     let mut id = None;
     let mut classes = Vec::new();
@@ -225,6 +275,8 @@ fn element_node(
         data: ElementDataWrapper::default(),
         allocated: Cell::new(false),
         style_attribute,
+        presentational_hints,
+        legacy_align,
         children_to_process: Cell::new(0),
         dirty_descendants: Cell::new(false),
         has_snapshot: Cell::new(false),

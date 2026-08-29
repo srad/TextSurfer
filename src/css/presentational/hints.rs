@@ -1,23 +1,58 @@
 use crate::core::dom::{Document, ElementNs, Node, NodeId, attr_value};
-use crate::core::style::Rgb;
+use crate::core::style::{LegacyAlign, Rgb};
 use crate::css::Declaration;
+use crate::css::values::parse_list_style_type;
 
 use super::legacy::{dimension, legacy_color, non_negative_integer};
+use super::{HintDeclaration, PresentationalHints};
 
 pub(in crate::css) fn presentational_hints(document: &Document, id: NodeId) -> Vec<Declaration> {
+    let hints = synthesized_hints(document, id);
+    let mut declarations: Vec<_> = hints
+        .declarations
+        .into_iter()
+        .map(|hint| Declaration {
+            name: hint.name,
+            value: hint.value,
+            important: false,
+        })
+        .collect();
+    if let Some(align) = hints.legacy_align {
+        push_declaration(
+            &mut declarations,
+            "-textsurfer-legacy-align",
+            match align {
+                LegacyAlign::Left => "left",
+                LegacyAlign::Right => "right",
+                LegacyAlign::Center => "center",
+                LegacyAlign::None => return declarations,
+            },
+        );
+    }
+    declarations
+}
+
+pub(in crate::css) fn synthesized_hints(document: &Document, id: NodeId) -> PresentationalHints {
     let Some(Node::Element { name, ns, attrs }) = document.node(id) else {
-        return Vec::new();
+        return PresentationalHints {
+            declarations: Vec::new(),
+            legacy_align: None,
+        };
     };
     if *ns != ElementNs::Html {
-        return Vec::new();
+        return PresentationalHints {
+            declarations: Vec::new(),
+            legacy_align: None,
+        };
     }
     let mut hints = Vec::new();
+    let mut legacy_align = None;
     if name == "center" {
         push(&mut hints, "text-align", "center");
-        push(&mut hints, "-textsurfer-legacy-align", "center");
+        legacy_align = Some(LegacyAlign::Center);
     }
     if let Some(align) = attr_value(attrs, "align") {
-        map_align(name, align, &mut hints);
+        map_align(name, align, &mut hints, &mut legacy_align);
     }
     map_float_spacing(name, attrs, &mut hints);
     if name == "br"
@@ -76,25 +111,38 @@ pub(in crate::css) fn presentational_hints(document: &Document, id: NodeId) -> V
         map_cell_table_borders(table_attrs, &mut hints);
     }
     map_rule_tracks(document, id, name, &mut hints);
-    hints
+    if matches!(name.as_str(), "ol" | "ul" | "menu" | "li")
+        && let Some(value) = attr_value(attrs, "type")
+        && let Some(list_type) = parse_html_list_type(value)
+    {
+        push(&mut hints, "list-style-type", list_type);
+    }
+    PresentationalHints {
+        declarations: hints,
+        legacy_align,
+    }
 }
 
-fn map_align(name: &str, value: &str, hints: &mut Vec<Declaration>) {
+fn map_align(
+    name: &str,
+    value: &str,
+    hints: &mut Vec<HintDeclaration>,
+    legacy_align: &mut Option<LegacyAlign>,
+) {
     let value = value.trim().to_ascii_lowercase();
     match name {
         "div" => match value.as_str() {
             "middle" => {
                 push(hints, "text-align", "center");
-                push(hints, "-textsurfer-legacy-align", "center");
+                *legacy_align = Some(LegacyAlign::Center);
             }
             "left" | "right" | "center" | "justify" => {
                 push(hints, "text-align", &value);
-                let legacy = if value == "justify" {
-                    "left"
-                } else {
-                    value.as_str()
-                };
-                push(hints, "-textsurfer-legacy-align", legacy);
+                *legacy_align = Some(match value.as_str() {
+                    "right" => LegacyAlign::Right,
+                    "center" => LegacyAlign::Center,
+                    _ => LegacyAlign::Left,
+                });
             }
             _ => {}
         },
@@ -142,7 +190,11 @@ fn map_align(name: &str, value: &str, hints: &mut Vec<Declaration>) {
     }
 }
 
-fn map_float_spacing(name: &str, attrs: &[crate::core::dom::Attr], hints: &mut Vec<Declaration>) {
+fn map_float_spacing(
+    name: &str,
+    attrs: &[crate::core::dom::Attr],
+    hints: &mut Vec<HintDeclaration>,
+) {
     if !matches!(name, "embed" | "img" | "object" | "input") {
         return;
     }
@@ -161,7 +213,7 @@ fn map_float_spacing(name: &str, attrs: &[crate::core::dom::Attr], hints: &mut V
     }
 }
 
-fn map_table(attrs: &[crate::core::dom::Attr], hints: &mut Vec<Declaration>) {
+fn map_table(attrs: &[crate::core::dom::Attr], hints: &mut Vec<HintDeclaration>) {
     if let Some(value) = attr_value(attrs, "cellspacing").and_then(non_negative_integer) {
         push(hints, "border-spacing", &format!("{value}px"));
     }
@@ -198,7 +250,7 @@ fn map_table(attrs: &[crate::core::dom::Attr], hints: &mut Vec<Declaration>) {
     }
 }
 
-fn map_cell_table_borders(attrs: &[crate::core::dom::Attr], hints: &mut Vec<Declaration>) {
+fn map_cell_table_borders(attrs: &[crate::core::dom::Attr], hints: &mut Vec<HintDeclaration>) {
     if let Some(raw) = attr_value(attrs, "border")
         && non_negative_integer(raw) != Some(0)
     {
@@ -225,7 +277,7 @@ fn map_cell_table_borders(attrs: &[crate::core::dom::Attr], hints: &mut Vec<Decl
     }
 }
 
-fn map_rule_tracks(document: &Document, id: NodeId, name: &str, hints: &mut Vec<Declaration>) {
+fn map_rule_tracks(document: &Document, id: NodeId, name: &str, hints: &mut Vec<HintDeclaration>) {
     let Some(table) = direct_table(document, id, name) else {
         return;
     };
@@ -290,7 +342,22 @@ fn element_name(document: &Document, id: NodeId) -> Option<&str> {
     }
 }
 
-fn push(hints: &mut Vec<Declaration>, name: &str, value: &str) {
+fn push(hints: &mut Vec<HintDeclaration>, name: &str, value: &str) {
+    hints.push(HintDeclaration {
+        name: name.to_string(),
+        value: value.to_string(),
+    });
+}
+
+fn push_color(hints: &mut Vec<HintDeclaration>, name: &str, color: Rgb) {
+    push(
+        hints,
+        name,
+        &format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b),
+    );
+}
+
+fn push_declaration(hints: &mut Vec<Declaration>, name: &str, value: &str) {
     hints.push(Declaration {
         name: name.to_string(),
         value: value.to_string(),
@@ -298,12 +365,26 @@ fn push(hints: &mut Vec<Declaration>, name: &str, value: &str) {
     });
 }
 
-fn push_color(hints: &mut Vec<Declaration>, name: &str, color: Rgb) {
-    push(
-        hints,
-        name,
-        &format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b),
-    );
+fn parse_html_list_type(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "1" => Some("decimal"),
+        "a" => Some("lower-alpha"),
+        "A" => Some("upper-alpha"),
+        "i" => Some("lower-roman"),
+        "I" => Some("upper-roman"),
+        other => match parse_list_style_type(other)? {
+            crate::core::style::ListStyleType::None => Some("none"),
+            crate::core::style::ListStyleType::Disc => Some("disc"),
+            crate::core::style::ListStyleType::Circle => Some("circle"),
+            crate::core::style::ListStyleType::Square => Some("square"),
+            crate::core::style::ListStyleType::Decimal => Some("decimal"),
+            crate::core::style::ListStyleType::DecimalLeadingZero => Some("decimal-leading-zero"),
+            crate::core::style::ListStyleType::LowerAlpha => Some("lower-alpha"),
+            crate::core::style::ListStyleType::UpperAlpha => Some("upper-alpha"),
+            crate::core::style::ListStyleType::LowerRoman => Some("lower-roman"),
+            crate::core::style::ListStyleType::UpperRoman => Some("upper-roman"),
+        },
+    }
 }
 
 fn matches_ci(value: &str, candidates: &[&str]) -> bool {

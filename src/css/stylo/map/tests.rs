@@ -6,7 +6,7 @@ use style::values::generics::length::GenericSize;
 
 use crate::core::dom::{Document, ElementNs, NodeId};
 use crate::core::geom::Size;
-use crate::core::style::{CalcRange, CellMetric, LengthAxis, RenderContext, StyleStore};
+use crate::core::style::{CalcRange, CellMetric, LengthAxis, Palette, RenderContext, StyleStore};
 
 use super::super::dom::StyleArena;
 use super::super::engine::StyloEngine;
@@ -29,7 +29,13 @@ fn computed(css: &str) -> servo_arc::Arc<ComputedValues> {
     let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
     let div = document.insert_element(Some(body), "div", ElementNs::Html, vec![]);
 
-    let engine = StyloEngine::new(CellMetric::DEFAULT, VIEWPORT, QuirksMode::NoQuirks, &[css]);
+    let engine = StyloEngine::new(
+        CellMetric::DEFAULT,
+        VIEWPORT,
+        QuirksMode::NoQuirks,
+        Palette::default(),
+        &[css],
+    );
     let arena = StyleArena::new();
     let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
@@ -46,7 +52,13 @@ fn mapped(css: &str) -> (crate::core::style::StyleTree, NodeId) {
     let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
     let div = document.insert_element(Some(body), "div", ElementNs::Html, vec![]);
 
-    let engine = StyloEngine::new(CellMetric::DEFAULT, VIEWPORT, QuirksMode::NoQuirks, &[css]);
+    let engine = StyloEngine::new(
+        CellMetric::DEFAULT,
+        VIEWPORT,
+        QuirksMode::NoQuirks,
+        Palette::default(),
+        &[css],
+    );
     let arena = StyleArena::new();
     let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
@@ -275,6 +287,7 @@ fn elements_sharing_computed_values_are_mapped_once() {
         CellMetric::DEFAULT,
         VIEWPORT,
         QuirksMode::NoQuirks,
+        Palette::default(),
         &["div { color: red }"],
     );
     let arena = StyleArena::new();
@@ -314,6 +327,7 @@ fn every_styled_element_reaches_the_tree() {
         CellMetric::DEFAULT,
         VIEWPORT,
         QuirksMode::NoQuirks,
+        Palette::default(),
         &["html, body, div, span, p { color: #ff0000 }"],
     );
     let arena = StyleArena::new();
@@ -534,4 +548,32 @@ fn grid_area_coordinates_need_no_translation() {
     let b = named("b");
     assert_eq!((b.row_start, b.row_end), (1, 3), "two rows tall");
     assert_eq!((b.column_start, b.column_end), (3, 4));
+}
+
+#[test]
+fn identical_presentational_hints_preserve_style_sharing() {
+    let mut document = Document::new();
+    let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
+    for _ in 0..64 {
+        document.insert_element(
+            Some(body),
+            "td",
+            ElementNs::Html,
+            vec![crate::core::dom::Attr::plain("bgcolor", "#123456")],
+        );
+    }
+    let engine = StyloEngine::new(
+        CellMetric::DEFAULT,
+        VIEWPORT,
+        QuirksMode::NoQuirks,
+        Palette::default(),
+        &[],
+    );
+    let arena = StyleArena::new();
+    let dom = engine.mirror(&arena, &document);
+    engine.cascade(&dom);
+    let (_, stats) = style_tree_measured(&dom, context());
+    assert_eq!(stats.elements, 66);
+    assert!(stats.distinct <= 3, "{stats:?}");
 }

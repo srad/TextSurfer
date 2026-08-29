@@ -157,10 +157,7 @@ fn padding(
         CalcRange::NonNegative,
         store,
     ) {
-        // `CssPadding` spells zero two ways: `Zero` is the enum default an undeclared edge keeps,
-        // and `Cells(0)` is what resolving `padding: 0` produces. They are the same value —
-        // `CssPadding::cells()` returns `Some(0)` for both — so the mapper emits one spelling
-        // uniformly rather than trying to guess which one the other engine would have used.
+        Some(Value::Cells(0)) => CssPadding::Zero,
         Some(Value::Cells(cells)) => CssPadding::Cells(cells.max(0) as usize),
         Some(Value::Percent(fraction)) => {
             CssPadding::Percent(super::sizing::percentage(fraction.max(0.0)))
@@ -226,6 +223,9 @@ fn line_style(value: BorderStyle) -> BorderLineStyle {
 /// The colour sentinel does double duty here: an element whose `color` is still the theme's leaves
 /// its borders reading as `CurrentColor`, which is exactly what an unstyled border means.
 fn border_color(values: &ComputedValues, value: &style::values::computed::Color) -> BorderColor {
+    if matches!(value, style::values::computed::Color::CurrentColor) {
+        return BorderColor::CurrentColor;
+    }
     let resolved = values.resolve_color(value);
     let rgba = color::rgba(&resolved);
     if rgba.alpha == 0 {

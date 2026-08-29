@@ -245,6 +245,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --all-features -- -D warnings
 cargo clippy --no-default-features --all-targets -- -D warnings
+cargo clippy --all-targets --features stylo -- -D warnings  # while M7 is open
 cargo test
 cargo test --features js
 cargo test --features vga

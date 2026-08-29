@@ -10,7 +10,7 @@ use stylo_dom::ElementState;
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
 use crate::core::geom::Size;
-use crate::core::style::{CellMetric, LengthAxis};
+use crate::core::style::{CellMetric, LengthAxis, Palette};
 
 use super::device::{CellFontMetrics, device_with_metrics};
 use super::dom::{StyleArena, StyleDom, StyloElement, StyloNode};
@@ -48,6 +48,7 @@ fn engine(author_css: &[&str]) -> StyloEngine {
         CellMetric::DEFAULT,
         VIEWPORT,
         QuirksMode::NoQuirks,
+        Palette::default(),
         author_css,
     )
 }
@@ -195,6 +196,7 @@ fn ex_and_ch_resolve_to_half_the_font_size_through_the_provider() {
     let engine = StyloEngine::with_metrics(
         VIEWPORT,
         QuirksMode::NoQuirks,
+        Palette::default(),
         &["p { border-top-style: solid; border-top-width: 2ch }"],
         device,
     );
@@ -302,6 +304,7 @@ fn measure_the_live_page_cascade() {
             rows: 40,
         },
         QuirksMode::NoQuirks,
+        Palette::default(),
         &[MODULES_CSS, SITE_CSS],
     );
     let stylist = started.elapsed();

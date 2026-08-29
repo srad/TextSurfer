@@ -1,7 +1,7 @@
 use style::values::computed::text::TextDecorationLine;
 
 use crate::core::form::ControlKind;
-use crate::core::style::{ComputedStyle, Visibility};
+use crate::core::style::{ComputedStyle, LegacyAlign, Visibility};
 
 /// The two things one element contributes that its `ComputedValues` cannot.
 ///
@@ -11,6 +11,7 @@ use crate::core::style::{ComputedStyle, Visibility};
 pub(super) struct ElementPolicy {
     pub(super) decorations: TextDecorationLine,
     pub(super) control: Option<ControlKind>,
+    pub(super) legacy_align: LegacyAlign,
 }
 
 /// A form control renders as a bracketed stand-in, and `reverse` is what tells it from body text.
@@ -26,6 +27,10 @@ pub(super) struct ElementPolicy {
 pub(super) fn form_control(style: &mut ComputedStyle, control: Option<ControlKind>) {
     // A hidden input is submitted and never rendered, so there is no stand-in to distinguish.
     style.reverse = control.is_some_and(|kind| kind != ControlKind::Hidden);
+}
+
+pub(super) fn legacy_align(style: &mut ComputedStyle, align: LegacyAlign) {
+    style.legacy_align = align;
 }
 
 /// `opacity: 0` computes to `visibility: hidden`.
