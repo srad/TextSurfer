@@ -35,7 +35,12 @@ fn fixture() -> (Document, NodeId, NodeId, NodeId) {
 /// `style` attribute, and a gated property would otherwise vanish here and nowhere else.
 fn mirror<'a>(arena: &'a StyleArena<'a>, document: &Document) -> StyleDom<'a> {
     super::super::prefs::enable();
-    StyleDom::build(arena, document, SharedRwLock::new())
+    StyleDom::build(
+        arena,
+        document,
+        crate::core::form::FormState::empty(),
+        SharedRwLock::new(),
+    )
 }
 
 fn element<'a>(dom: &StyleDom<'a>, id: NodeId) -> StyloElement<'a> {
@@ -360,8 +365,6 @@ fn identical_style_attributes_share_one_declaration_block() {
     assert_ne!(block(first), block(other));
 }
 
-/// An attribute that declares nothing is stored as nothing: it is what `BasicCascade` sees, and it
-/// keeps the element shareable with its attribute-less siblings.
 #[test]
 fn a_style_attribute_that_declares_nothing_is_not_mirrored_at_all() {
     let mut document = Document::new();

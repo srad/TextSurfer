@@ -1,10 +1,135 @@
+use std::borrow::Cow;
+use std::cell::{Cell, RefCell};
+
+use cssparser::{Parser, ParserInput, SourceLocation};
 use servo_arc::Arc as ServoArc;
 use style::context::QuirksMode;
+use style::custom_properties::AttrTaint;
+use style::error_reporting::{ContextualParseError, ParseErrorReporter};
 use style::media_queries::MediaList;
+use style::parser::ParserContext;
 use style::shared_lock::SharedRwLock;
-use style::stylesheets::{AllowImportRules, DocumentStyleSheet, Origin, Stylesheet, UrlExtraData};
+use style::stylesheets::import_rule::{
+    ImportLayer, ImportRule, ImportSheet, ImportSupportsCondition,
+};
+use style::stylesheets::{
+    AllowImportRules, DocumentStyleSheet, Namespaces, Origin, Stylesheet, StylesheetLoader,
+    UrlExtraData,
+};
+use style::values::CssUrl;
+use style_traits::{ParsingMode, ToCss};
 
+use crate::core::dom::DomQuirksMode;
 use crate::core::style::Palette;
+use crate::pipeline::render::StyleSource;
+
+pub(crate) struct DiscoveredImport {
+    pub url: url::Url,
+    pub media: String,
+}
+
+#[derive(Default)]
+pub(super) struct WarningCounter(Cell<usize>);
+
+impl WarningCounter {
+    pub(super) fn count(&self) -> usize {
+        self.0.get()
+    }
+}
+
+impl ParseErrorReporter for WarningCounter {
+    fn report_error(
+        &self,
+        _url: &UrlExtraData,
+        _location: SourceLocation,
+        _error: ContextualParseError,
+    ) {
+        self.0.set(self.0.get().saturating_add(1));
+    }
+}
+
+pub(crate) fn discover_imports(
+    source: &str,
+    base_url: &url::Url,
+    quirks_mode: DomQuirksMode,
+) -> Vec<DiscoveredImport> {
+    super::engine::mark_layout_thread();
+    super::prefs::enable();
+    let lock = SharedRwLock::new();
+    let loader = DiscoveryLoader {
+        imports: RefCell::new(Vec::new()),
+    };
+    let sheet = Stylesheet::from_str(
+        source,
+        UrlExtraData::from(base_url.clone()),
+        Origin::Author,
+        ServoArc::new(lock.wrap(MediaList::empty())),
+        lock,
+        Some(&loader),
+        None,
+        stylo_quirks_mode(quirks_mode),
+        AllowImportRules::Yes,
+    );
+    drop(sheet);
+    loader.imports.into_inner()
+}
+
+pub(crate) fn media_matches(
+    source: &str,
+    media: crate::css::MediaContext,
+    quirks_mode: DomQuirksMode,
+) -> bool {
+    super::engine::mark_layout_thread();
+    super::prefs::enable();
+    let quirks_mode = stylo_quirks_mode(quirks_mode);
+    let url_data = base_url();
+    parse_media(source, &url_data, quirks_mode).evaluate(
+        &super::device::device_for_media(media, quirks_mode),
+        quirks_mode,
+        &mut style::stylesheets::CustomMediaEvaluator::none(),
+    )
+}
+
+struct DiscoveryLoader {
+    imports: RefCell<Vec<DiscoveredImport>>,
+}
+
+impl StylesheetLoader for DiscoveryLoader {
+    fn request_stylesheet(
+        &self,
+        url: CssUrl,
+        source_location: SourceLocation,
+        lock: &SharedRwLock,
+        media: ServoArc<style::shared_lock::Locked<MediaList>>,
+        supports: Option<ImportSupportsCondition>,
+        _layer: ImportLayer,
+    ) -> ServoArc<style::shared_lock::Locked<ImportRule>> {
+        if supports.as_ref().is_none_or(|condition| condition.enabled)
+            && let Some(url) = url.url()
+        {
+            let guard = lock.read();
+            self.imports.borrow_mut().push(DiscoveredImport {
+                url: url.as_ref().clone(),
+                media: media.read_with(&guard).to_css_string(),
+            });
+        }
+        ServoArc::new(lock.wrap(ImportRule {
+            url,
+            stylesheet: ImportSheet::new_refused(),
+            supports,
+            layer: ImportLayer::None,
+            source_location,
+        }))
+    }
+}
+
+fn stylo_quirks_mode(mode: DomQuirksMode) -> QuirksMode {
+    match mode {
+        DomQuirksMode::Quirks => QuirksMode::Quirks,
+        DomQuirksMode::LimitedQuirks => QuirksMode::LimitedQuirks,
+        DomQuirksMode::NoQuirks => QuirksMode::NoQuirks,
+    }
+}
 
 pub(super) const UA_CSS: &str = "\
 @namespace \"http://www.w3.org/1999/xhtml\";
@@ -123,4 +248,114 @@ pub(super) fn author_sheet(
     quirks_mode: QuirksMode,
 ) -> DocumentStyleSheet {
     parse(css, Origin::Author, lock, quirks_mode)
+}
+
+pub(super) fn author_source(
+    source: &StyleSource,
+    lock: &SharedRwLock,
+    quirks_mode: QuirksMode,
+    reporter: &WarningCounter,
+) -> DocumentStyleSheet {
+    let url_data = UrlExtraData::from(source.base_url.clone());
+    let media = ServoArc::new(lock.wrap(parse_media(&source.media, &url_data, quirks_mode)));
+    DocumentStyleSheet(ServoArc::new(parse_source(
+        source,
+        media,
+        lock,
+        quirks_mode,
+        reporter,
+    )))
+}
+
+fn parse_source(
+    source: &StyleSource,
+    media: ServoArc<style::shared_lock::Locked<MediaList>>,
+    lock: &SharedRwLock,
+    quirks_mode: QuirksMode,
+    reporter: &WarningCounter,
+) -> Stylesheet {
+    let loader = GraphLoader {
+        children: &source.imports,
+        next: Cell::new(0),
+        quirks_mode,
+        reporter,
+    };
+    Stylesheet::from_str(
+        source.source.as_deref().unwrap_or(""),
+        UrlExtraData::from(source.base_url.clone()),
+        Origin::Author,
+        media,
+        lock.clone(),
+        Some(&loader),
+        Some(reporter),
+        quirks_mode,
+        AllowImportRules::Yes,
+    )
+}
+
+struct GraphLoader<'a> {
+    children: &'a [StyleSource],
+    next: Cell<usize>,
+    quirks_mode: QuirksMode,
+    reporter: &'a WarningCounter,
+}
+
+impl StylesheetLoader for GraphLoader<'_> {
+    fn request_stylesheet(
+        &self,
+        url: CssUrl,
+        source_location: SourceLocation,
+        lock: &SharedRwLock,
+        media: ServoArc<style::shared_lock::Locked<MediaList>>,
+        supports: Option<ImportSupportsCondition>,
+        layer: ImportLayer,
+    ) -> ServoArc<style::shared_lock::Locked<ImportRule>> {
+        let child = self.children.get(self.next.get()).filter(|child| {
+            url.url()
+                .is_some_and(|resolved| resolved.as_ref() == &child.base_url)
+        });
+        if child.is_some() {
+            self.next.set(self.next.get() + 1);
+        }
+        let stylesheet = if supports
+            .as_ref()
+            .is_some_and(|condition| !condition.enabled)
+        {
+            ImportSheet::new_refused()
+        } else if let Some(child) = child.filter(|child| child.source.is_some()) {
+            ImportSheet::new(ServoArc::new(parse_source(
+                child,
+                media,
+                lock,
+                self.quirks_mode,
+                self.reporter,
+            )))
+        } else {
+            ImportSheet::new_pending()
+        };
+        ServoArc::new(lock.wrap(ImportRule {
+            url,
+            stylesheet,
+            supports,
+            layer,
+            source_location,
+        }))
+    }
+}
+
+fn parse_media(source: &str, url_data: &UrlExtraData, quirks_mode: QuirksMode) -> MediaList {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let mut context = ParserContext::new(
+        Origin::Author,
+        url_data,
+        None,
+        ParsingMode::empty(),
+        quirks_mode,
+        Cow::Owned(Namespaces::default()),
+        None,
+        None,
+        AttrTaint::default(),
+    );
+    MediaList::parse(&mut context, &mut parser)
 }

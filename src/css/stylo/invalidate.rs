@@ -64,6 +64,48 @@ impl StateChange {
     pub(super) fn snapshots(&self) -> &SnapshotMap {
         &self.snapshots
     }
+
+    pub(super) fn replace<'dom>(
+        dom: &StyleDom<'dom>,
+        clear: &[crate::core::dom::NodeId],
+        states: &[(crate::core::dom::NodeId, ElementState)],
+        mask: ElementState,
+    ) -> (Self, Vec<crate::core::dom::NodeId>) {
+        for id in clear {
+            if let Some(element) = dom.element(*id) {
+                element.forget_snapshot();
+            }
+        }
+        let root = dom.root_element();
+        let mut snapshots = SnapshotMap::new();
+        let mut changed = Vec::new();
+        for (id, desired) in states {
+            let Some(element) = dom.element(*id) else {
+                continue;
+            };
+            let previous = element.state();
+            let next = (previous & !mask) | (*desired & mask);
+            if previous == next {
+                continue;
+            }
+            snapshots.insert(
+                TElement::as_node(&element).opaque(),
+                ServoElementSnapshot {
+                    state: Some(previous),
+                    ..ServoElementSnapshot::new()
+                },
+            );
+            element.note_snapshot();
+            element.set_state(next);
+            changed.push(*id);
+            if let Some(root) = root
+                && element != root
+            {
+                propagate_dirty_bit_up_to(root, element);
+            }
+        }
+        (Self { snapshots }, changed)
+    }
 }
 
 /// The hover chain for an element: itself and every ancestor, matching `css::ua`'s `on_chain`.

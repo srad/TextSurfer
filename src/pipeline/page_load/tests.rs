@@ -4,7 +4,7 @@ use super::*;
 use crate::core::image::ImageDecodeError;
 use crate::css::{DynamicState, FocusSource, FocusedNode};
 use crate::net::{FetchError, FetchResponse};
-use crate::pipeline::render::RenderKey;
+use crate::pipeline::render::{BlockingRenderQueue, RenderJob, RenderKey, RenderResult};
 use crate::ui::theme::PAPER_WHITE;
 
 fn load(source: &str) -> PageLoad {
@@ -20,6 +20,10 @@ fn load(source: &str) -> PageLoad {
             started: Duration::ZERO,
         },
     )
+}
+
+fn render(job: RenderJob) -> RenderResult {
+    BlockingRenderQueue::new().render(job).unwrap()
 }
 
 #[test]
@@ -71,7 +75,7 @@ fn a_render_result_from_an_old_epoch_is_discarded() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let result = load.take_render_job(key).unwrap().execute();
+    let result = render(load.take_render_job(key).unwrap());
     assert!(
         load.resize(Size { cols: 40, rows: 24 }).is_none(),
         "deferred rendering must not publish on the owner thread"
@@ -92,7 +96,7 @@ fn a_coherent_render_survives_a_late_stylesheet_soft_revision() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let result = load.take_render_job(key).unwrap().execute();
+    let result = render(load.take_render_job(key).unwrap());
     assert!(load.deliver(
         command.resource_id,
         Ok(FetchResponse {
@@ -124,7 +128,7 @@ fn coalesced_render_causes_follow_the_job_without_leaking_across_epochs() {
     load.set_viewport(Size { cols: 40, rows: 24 });
     load.invalidate_soft(RenderInvalidation::LAYOUT, RenderCause::Image);
     load.invalidate_soft(RenderInvalidation::STYLE, RenderCause::Stylesheet);
-    assert!(load.apply_render_result(initial.execute()).is_none());
+    assert!(load.apply_render_result(render(initial)).is_none());
 
     let next_key = RenderKey {
         tab_id: 7,
@@ -286,6 +290,32 @@ fn imports_resolve_against_final_url_and_cycles_stop() {
     ));
     assert!(load.is_settled());
     assert_eq!(load.take_commands().len(), 0);
+}
+
+#[test]
+fn stylo_discovers_and_attaches_import_supports_layers_and_media() {
+    let mut load = load(
+        "<!doctype html><style>
+        @import 'child.css' layer(imported) supports(display: grid) screen;
+        @import 'skip.css' supports(display: definitely-not-a-display);
+        </style><p>visible</p>",
+    );
+    let commands = load.take_commands();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].url.as_str(),
+        "https://example.com/dir/child.css"
+    );
+    let (id, response) = css_response(commands[0].clone(), b"p { display: none }");
+    assert!(load.deliver(id, Ok(response)));
+    let page = load.render_if_ready(Duration::ZERO).unwrap();
+    assert!(
+        !page
+            .painted
+            .text_lines()
+            .iter()
+            .any(|line| line == "visible")
+    );
 }
 
 #[test]
@@ -1071,18 +1101,17 @@ fn import_depth_is_bounded_to_eight_edges() {
 }
 
 #[test]
-fn dynamic_state_restyles_only_when_author_or_ua_rules_can_observe_it() {
+fn stylo_invalidates_dynamic_state_per_element() {
     let mut inert = load("<!doctype html><p id=x>x</p>");
     inert.force_render();
     let x = inert.document.borrow().element_by_id("x").unwrap();
-    assert!(
-        inert
-            .set_dynamic_state(DynamicState {
-                hover: Some(x),
-                ..Default::default()
-            })
-            .is_none()
-    );
+    let inert = inert
+        .set_dynamic_state(DynamicState {
+            hover: Some(x),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(!inert.painted_changed);
 
     let mut authored = load("<!doctype html><style>#x:hover { color: red }</style><p id=x>x</p>");
     authored.force_render();
@@ -1113,14 +1142,36 @@ fn dynamic_state_restyles_only_when_author_or_ua_rules_can_observe_it() {
         load("<!doctype html><style>#x:hover { unknown: 1 }</style><p id=x>x</p>");
     unsupported.force_render();
     let x = unsupported.document.borrow().element_by_id("x").unwrap();
-    assert!(
-        unsupported
-            .set_dynamic_state(DynamicState {
-                hover: Some(x),
-                ..Default::default()
-            })
-            .is_none()
+    let unsupported = unsupported
+        .set_dynamic_state(DynamicState {
+            hover: Some(x),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(!unsupported.painted_changed);
+}
+
+#[test]
+fn inherited_cursor_state_does_not_report_paint_damage() {
+    let mut load = load(
+        "<!doctype html><style>p { cursor: text }</style><p><span id=target>target</span></p>",
     );
+    load.force_render();
+    let document = load.document.borrow();
+    let target = document.element_by_id("target").unwrap();
+    let text = document.first_child(target).unwrap();
+    drop(document);
+    let page = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(text),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        page.styles.get(target).cursor,
+        crate::core::style::Cursor::Text
+    );
+    assert!(!page.painted_changed);
 }
 
 #[test]
@@ -1139,7 +1190,7 @@ fn paint_only_dynamic_state_recascades_without_relayout() {
         epoch: page_load.render_epoch(),
         hard_epoch: page_load.hard_epoch(),
     };
-    let initial = page_load.take_render_job(initial_key).unwrap().execute();
+    let initial = page_load.render_job_blocking(initial_key).unwrap();
     assert!(page_load.apply_render_result(initial).is_some());
 
     let x = page_load.document.borrow().element_by_id("x").unwrap();
@@ -1157,7 +1208,7 @@ fn paint_only_dynamic_state_recascades_without_relayout() {
         epoch: page_load.render_epoch(),
         hard_epoch: page_load.hard_epoch(),
     };
-    let hover = page_load.take_render_job(hover_key).unwrap().execute();
+    let hover = page_load.render_job_blocking(hover_key).unwrap();
     assert_eq!(hover.timings.layout, Duration::ZERO);
     assert_ne!(hover.timings.restyle, Duration::ZERO);
     let retained = hover.painted;
@@ -1176,6 +1227,85 @@ fn paint_only_dynamic_state_recascades_without_relayout() {
 }
 
 #[test]
+fn local_hover_work_is_independent_of_unrelated_sibling_count() {
+    let hover_work = |siblings: usize| {
+        let source = format!(
+            "<!doctype html><style>#target:hover {{ color: red }}</style><main><a id=target href=/>target</a>{}</main>",
+            "<span>unrelated</span>".repeat(siblings)
+        );
+        let mut load = load(&source);
+        load.defer_rendering();
+        assert!(load.render_if_ready(Duration::ZERO).is_none());
+        let initial_key = RenderKey {
+            tab_id: 7,
+            generation: 11,
+            epoch: load.render_epoch(),
+            hard_epoch: load.hard_epoch(),
+        };
+        let initial = load.render_job_blocking(initial_key).unwrap();
+        assert!(load.apply_render_result(initial).is_some());
+        let target = load.document.borrow().element_by_id("target").unwrap();
+        assert!(
+            load.set_dynamic_state(DynamicState {
+                hover: Some(target),
+                ..Default::default()
+            })
+            .is_none()
+        );
+        let hover_key = RenderKey {
+            tab_id: 7,
+            generation: 11,
+            epoch: load.render_epoch(),
+            hard_epoch: load.hard_epoch(),
+        };
+        load.render_job_blocking(hover_key).unwrap().work
+    };
+
+    let small = hover_work(1_000);
+    let large = hover_work(10_000);
+    assert_ne!(small.styled_nodes_visited, 0);
+    assert_ne!(small.style_entries_mapped, 0);
+    assert_ne!(small.damage_nodes_checked, 0);
+    assert_eq!(large, small);
+}
+
+#[test]
+fn checked_mutation_restyles_the_retained_stylo_session() {
+    let source = "<!doctype html><style>
+        #toggle:checked + #label { color: red }
+        </style><input id=toggle type=checkbox><span id=label>label</span>";
+    let mut page_load = load(source);
+    page_load.defer_rendering();
+    assert!(page_load.render_if_ready(Duration::ZERO).is_none());
+    let initial_key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: page_load.render_epoch(),
+        hard_epoch: page_load.hard_epoch(),
+    };
+    let initial = page_load.render_job_blocking(initial_key).unwrap();
+    assert!(page_load.apply_render_result(initial).is_some());
+    let toggle = page_load.document.borrow().element_by_id("toggle").unwrap();
+    assert!(page_load.set_form_checked(toggle, true).unwrap().is_none());
+    let checked_key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: page_load.render_epoch(),
+        hard_epoch: page_load.hard_epoch(),
+    };
+    let checked = page_load.render_job_blocking(checked_key).unwrap();
+    assert_eq!(checked.timings.cascade, Duration::ZERO);
+    assert_ne!(checked.timings.restyle, Duration::ZERO);
+    assert_ne!(checked.timings.layout, Duration::ZERO);
+    let retained = checked.painted;
+
+    let mut fresh = load(source);
+    let toggle = fresh.document.borrow().element_by_id("toggle").unwrap();
+    assert!(fresh.set_form_checked(toggle, true).unwrap().is_none());
+    assert_eq!(retained, fresh.force_render().painted);
+}
+
+#[test]
 fn layout_dynamic_state_keeps_the_full_layout_path() {
     let mut load = load("<!doctype html><style>#x:hover { width: 3px }</style><p id=x>x</p>");
     load.defer_rendering();
@@ -1186,7 +1316,7 @@ fn layout_dynamic_state_keeps_the_full_layout_path() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let initial = load.take_render_job(initial_key).unwrap().execute();
+    let initial = load.render_job_blocking(initial_key).unwrap();
     assert!(load.apply_render_result(initial).is_some());
 
     let x = load.document.borrow().element_by_id("x").unwrap();
@@ -1203,8 +1333,8 @@ fn layout_dynamic_state_keeps_the_full_layout_path() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let hover = load.take_render_job(hover_key).unwrap().execute();
-    assert_eq!(hover.timings.restyle, Duration::ZERO);
+    let hover = load.render_job_blocking(hover_key).unwrap();
+    assert_ne!(hover.timings.restyle, Duration::ZERO);
     assert_ne!(hover.timings.layout, Duration::ZERO);
     assert_eq!(
         hover.restyle_failure,
@@ -1227,7 +1357,7 @@ fn an_unrelated_layout_hover_rule_does_not_relayout_a_paint_only_link() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let initial = load.take_render_job(initial_key).unwrap().execute();
+    let initial = load.render_job_blocking(initial_key).unwrap();
     assert!(load.apply_render_result(initial).is_some());
 
     let link = load.document.borrow().element_by_id("link").unwrap();
@@ -1244,7 +1374,7 @@ fn an_unrelated_layout_hover_rule_does_not_relayout_a_paint_only_link() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let hover = load.take_render_job(hover_key).unwrap().execute();
+    let hover = load.render_job_blocking(hover_key).unwrap();
     assert_eq!(hover.timings.layout, Duration::ZERO);
     assert_ne!(hover.timings.restyle, Duration::ZERO);
 }
@@ -1266,7 +1396,7 @@ fn pseudo_background_hover_does_not_force_layout() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let initial = load.take_render_job(initial_key).unwrap().execute();
+    let initial = load.render_job_blocking(initial_key).unwrap();
     assert!(load.apply_render_result(initial).is_some());
 
     let link = load.document.borrow().element_by_id("link").unwrap();
@@ -1283,7 +1413,7 @@ fn pseudo_background_hover_does_not_force_layout() {
         epoch: load.render_epoch(),
         hard_epoch: load.hard_epoch(),
     };
-    let hover = load.take_render_job(hover_key).unwrap().execute();
+    let hover = load.render_job_blocking(hover_key).unwrap();
     assert_eq!(hover.restyle_failure, None);
     assert_eq!(hover.timings.cascade, Duration::ZERO);
     assert_eq!(hover.timings.layout, Duration::ZERO);
@@ -1291,7 +1421,7 @@ fn pseudo_background_hover_does_not_force_layout() {
 }
 
 #[test]
-fn ua_link_hover_uses_the_ancestor_chain_and_suppresses_same_link_rehits() {
+fn ua_link_hover_uses_the_ancestor_chain_and_preserves_descendant_state() {
     let mut load = load("<!doctype html><a id=link href=/><span id=span>target</span></a>");
     load.force_render();
     let document = load.document.borrow();
@@ -1306,13 +1436,13 @@ fn ua_link_hover_uses_the_ancestor_chain_and_suppresses_same_link_rehits() {
         })
         .is_some()
     );
-    assert!(
-        load.set_dynamic_state(DynamicState {
+    let second = load
+        .set_dynamic_state(DynamicState {
             hover: Some(link),
             ..Default::default()
         })
-        .is_none()
-    );
+        .unwrap();
+    assert!(!second.painted_changed);
 }
 
 #[test]

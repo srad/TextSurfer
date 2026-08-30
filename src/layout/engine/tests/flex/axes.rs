@@ -1,7 +1,7 @@
 use super::{box_for, flex_fixture};
 use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::LayoutRect;
 use taffy::style::{
     AlignContentKeyword as TaffyContentKeyword, AlignItemsKeyword as TaffyItemKeyword,
@@ -291,7 +291,7 @@ fn taffy_alignment_mapping_preserves_safety_and_physical_fallbacks() {
         let mut document = Document::new();
         let root = document.insert_element(None, "main", ElementNs::Html, vec![]);
         let sheet = CssparserParser.parse(&format!("main {{ display:flex;{declarations} }}"));
-        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
         let flow = crate::layout::engine::flow::build_flow_tree(
             crate::layout::LayoutInput {
                 document: &document,

@@ -1,14 +1,3 @@
-//! The M7 perf baseline: the full live Wikipedia page, with both of its stylesheets, through the
-//! custom cascade.
-//!
-//! `linux_page.rs` measures the Parsoid article body alone, which links no external CSS and so
-//! exercises a much smaller cascade. The external stylesheets are what make the custom cascade
-//! expensive, and therefore what M7 exists to attack — so this is the number the Stylo migration is
-//! judged against.
-//!
-//! Nothing is fetched: the stylesheet bodies are handed to `PageLoad::deliver` against the resource
-//! ids discovery reports, the way the `FakeFetch` harnesses do it.
-
 use std::time::{Duration, Instant};
 
 use encoding_rs::UTF_8;
@@ -17,13 +6,14 @@ use textsurfer::core::style::{Palette, RenderContext};
 use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::net::FetchResponse;
 use textsurfer::pipeline::page_load::{PageLoadOptions, PendingPageLoad};
-use textsurfer::pipeline::render::RenderKey;
+use textsurfer::pipeline::render::{BlockingRenderQueue, RenderKey};
 use url::Url;
 
 const PAGE: &str = include_str!("../tests/fixtures/linux-live/page.html");
 const MODULES_CSS: &str = include_str!("../tests/fixtures/linux-live/modules.css");
 const SITE_CSS: &str = include_str!("../tests/fixtures/linux-live/site.css");
 const SLICE_BYTES: usize = 64 * 1024;
+const FRAME_BUDGET: Duration = Duration::from_micros(16_667);
 
 /// Answer a stylesheet request from the fixtures rather than the network.
 ///
@@ -112,20 +102,23 @@ fn main() {
     let _ = load.render_if_ready(Duration::from_secs(5));
 
     let render_started = Instant::now();
-    let result = load
-        .take_render_job(RenderKey {
-            tab_id: 0,
-            generation: 0,
-            epoch: load.render_epoch(),
-            hard_epoch: load.hard_epoch(),
-        })
-        .expect("the page is ready to render")
-        .execute();
+    let renders = BlockingRenderQueue::new();
+    let result = renders
+        .render(
+            load.take_render_job(RenderKey {
+                tab_id: 0,
+                generation: 0,
+                epoch: load.render_epoch(),
+                hard_epoch: load.hard_epoch(),
+            })
+            .expect("the page is ready to render"),
+        )
+        .expect("the render worker returns the page");
     let wall = render_started.elapsed();
     let timings = result.timings;
     let worker = timings.cascade + timings.restyle + timings.layout + timings.paint;
 
-    println!("linux-live — custom cascade baseline (M7 gate)");
+    println!("linux-live — Stylo adoption gate");
     println!(
         "  parse + discovery : {:>7.1} ms across {slices} slices",
         parse_and_discovery.as_secs_f64() * 1000.0
@@ -163,11 +156,10 @@ fn main() {
         wall.as_secs_f64() * 1000.0
     );
 
-    // The hover path is the one M7 actually attacks: layout is retained, so the cascade is the
-    // dominant cost and the whole frame budget rides on it.
     let page = load
         .apply_render_result(result)
         .expect("the first render publishes");
+    let painted_rows = page.painted.len();
     let hovered = page
         .painted
         .links
@@ -181,18 +173,60 @@ fn main() {
         })
         .is_none()
     );
-    let hover = load
-        .take_render_job(RenderKey {
-            tab_id: 0,
-            generation: 0,
-            epoch: load.render_epoch(),
-            hard_epoch: load.hard_epoch(),
-        })
-        .expect("the hover queues a render")
-        .execute();
+    let hover = renders
+        .render(
+            load.take_render_job(RenderKey {
+                tab_id: 0,
+                generation: 0,
+                epoch: load.render_epoch(),
+                hard_epoch: load.hard_epoch(),
+            })
+            .expect("the hover queues a render"),
+        )
+        .expect("the render worker returns the hover");
     let hover_timings = hover.timings;
     let hover_worker =
         hover_timings.cascade + hover_timings.restyle + hover_timings.layout + hover_timings.paint;
+    load.apply_render_result(hover)
+        .expect("the warm-up hover publishes");
+
+    let mut retained_samples = Vec::with_capacity(100);
+    let mut worker_samples = Vec::with_capacity(100);
+    for index in 0..100 {
+        let state = if index % 2 == 0 {
+            DynamicState::default()
+        } else {
+            DynamicState {
+                hover: Some(hovered),
+                ..Default::default()
+            }
+        };
+        assert!(load.set_dynamic_state(state).is_none());
+        let sample = renders
+            .render(
+                load.take_render_job(RenderKey {
+                    tab_id: 0,
+                    generation: 0,
+                    epoch: load.render_epoch(),
+                    hard_epoch: load.hard_epoch(),
+                })
+                .expect("the state change queues a render"),
+            )
+            .expect("the render worker returns the state change");
+        retained_samples.push(sample.timings.restyle);
+        worker_samples.push(
+            sample.timings.cascade
+                + sample.timings.restyle
+                + sample.timings.layout
+                + sample.timings.paint,
+        );
+        load.apply_render_result(sample)
+            .expect("the state change publishes");
+    }
+    retained_samples.sort_unstable();
+    worker_samples.sort_unstable();
+    let retained_p95 = retained_samples[94];
+    let worker_p95 = worker_samples[94];
 
     println!();
     println!(
@@ -215,5 +249,14 @@ fn main() {
         "  hover worker      : {:>7.1} ms",
         hover_worker.as_secs_f64() * 1000.0
     );
-    println!("  painted rows      : {}", page.painted.len());
+    println!(
+        "  retained p95      : {:>7.1} ms",
+        retained_p95.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  full worker p95   : {:>7.1} ms",
+        worker_p95.as_secs_f64() * 1000.0
+    );
+    println!("  painted rows      : {painted_rows}");
+    assert!(retained_p95 < FRAME_BUDGET);
 }

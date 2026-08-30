@@ -2,7 +2,7 @@ use super::box_for;
 use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
 use crate::core::style::{FlexDirection, TextRendering};
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{LayoutEngine, LayoutRect, TaffyLayoutEngine};
 
 #[test]
@@ -16,7 +16,7 @@ fn flex_items_use_order_modified_layout_without_changing_document_order() {
     let sheet = CssparserParser.parse(
         "main { display:flex } main > div { width:4ch;flex:none } main > div:last-child { order:-1 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     assert_eq!(box_for(&tree, second).border_rect.col, 0);
     assert_eq!(box_for(&tree, first).border_rect.col, 4);
@@ -35,7 +35,7 @@ fn inline_flex_shrinks_to_its_items_and_keeps_following_text_on_the_line() {
     let after = document.insert_text(Some(p), "R");
     let sheet =
         CssparserParser.parse("span { display:inline-flex } span > i { width:2ch;flex:none }");
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     let fragment = |node| {
         tree.fragments
@@ -67,7 +67,7 @@ fn generated_flex_items_participate_in_order_modified_layout() {
     let sheet = CssparserParser.parse(
         "main { display:flex } main::before { content:'B';order:2 } main::after { content:'A';order:-1 } main > div { width:2ch;flex:none }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     let generated = |text| {
         tree.fragments
@@ -91,7 +91,7 @@ fn flex_baseline_alignment_uses_text_baselines() {
     let sheet = CssparserParser.parse(
         "main { display:flex;align-items:baseline } main > div:first-child { font-size:32px }",
     );
-    let styles = BasicCascade.apply(
+    let styles = StyloCascade.apply(
         &[sheet],
         &document,
         MediaContext::screen().with_text_rendering(TextRendering::ScaledBitmap),
@@ -118,7 +118,7 @@ fn nested_flex_and_table_items_share_order_modified_layout() {
     let sheet = CssparserParser.parse(
         "main { display:flex;width:12ch;margin:0 } section { display:flex;flex-direction:column;width:4ch;flex:none } section div { height:16px;margin:0;flex:none } table { width:4ch;margin:0;border-spacing:0;order:-1 } td { padding:0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     assert_eq!(styles.get(nested).flex.direction, FlexDirection::Column);
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 8 });
     assert_eq!(
@@ -171,7 +171,7 @@ fn wrapped_inline_flex_keeps_margins_size_and_first_line_baseline() {
     let sheet = CssparserParser.parse(
         "span { display:inline-flex;flex-wrap:wrap;width:4ch;margin:0 1ch } span > b { width:3ch;height:16px;flex:none }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 6 });
     let fragment = |node| {
         tree.fragments
@@ -207,7 +207,7 @@ fn equal_order_values_remain_stable() {
     let sheet = CssparserParser.parse(
         "main { display:flex;width:12ch;margin:0 } main > div { width:4ch;flex:none;order:1 } main > div:last-child { order:-1 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     assert_eq!(box_for(&tree, early).border_rect.col, 0);
     assert_eq!(box_for(&tree, first).border_rect.col, 4);
@@ -224,7 +224,7 @@ fn deeply_nested_flex_preserves_content() {
     let text = document.insert_text(Some(parent), "deep");
     let sheet = CssparserParser
         .parse("main, div { display:flex;flex-direction:column;margin:0;min-width:1ch }");
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     assert!(tree.fragments.iter().any(|fragment| fragment.node == text));
 }

@@ -9,7 +9,7 @@ pub use engine::{
     BackgroundFill, BorderStroke, BoxTree, ImagePlacement, LayoutBox, LayoutEngine, LayoutLimits,
     LayoutRect, LinkBox, TaffyLayoutEngine, TextFragment,
 };
-pub(crate) use restyle::{RestyleFailure, restyle};
+pub(crate) use restyle::{RestyleFailure, restyle, restyle_nodes};
 
 use crate::core::dom::Document;
 use crate::core::form::FormState;

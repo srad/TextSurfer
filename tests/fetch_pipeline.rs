@@ -9,7 +9,7 @@ use textsurfer::net::{
     Fetch, FetchError, FetchPayload, FetchPoll, FetchRequest, FetchResponse, ResourceId,
     SchemeFetch, Submitted,
 };
-use textsurfer::pipeline::render::InlineRenderQueue;
+use textsurfer::pipeline::render::BlockingRenderQueue;
 
 const BODY: &str = "<!doctype html><title>smoke</title><p>acceptance</p>";
 
@@ -115,7 +115,7 @@ fn app_with_fixture_fetch() -> App {
         fetch,
         pending: Mutex::new(VecDeque::new()),
     });
-    App::with_net_and_render_queue(net, Arc::new(InlineRenderQueue::default()))
+    App::with_net_and_render_queue(net, Arc::new(BlockingRenderQueue::default()))
 }
 
 fn deliver(app: &mut App) {
@@ -230,7 +230,7 @@ fn composed_pipeline_applies_external_author_styles() {
         fetch,
         pending: Mutex::new(VecDeque::new()),
     });
-    let mut app = App::with_net_and_render_queue(net, Arc::new(InlineRenderQueue::default()));
+    let mut app = App::with_net_and_render_queue(net, Arc::new(BlockingRenderQueue::default()));
     app.submit_url("https://example.com/article");
     deliver(&mut app);
     let lines = app.chrome_view().content.painted.text_lines();

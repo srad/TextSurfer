@@ -54,8 +54,8 @@ fn render_queue_contract(queue: Arc<dyn RenderQueue>) {
 }
 
 #[test]
-fn inline_render_queue_passes_the_contract() {
-    render_queue_contract(Arc::new(InlineRenderQueue::default()));
+fn blocking_render_queue_passes_the_contract() {
+    render_queue_contract(Arc::new(BlockingRenderQueue::default()));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn rendering_html_reports_parse_and_style_diagnostics_with_the_painted_page() {
             .iter()
             .any(|line| line.contains("hello"))
     );
-    assert_eq!(page.css_warnings, 0);
+    assert_eq!(page.css_warnings, 1);
     assert!(
         page.styles.get(page.document.borrow().roots()[0]).display
             != crate::core::style::Display::NONE

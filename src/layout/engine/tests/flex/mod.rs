@@ -4,7 +4,7 @@ mod sizing;
 
 use crate::core::dom::{Document, ElementNs, NodeId};
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{BoxTree, LayoutBox, LayoutEngine, TaffyLayoutEngine};
 
 pub(super) struct FlexFixture {
@@ -30,7 +30,7 @@ pub(super) fn flex_fixture(
     let sheet = CssparserParser.parse(&format!(
         "main {{ display: flex; margin: 0; {container} }} main > div {{ margin: 0; padding: 0; {item} }}"
     ));
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     FlexFixture {
         tree: TaffyLayoutEngine.layout(&document, &styles, viewport),
         container: root,

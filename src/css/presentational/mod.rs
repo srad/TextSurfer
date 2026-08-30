@@ -16,6 +16,4 @@ pub(in crate::css) struct PresentationalHints {
     pub(in crate::css) legacy_align: Option<LegacyAlign>,
 }
 
-pub(super) use hints::presentational_hints;
-#[cfg(feature = "stylo")]
 pub(in crate::css) use hints::synthesized_hints;

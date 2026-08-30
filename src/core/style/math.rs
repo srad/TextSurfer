@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
+
+use im::{HashMap, Vector};
 
 const MAX_STORED_NODES: usize = 65_536;
 
@@ -237,7 +238,7 @@ impl CssCalcExpr {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CssCalcStore {
-    expressions: Vec<Arc<StoredCalc>>,
+    expressions: Vector<Arc<StoredCalc>>,
     ids: HashMap<Arc<StoredCalc>, CssCalc>,
     nodes: usize,
 }
@@ -248,29 +249,7 @@ struct StoredCalc {
     range: CalcRange,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct CssCalcCheckpoint {
-    expressions: usize,
-    nodes: usize,
-}
-
 impl CssCalcStore {
-    pub(crate) fn checkpoint(&self) -> CssCalcCheckpoint {
-        CssCalcCheckpoint {
-            expressions: self.expressions.len(),
-            nodes: self.nodes,
-        }
-    }
-
-    pub(crate) fn rollback(&mut self, checkpoint: CssCalcCheckpoint) {
-        while self.expressions.len() > checkpoint.expressions {
-            if let Some(expression) = self.expressions.pop() {
-                self.ids.remove(expression.as_ref());
-            }
-        }
-        self.nodes = checkpoint.nodes;
-    }
-
     pub(crate) fn insert(&mut self, expression: CssCalcExpr, range: CalcRange) -> Option<CssCalc> {
         let stored = StoredCalc { expression, range };
         if let Some(value) = self.ids.get(&stored) {
@@ -282,7 +261,7 @@ impl CssCalcStore {
         }
         let value = CssCalc(u32::try_from(self.expressions.len()).ok()?);
         let stored = Arc::new(stored);
-        self.expressions.push(stored.clone());
+        self.expressions.push_back(stored.clone());
         self.ids.insert(stored, value);
         self.nodes += nodes;
         Some(value)
@@ -304,11 +283,6 @@ impl CssCalcStore {
                 .expression
                 .depends_on_basis(),
         )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn stored_nodes(&self) -> usize {
-        self.nodes
     }
 }
 

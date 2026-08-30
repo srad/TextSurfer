@@ -3,9 +3,6 @@ use mediatype::{MediaType, names};
 use url::Url;
 
 use crate::core::dom::{Attr, AttrNs, ElementNs, Node};
-use crate::css::{
-    CssParser, CssRule, CssparserParser, MediaQueryList, StyleSheet, parse_media_queries,
-};
 use crate::net::ResourceId;
 
 use super::resource_url::normalized_url;
@@ -63,25 +60,20 @@ impl PageLoad {
         for root in discovered {
             match root {
                 DiscoveredRoot::Inline { source, media } => {
-                    let sheet = CssparserParser.parse(&source);
                     let imports =
-                        self.discover_imports(&sheet, effective_base, 1, &[], self.html_encoding);
+                        self.discover_imports(&source, effective_base, 1, &[], self.html_encoding);
                     self.roots.push(RootSource::Inline {
-                        sheet,
-                        queries: parse_media_queries(&media),
+                        source,
+                        media,
                         imports,
                     });
                 }
                 DiscoveredRoot::External { mut url, media } => {
                     url.set_fragment(None);
-                    if let Some(occurrence) = self.add_occurrence(
-                        url,
-                        parse_media_queries(&media),
-                        0,
-                        Vec::new(),
-                        self.html_encoding,
-                    ) {
-                        self.roots.push(RootSource::External(occurrence));
+                    if let Some(occurrence) =
+                        self.add_occurrence(url, String::new(), 0, Vec::new(), self.html_encoding)
+                    {
+                        self.roots.push(RootSource::External { occurrence, media });
                     }
                 }
             }
@@ -90,33 +82,24 @@ impl PageLoad {
 
     pub(super) fn discover_imports(
         &mut self,
-        sheet: &StyleSheet,
+        source: &str,
         base: &Url,
         depth: usize,
         ancestors: &[String],
         environment: &'static Encoding,
     ) -> Vec<usize> {
         let mut imports = Vec::new();
-        for rule in &sheet.rules {
-            let CssRule::Import(rule) = rule else {
-                continue;
-            };
+        let quirks_mode = self.document.borrow().quirks_mode();
+        for import in crate::css::stylo::discover_imports(source, base, quirks_mode) {
             if depth > MAX_IMPORT_DEPTH {
                 self.failed_resources = self.failed_resources.saturating_add(1);
                 continue;
             }
-            let Ok(mut url) = base.join(&rule.url) else {
-                self.failed_resources = self.failed_resources.saturating_add(1);
-                continue;
-            };
+            let mut url = import.url;
             url.set_fragment(None);
-            if let Some(occurrence) = self.add_occurrence(
-                url,
-                rule.queries.clone(),
-                depth,
-                ancestors.to_vec(),
-                environment,
-            ) {
+            if let Some(occurrence) =
+                self.add_occurrence(url, import.media, depth, ancestors.to_vec(), environment)
+            {
                 imports.push(occurrence);
             }
         }
@@ -135,7 +118,7 @@ impl PageLoad {
     fn add_occurrence(
         &mut self,
         mut url: Url,
-        queries: MediaQueryList,
+        media: String,
         depth: usize,
         ancestors: Vec<String>,
         environment: &'static Encoding,
@@ -175,11 +158,12 @@ impl PageLoad {
         let occurrence = self.occurrences.len();
         self.occurrences.push(Occurrence {
             fetch_id,
-            queries,
+            media,
             depth,
             ancestors,
             environment,
-            sheet: None,
+            source: None,
+            base_url: url,
             imports: Vec::new(),
             failed: cycle,
         });

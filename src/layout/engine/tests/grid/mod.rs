@@ -5,7 +5,7 @@ mod tracks;
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{BoxTree, LayoutBox, LayoutEngine, TaffyLayoutEngine};
 
 pub(super) struct GridFixture {
@@ -39,7 +39,7 @@ pub(super) fn grid_fixture(container: &str, items: &[&str], viewport: Size) -> G
          main > div {{ margin: 0; padding: 0 }}
          {rules}"
     ));
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     GridFixture {
         tree: TaffyLayoutEngine.layout(&document, &styles, viewport),
         items: nodes,

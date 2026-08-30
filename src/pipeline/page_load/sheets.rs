@@ -1,6 +1,10 @@
-use super::super::render::{RenderJob, RenderKey, RenderResult, RenderTree, RenderedPage};
+use std::sync::Arc;
+
+use super::super::render::{
+    BlockingRenderQueue, RenderJob, RenderKey, RenderResult, RenderTree, RenderedPage, StyleInput,
+    StyleSessionId, StyleSource,
+};
 use super::{PageLoad, RenderInvalidation, RootSource};
-use crate::css::{CssRule, MediaQueryList, MediaRule, StateDeps, StyleSheet};
 
 impl PageLoad {
     pub(super) fn render_page(&mut self) -> RenderedPage {
@@ -11,11 +15,17 @@ impl PageLoad {
             hard_epoch: self.hard_epoch,
         };
         let result = self
-            .take_render_job(key)
-            .expect("a direct render has pending work")
-            .execute();
+            .render_job_blocking(key)
+            .expect("a direct render has pending work");
         self.apply_render_result(result)
             .expect("a direct render keeps its epoch")
+    }
+
+    pub(crate) fn render_job_blocking(&mut self, key: RenderKey) -> Option<RenderResult> {
+        let job = self.take_render_job(key)?;
+        self.direct_renders
+            .get_or_insert_with(BlockingRenderQueue::new)
+            .render(job)
     }
 
     pub fn take_render_job(&mut self, key: RenderKey) -> Option<RenderJob> {
@@ -32,31 +42,19 @@ impl PageLoad {
         let causes = std::mem::take(&mut self.render_causes);
         let had_cached_styles = self.cached_styles.is_some();
         let had_cached_layout = self.cached_layout.is_some();
-        let (styles, previous_styles, cascade_state, sheets, css_warnings) =
+        let (styles, previous_styles, css_warnings) =
             if invalidation.cascade || self.cached_styles.is_none() {
-                let sheets = self.ordered_sheets();
-                self.state_deps = sheets.iter().fold(StateDeps::default(), |deps, sheet| {
-                    deps.union(sheet.state_deps)
-                });
-                self.state_effects = crate::css::StateEffects::for_sheets(&sheets, self.media);
-                let css_warnings = sheets.iter().map(|sheet| sheet.diagnostics.total()).sum();
                 let previous_styles = self.cached_styles.take();
-                let cascade_state = self.cached_cascade_state.take();
                 if invalidation.layout {
                     self.cached_layout = None;
                     self.cached_layout_styles = None;
                 }
-                (None, previous_styles, cascade_state, sheets, css_warnings)
+                (None, previous_styles, 0)
             } else {
-                (
-                    self.cached_styles.clone(),
-                    None,
-                    self.cached_cascade_state.clone(),
-                    Vec::new(),
-                    self.cached_css_warnings,
-                )
+                (self.cached_styles.clone(), None, self.cached_css_warnings)
             };
         let images = self.image_resources();
+        let style_input = self.style_input(key);
         let layout = (!invalidation.layout)
             .then(|| self.cached_layout.take())
             .flatten();
@@ -76,7 +74,6 @@ impl PageLoad {
             had_cached_layout,
             reused_styles = styles.is_some(),
             reused_layout = layout.is_some(),
-            stylesheets = sheets.len(),
             images = images.iter().count(),
             "render job prepared"
         );
@@ -86,8 +83,7 @@ impl PageLoad {
             document: RenderTree::from_document(&self.document.borrow()),
             styles,
             previous_styles,
-            cascade_state,
-            sheets,
+            style_input,
             forms: self.forms.clone(),
             images,
             media: self.media,
@@ -107,7 +103,6 @@ impl PageLoad {
                 }
                 if !pending.cascade {
                     self.cached_styles = Some(result.styles);
-                    self.cached_cascade_state = result.cascade_state;
                 }
             }
             tracing::trace!(
@@ -134,7 +129,6 @@ impl PageLoad {
         if result.key.epoch == self.render_epoch {
             self.cached_layout = Some(result.layout);
             self.cached_styles = Some(result.styles.clone());
-            self.cached_cascade_state = result.cascade_state.clone();
             self.cached_layout_styles = Some(result.styles.clone());
             self.cached_css_warnings = result.css_warnings;
         } else {
@@ -142,26 +136,22 @@ impl PageLoad {
                 Some(pending) if !pending.layout && !pending.cascade => {
                     self.cached_layout = Some(result.layout);
                     self.cached_styles = Some(result.styles.clone());
-                    self.cached_cascade_state = result.cascade_state.clone();
                     self.cached_layout_styles = Some(result.styles.clone());
                 }
                 Some(pending) if pending.layout && !pending.cascade => {
                     self.cached_layout = None;
                     self.cached_layout_styles = None;
                     self.cached_styles = Some(result.styles.clone());
-                    self.cached_cascade_state = result.cascade_state.clone();
                 }
                 Some(pending) if !pending.layout && pending.cascade => {
                     self.cached_layout = Some(result.layout);
                     self.cached_layout_styles = Some(result.styles.clone());
                     self.cached_styles = None;
-                    self.cached_cascade_state = None;
                 }
                 Some(_) | None => {
                     self.cached_layout = None;
                     self.cached_layout_styles = None;
                     self.cached_styles = None;
-                    self.cached_cascade_state = None;
                 }
             }
         }
@@ -186,74 +176,61 @@ impl PageLoad {
         })
     }
 
-    fn ordered_sheets(&self) -> Vec<StyleSheet> {
-        let mut sheets = Vec::new();
-        for root in &self.roots {
-            match root {
+    fn style_input(&self, key: RenderKey) -> StyleInput {
+        let roots = self
+            .roots
+            .iter()
+            .filter_map(|root| match root {
                 RootSource::Inline {
-                    sheet,
-                    queries,
+                    source,
+                    media,
                     imports,
-                } => {
-                    if !self.external_disabled {
-                        for occurrence in imports {
-                            self.flatten_occurrence(
-                                *occurrence,
-                                std::slice::from_ref(queries),
-                                &mut sheets,
-                            );
-                        }
-                    }
-                    sheets.push(sheet_without_imports(sheet, std::slice::from_ref(queries)));
+                    ..
+                } => Some(StyleSource {
+                    source: Some(Arc::from(source.as_str())),
+                    base_url: self.effective_base.clone(),
+                    media: Arc::from(media.as_str()),
+                    imports: if self.external_disabled {
+                        Arc::from([])
+                    } else {
+                        imports
+                            .iter()
+                            .map(|occurrence| self.style_source(*occurrence, None))
+                            .collect::<Vec<_>>()
+                            .into()
+                    },
+                }),
+                RootSource::External { occurrence, media } if !self.external_disabled => {
+                    Some(self.style_source(*occurrence, Some(media)))
                 }
-                RootSource::External(occurrence) if !self.external_disabled => {
-                    self.flatten_occurrence(*occurrence, &[], &mut sheets);
-                }
-                RootSource::External(_) => {}
-            }
+                RootSource::External { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .into();
+        StyleInput {
+            session: StyleSessionId {
+                tab_id: key.tab_id,
+                generation: key.generation,
+                revision: self.style_revision,
+            },
+            roots,
         }
-        sheets
     }
 
-    fn flatten_occurrence(
-        &self,
-        occurrence_id: usize,
-        inherited: &[MediaQueryList],
-        output: &mut Vec<StyleSheet>,
-    ) {
+    fn style_source(&self, occurrence_id: usize, media: Option<&str>) -> StyleSource {
         let occurrence = &self.occurrences[occurrence_id];
-        if occurrence.failed {
-            return;
+        StyleSource {
+            source: (!occurrence.failed)
+                .then(|| occurrence.source.clone())
+                .flatten(),
+            base_url: occurrence.base_url.clone(),
+            media: Arc::from(media.unwrap_or(&occurrence.media)),
+            imports: occurrence
+                .imports
+                .iter()
+                .map(|child| self.style_source(*child, None))
+                .collect::<Vec<_>>()
+                .into(),
         }
-        let mut chain = inherited.to_vec();
-        chain.push(occurrence.queries.clone());
-        for child in &occurrence.imports {
-            self.flatten_occurrence(*child, &chain, output);
-        }
-        if let Some(sheet) = &occurrence.sheet {
-            output.push(sheet_without_imports(sheet, &chain));
-        }
-    }
-}
-
-fn sheet_without_imports(sheet: &StyleSheet, queries: &[MediaQueryList]) -> StyleSheet {
-    let mut rules: Vec<_> = sheet
-        .rules
-        .iter()
-        .filter(|rule| !matches!(rule, CssRule::Import(_)))
-        .cloned()
-        .collect();
-    for query in queries.iter().rev() {
-        if !matches!(query, MediaQueryList::Always) {
-            rules = vec![CssRule::Media(MediaRule {
-                queries: query.clone(),
-                rules,
-            })];
-        }
-    }
-    StyleSheet {
-        rules,
-        diagnostics: sheet.diagnostics.clone(),
-        state_deps: sheet.state_deps,
     }
 }

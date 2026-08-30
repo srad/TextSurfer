@@ -16,7 +16,7 @@ mod typography;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use im::HashMap;
 
 use crate::core::dom::NodeId;
 
@@ -239,26 +239,6 @@ pub(crate) struct StyleStore {
     pub(crate) grid: GridStore,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct StyleStoreCheckpoint {
-    calculations: math::CssCalcCheckpoint,
-    grid: grid::GridStoreCheckpoint,
-}
-
-impl StyleStore {
-    pub(crate) fn checkpoint(&self) -> StyleStoreCheckpoint {
-        StyleStoreCheckpoint {
-            calculations: self.calculations.checkpoint(),
-            grid: self.grid.checkpoint(),
-        }
-    }
-
-    pub(crate) fn rollback(&mut self, checkpoint: StyleStoreCheckpoint) {
-        self.calculations.rollback(checkpoint.calculations);
-        self.grid.rollback(checkpoint.grid);
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleTree {
     styles: HashMap<NodeId, ComputedStyle>,
@@ -296,8 +276,8 @@ impl StyleTree {
         self.store = store;
     }
 
-    pub(crate) fn store_mut(&mut self) -> &mut StyleStore {
-        &mut self.store
+    pub(crate) fn cloned_store(&self) -> StyleStore {
+        self.store.clone()
     }
 
     pub fn resolve_calc(&self, value: CssCalc, basis: f32) -> Option<f32> {

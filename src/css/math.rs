@@ -1,9 +1,9 @@
 use cssparser::{ParseError, Parser, ParserInput, Token};
 
-#[cfg(feature = "stylo")]
 use crate::core::geom::Size;
-use crate::core::style::{CellMetric, CssCalcExpr, CssLength, CssLengthUnit, FontSize, LengthAxis};
+use crate::core::style::{CellMetric, CssCalcExpr, CssLength, CssLengthUnit, LengthAxis};
 
+#[cfg(test)]
 use super::cascade::MediaContext;
 
 const MAX_DEPTH: usize = 32;
@@ -34,6 +34,7 @@ pub(super) enum ParsedMath {
 }
 
 impl ParsedMath {
+    #[cfg(test)]
     pub(super) fn lower_cells(
         &self,
         media: MediaContext,
@@ -52,7 +53,6 @@ impl ParsedMath {
     /// computed, so the font-relative units `MediaContext` exists to resolve cannot appear. The
     /// cell metric and viewport are the whole of what is left. Both entry points share the
     /// percentage scale, which is the part that is easy to get wrong.
-    #[cfg(feature = "stylo")]
     pub(in crate::css) fn lower_cells_with_metric(
         &self,
         cell: CellMetric,
@@ -67,17 +67,6 @@ impl ParsedMath {
         self.lower(
             &|length| (cell.css_pixels(length, viewport) / cell_px) as f32,
             percent_scale(cell, output_axis, basis_axis),
-        )
-    }
-
-    pub(super) fn lower_font_pixels(
-        &self,
-        media: MediaContext,
-        inherited: FontSize,
-    ) -> Option<CssCalcExpr> {
-        self.lower(
-            &|length| media.css_pixels_for_font_size(length, inherited) as f32,
-            1.0,
         )
     }
 
@@ -161,6 +150,7 @@ fn percent_scale(cell: CellMetric, output_axis: LengthAxis, basis_axis: LengthAx
     f32::from(axis_px(basis_axis)) / f32::from(axis_px(output_axis))
 }
 
+#[cfg(test)]
 pub(super) fn parse_length_percentage(
     source: &str,
     media: MediaContext,
@@ -182,43 +172,6 @@ pub(in crate::css) fn parse_length_percentage_source(source: &str) -> Option<Par
         return None;
     };
     parser.expect_exhausted().ok()?;
-    Some(value)
-}
-
-pub(super) fn parse_length_percentage_parser(
-    parser: &mut Parser<'_, '_>,
-    media: MediaContext,
-    axis: LengthAxis,
-) -> Option<CssCalcExpr> {
-    parse_math_parser(parser)?.lower_cells(media, axis, axis)
-}
-
-pub(super) fn parse_math(source: &str) -> Option<ParsedMath> {
-    let mut input = ParserInput::new(source);
-    let mut parser = Parser::new(&mut input);
-    let value = parse_math_parser(&mut parser)?;
-    parser.expect_exhausted().ok()?;
-    Some(value)
-}
-
-pub(super) fn parse_math_parser(parser: &mut Parser<'_, '_>) -> Option<ParsedMath> {
-    let state = parser.state();
-    let Token::Function(name) = parser.next().ok()?.clone() else {
-        parser.reset(&state);
-        return None;
-    };
-    if !matches!(
-        name.to_ascii_lowercase().as_ref(),
-        "calc" | "min" | "max" | "clamp"
-    ) {
-        parser.reset(&state);
-        return None;
-    }
-    parser.reset(&state);
-    let mut limits = Limits { depth: 0, nodes: 0 };
-    let Value::Length(value) = parse_primary(parser, &mut limits).ok()? else {
-        return None;
-    };
     Some(value)
 }
 

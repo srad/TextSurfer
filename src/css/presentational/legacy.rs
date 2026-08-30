@@ -1,5 +1,8 @@
-use crate::core::style::Rgb;
-use crate::css::values::parse_color;
+use cssparser::color::clamp_unit_f32;
+use cssparser::{Parser, ParserInput};
+use cssparser_color::{Color as CssColor, hsl_to_rgb, hwb_to_rgb};
+
+use crate::core::style::{Rgb, Rgba};
 
 pub(super) fn non_negative_integer(source: &str) -> Option<usize> {
     let source = source.trim_start();
@@ -86,4 +89,40 @@ pub(super) fn legacy_color(source: &str) -> Option<Rgb> {
         *channel = u8::from_str_radix(&part, 16).ok()?;
     }
     Some(Rgb::new(channels[0], channels[1], channels[2]))
+}
+
+fn parse_color(source: &str) -> Option<Rgba> {
+    let mut input = ParserInput::new(source);
+    let mut parser = Parser::new(&mut input);
+    let color = CssColor::parse(&mut parser).ok()?;
+    parser.expect_exhausted().ok()?;
+    let ((r, g, b), alpha) = match color {
+        CssColor::Rgba(rgba) => ((rgba.red, rgba.green, rgba.blue), rgba.alpha),
+        CssColor::Hsl(hsl) => (
+            float_rgb(hsl_to_rgb(
+                hsl.hue.unwrap_or_default() / 360.0,
+                hsl.saturation.unwrap_or_default(),
+                hsl.lightness.unwrap_or_default(),
+            )),
+            hsl.alpha.unwrap_or(1.0),
+        ),
+        CssColor::Hwb(hwb) => (
+            float_rgb(hwb_to_rgb(
+                hwb.hue.unwrap_or_default() / 360.0,
+                hwb.whiteness.unwrap_or_default(),
+                hwb.blackness.unwrap_or_default(),
+            )),
+            hwb.alpha.unwrap_or(1.0),
+        ),
+        _ => return None,
+    };
+    Some(Rgba::new(r, g, b, clamp_unit_f32(alpha)))
+}
+
+fn float_rgb((red, green, blue): (f32, f32, f32)) -> (u8, u8, u8) {
+    (
+        clamp_unit_f32(red),
+        clamp_unit_f32(green),
+        clamp_unit_f32(blue),
+    )
 }

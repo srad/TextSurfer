@@ -1,7 +1,7 @@
 use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
 use crate::core::style::Palette;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 
 fn render(source: &str, cols: u16) -> crate::pipeline::render::RenderedPage {
@@ -37,7 +37,7 @@ fn fixed_subtrees_do_not_extend_document_height() {
     let normal = document.insert_element(None, "p", ElementNs::Html, vec![]);
     document.insert_text(Some(normal), "normal");
     let sheet = CssparserParser.parse("div { position:fixed;top:160px }");
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
     assert!(
         tree.fragments

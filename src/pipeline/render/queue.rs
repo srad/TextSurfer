@@ -10,9 +10,11 @@ use crate::core::dom::Document;
 use crate::core::form::FormState;
 use crate::core::image::ImageResources;
 use crate::core::style::{Palette, StyleTree};
-use crate::css::{BasicCascade, CascadeState, MediaContext, StyleSheet};
+use crate::css::MediaContext;
 use crate::layout::{BoxTree, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
+
+use super::StyleInput;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RenderKey {
@@ -28,8 +30,7 @@ pub struct RenderJob {
     pub document: RenderTree,
     pub styles: Option<Arc<StyleTree>>,
     pub(crate) previous_styles: Option<Arc<StyleTree>>,
-    pub(crate) cascade_state: Option<Arc<CascadeState>>,
-    pub sheets: Vec<StyleSheet>,
+    pub style_input: StyleInput,
     pub forms: FormState,
     pub images: ImageResources,
     pub media: MediaContext,
@@ -67,9 +68,9 @@ pub struct RenderResult {
         )
     )]
     pub(crate) restyle_failure: Option<crate::layout::RestyleFailure>,
-    pub(crate) cascade_state: Option<Arc<CascadeState>>,
     pub css_warnings: usize,
     pub timings: RenderTimings,
+    pub work: RenderWork,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,12 +95,28 @@ struct ActiveRender {
     started: Instant,
 }
 
+struct PreparedStyles {
+    styles: Arc<StyleTree>,
+    cascade: Duration,
+    restyle: Duration,
+    touched: Option<Vec<crate::core::dom::NodeId>>,
+    work: RenderWork,
+    css_warnings: Option<usize>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RenderTimings {
     pub cascade: Duration,
     pub restyle: Duration,
     pub layout: Duration,
     pub paint: Duration,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RenderWork {
+    pub styled_nodes_visited: usize,
+    pub style_entries_mapped: usize,
+    pub damage_nodes_checked: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,10 +149,6 @@ impl RenderCauses {
 
     pub(crate) fn contains(self, cause: RenderCause) -> bool {
         self.0 & (1 << cause as u8) != 0
-    }
-
-    fn is_only(self, cause: RenderCause) -> bool {
-        self.0 == 1 << cause as u8
     }
 
     pub fn bits(self) -> u16 {
@@ -197,12 +210,6 @@ pub trait RenderQueue: Send + Sync {
     fn shutdown(&self) {}
 }
 
-impl RenderJob {
-    pub fn execute(self) -> RenderResult {
-        execute(self, None)
-    }
-}
-
 fn set_activity(
     activity: Option<&Mutex<Option<ActiveRender>>>,
     key: RenderKey,
@@ -217,15 +224,18 @@ fn set_activity(
     }
 }
 
-fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> RenderResult {
+fn execute_inner(
+    job: RenderJob,
+    activity: Option<&Mutex<Option<ActiveRender>>>,
+    prepared: Option<PreparedStyles>,
+) -> RenderResult {
     let RenderJob {
         key,
         causes,
         document,
         styles,
-        previous_styles,
-        cascade_state,
-        sheets,
+        previous_styles: _,
+        style_input: _,
         forms,
         images,
         media,
@@ -234,7 +244,7 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         layout_styles,
         css_warnings,
     } = job;
-    let cascade_required = styles.is_none();
+    let cascade_required = styles.is_none() || prepared.is_some();
     let render_span = tracing::trace_span!(
         target: "textsurfer::perf",
         "render",
@@ -246,49 +256,23 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         causes_bits = causes.bits(),
         reused_styles = styles.is_some(),
         reused_layout = layout.is_some(),
-        stylesheets = sheets.len(),
         images = images.iter().count()
     );
     let _render_guard = render_span.enter();
     let mut incremental_style_time = Duration::ZERO;
-    let retained = if cascade_required && causes.is_only(RenderCause::DynamicState) {
-        previous_styles
-            .as_ref()
-            .zip(cascade_state.as_ref())
-            .and_then(|(previous, state)| {
-                set_activity(activity, key, RenderStage::Restyle);
-                let started = Instant::now();
-                let result = BasicCascade.apply_dynamic_with_form_state(
-                    &sheets,
-                    &document.document,
-                    media,
-                    &forms,
-                    previous,
-                    state,
-                );
-                incremental_style_time = started.elapsed();
-                result
-            })
+    let mut touched = None;
+    let mut work = RenderWork::default();
+    let mut css_warnings = css_warnings;
+    let (styles, cascade) = if let Some(prepared) = prepared {
+        incremental_style_time = prepared.restyle;
+        work = prepared.work;
+        css_warnings = prepared.css_warnings.unwrap_or(css_warnings);
+        touched = prepared.touched;
+        (prepared.styles, prepared.cascade)
+    } else if let Some(styles) = styles {
+        (styles, Duration::ZERO)
     } else {
-        None
-    };
-    let (styles, cascade_state, cascade) = if let Some(styles) = styles {
-        (styles, cascade_state, Duration::ZERO)
-    } else if let Some((styles, state)) = retained {
-        (Arc::new(styles), Some(Arc::new(state)), Duration::ZERO)
-    } else {
-        incremental_style_time = Duration::ZERO;
-        set_activity(activity, key, RenderStage::Cascade);
-        let started = Instant::now();
-        let span = tracing::trace_span!(
-            target: "textsurfer::perf",
-            "cascade",
-            reused = false
-        );
-        let _guard = span.enter();
-        let (styles, state) =
-            BasicCascade.apply_retained_with_form_state(&sheets, &document.document, media, &forms);
-        (Arc::new(styles), Some(Arc::new(state)), started.elapsed())
+        unreachable!("the Stylo worker prepares every cascade")
     };
     let mut layout = layout;
     let mut restyle_time = incremental_style_time;
@@ -301,10 +285,17 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         let started = Instant::now();
         let span = tracing::trace_span!(target: "textsurfer::perf", "restyle");
         let _guard = span.enter();
-        match crate::layout::restyle(tree, previous, &styles) {
+        let result = match touched.as_deref() {
+            Some(nodes) => crate::layout::restyle_nodes(tree, previous, &styles, nodes),
+            None => crate::layout::restyle(tree, previous, &styles),
+        };
+        match result {
             Ok(()) => {
                 restyle_time = restyle_time.saturating_add(started.elapsed());
-                painted_changed = !previous.paint_compatible_with(&styles);
+                painted_changed = !touched.as_deref().map_or_else(
+                    || previous.paint_compatible_with(&styles),
+                    |nodes| previous.paint_compatible_for(&styles, nodes),
+                );
             }
             Err(failure) => {
                 tracing::trace!(target: "textsurfer::perf", ?failure, "restyle rejected");
@@ -370,7 +361,6 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
         painted,
         painted_changed,
         restyle_failure,
-        cascade_state,
         css_warnings,
         timings: RenderTimings {
             cascade,
@@ -378,6 +368,7 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
             layout: layout_time,
             paint,
         },
+        work,
     };
     if let Some(activity) = activity {
         *activity.lock().unwrap() = None;
@@ -385,33 +376,79 @@ fn execute(job: RenderJob, activity: Option<&Mutex<Option<ActiveRender>>>) -> Re
     result
 }
 
-#[derive(Default)]
-pub struct InlineRenderQueue {
+pub struct BlockingRenderQueue {
+    worker: ThreadedRenderQueue,
     results: Mutex<VecDeque<RenderResult>>,
-    closed: AtomicBool,
+    disconnected: AtomicBool,
 }
 
-impl RenderQueue for InlineRenderQueue {
-    fn submit(&self, job: RenderJob) -> RenderSubmitted {
-        if self.closed.load(Ordering::Acquire) {
-            return RenderSubmitted::Closed(job);
+impl BlockingRenderQueue {
+    pub fn new() -> Self {
+        Self {
+            worker: ThreadedRenderQueue::new(),
+            results: Mutex::new(VecDeque::new()),
+            disconnected: AtomicBool::new(false),
         }
-        self.results.lock().unwrap().push_back(execute(job, None));
+    }
+
+    pub fn render(&self, job: RenderJob) -> Option<RenderResult> {
+        match self.submit(job) {
+            RenderSubmitted::Queued => {}
+            RenderSubmitted::Refused(_) | RenderSubmitted::Closed(_) => return None,
+        }
+        match self.poll() {
+            RenderPoll::Ready(result) => Some(*result),
+            RenderPoll::Empty | RenderPoll::Disconnected => None,
+        }
+    }
+}
+
+impl Default for BlockingRenderQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderQueue for BlockingRenderQueue {
+    fn submit(&self, job: RenderJob) -> RenderSubmitted {
+        match self.worker.submit(job) {
+            RenderSubmitted::Queued => {}
+            refused => return refused,
+        }
+        loop {
+            match self.worker.poll() {
+                RenderPoll::Ready(result) => {
+                    self.results.lock().unwrap().push_back(*result);
+                    break;
+                }
+                RenderPoll::Empty => std::thread::yield_now(),
+                RenderPoll::Disconnected => {
+                    self.disconnected.store(true, Ordering::Release);
+                    break;
+                }
+            }
+        }
         RenderSubmitted::Queued
     }
 
     fn poll(&self) -> RenderPoll {
-        self.results
+        let result = self
+            .results
             .lock()
             .unwrap()
             .pop_front()
             .map_or(RenderPoll::Empty, |result| {
                 RenderPoll::Ready(Box::new(result))
-            })
+            });
+        if matches!(result, RenderPoll::Empty) && self.disconnected.load(Ordering::Acquire) {
+            RenderPoll::Disconnected
+        } else {
+            result
+        }
     }
 
     fn shutdown(&self) {
-        self.closed.store(true, Ordering::Release);
+        self.worker.shutdown();
     }
 }
 
@@ -436,17 +473,7 @@ impl ThreadedRenderQueue {
         let activity = Arc::new(Mutex::new(None));
         let worker_activity = activity.clone();
         std::thread::spawn(move || {
-            while let Ok(command) = command_rx.recv() {
-                match command {
-                    Command::Render(job) => {
-                        let result = execute(*job, Some(&worker_activity));
-                        if result_tx.send(result).is_err() {
-                            break;
-                        }
-                    }
-                    Command::Shutdown => break,
-                }
-            }
+            worker_loop(command_rx, result_tx, &worker_activity);
             worker_closed.store(true, Ordering::Release);
         });
         Self {
@@ -456,6 +483,116 @@ impl ThreadedRenderQueue {
             activity,
         }
     }
+}
+
+fn worker_loop(
+    command_rx: Receiver<Command>,
+    result_tx: Sender<RenderResult>,
+    activity: &Mutex<Option<ActiveRender>>,
+) {
+    let mut pending = None;
+    let mut stopped = false;
+    while !stopped {
+        let command = match pending.take() {
+            Some(command) => command,
+            None => match command_rx.recv() {
+                Ok(command) => command,
+                Err(_) => break,
+            },
+        };
+        let Command::Render(first) = command else {
+            break;
+        };
+        let input = first.style_input.clone();
+        let document = first.document.document.clone();
+        let forms = first.forms.clone();
+        let media = first.media;
+        crate::css::stylo::with_session(&input, &document, &forms, media, |session| {
+            let mut current = first;
+            loop {
+                let result = execute_with_stylo_session(*current, session, Some(activity));
+                if result_tx.send(result).is_err() {
+                    stopped = true;
+                    break;
+                }
+                match command_rx.recv() {
+                    Ok(Command::Render(next)) if next.style_input.session == input.session => {
+                        current = next;
+                    }
+                    Ok(command) => {
+                        pending = Some(command);
+                        break;
+                    }
+                    Err(_) => {
+                        stopped = true;
+                        break;
+                    }
+                }
+            }
+        });
+    }
+}
+
+fn execute_with_stylo_session(
+    job: RenderJob,
+    session: &mut crate::css::stylo::StyloSession<'_, '_>,
+    activity: Option<&Mutex<Option<ActiveRender>>>,
+) -> RenderResult {
+    if job.styles.is_some() {
+        return execute_inner(job, activity, None);
+    }
+    if (job.causes.contains(RenderCause::DynamicState)
+        || job.causes.contains(RenderCause::FormState))
+        && job.previous_styles.is_some()
+    {
+        set_activity(activity, job.key, RenderStage::Restyle);
+        let started = Instant::now();
+        let restyled = session.restyle(
+            job.media,
+            job.previous_styles.as_deref().expect("checked above"),
+            &job.forms,
+        );
+        let elapsed = started.elapsed();
+        tracing::trace!(
+            target: "textsurfer::perf",
+            visited = restyled.visited,
+            touched = restyled.touched.len(),
+            mapped = restyled.mapped,
+            "stylo restyle completed"
+        );
+        let damage_nodes_checked = restyled.touched.len();
+        return execute_inner(
+            job,
+            activity,
+            Some(PreparedStyles {
+                styles: Arc::new(restyled.styles),
+                cascade: Duration::ZERO,
+                restyle: elapsed,
+                touched: Some(restyled.touched),
+                work: RenderWork {
+                    styled_nodes_visited: restyled.visited,
+                    style_entries_mapped: restyled.mapped,
+                    damage_nodes_checked,
+                },
+                css_warnings: Some(session.css_warnings()),
+            }),
+        );
+    }
+    set_activity(activity, job.key, RenderStage::Cascade);
+    let started = Instant::now();
+    let styles = Arc::new(session.cascade(job.media));
+    execute_inner(
+        job,
+        activity,
+        Some(PreparedStyles {
+            styles,
+            cascade: started.elapsed(),
+            restyle: Duration::ZERO,
+            touched: None,
+            work: RenderWork::default(),
+            css_warnings: Some(session.css_warnings()),
+        }),
+    )
 }
 
 impl Default for ThreadedRenderQueue {

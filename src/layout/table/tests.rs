@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::layout::LayoutRect;
 use proptest::prelude::*;
@@ -32,7 +32,7 @@ fn formatted(source: &str, width: usize) -> TableOutput {
                 .unwrap_or_default(),
         ),
     ];
-    let styles = BasicCascade.apply(
+    let styles = StyloCascade.apply(
         &sheets,
         &document,
         MediaContext::screen().with_viewport(Size {
@@ -161,7 +161,7 @@ fn resource_limit_falls_back_without_losing_text() {
     let outcome = Html5everParser::new(false)
         .parse_document("<table id=table><tr><td>A</td><td>B</td></tr></table>");
     let document = outcome.document.borrow();
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let table = document.element_by_id("table").unwrap();
     let limited = TableFormatter::new(test_input(&document, &styles)).format(
         table,
@@ -180,7 +180,7 @@ fn resource_limit_falls_back_without_losing_text() {
         "<div id=parent><span id=a style='display:table-cell'>A</span><span id=b style='display:table-cell'>B</span></div>",
     );
     let document = outcome.document.borrow();
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let parent = document.element_by_id("parent").unwrap();
     let anonymous = TableFormatter::new(test_input(&document, &styles)).format_anonymous(
         vec![
@@ -203,7 +203,7 @@ fn resource_limit_falls_back_without_losing_text() {
         "<table id=table><tr><td>before<table><tr><td>middle<table><tr><td>deep</td></tr></table>after-middle</td></tr></table>after</td></tr></table>",
     );
     let document = outcome.document.borrow();
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let table = document.element_by_id("table").unwrap();
     let nested = TableFormatter::new(test_input(&document, &styles)).format(
         table,

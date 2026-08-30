@@ -1,7 +1,7 @@
 use super::{box_for, grid_fixture, viewport};
 use crate::core::dom::{Attr, Document, ElementNs};
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 
 #[test]
@@ -90,7 +90,7 @@ fn the_vector_2022_page_skeleton_is_placed_rather_than_stacked() {
          .content { grid-area: content }
          .footer { grid-area: footer }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 24 });
 
     let rect = |name: &str| {
@@ -117,7 +117,7 @@ fn generated_content_becomes_a_grid_item_rather_than_inline_text() {
          main > div { margin: 0; padding: 0 }
          main::before { content: 'A' }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
     // `::before` takes the first track, pushing the real child into the second.
     let rect = box_for(&tree, child).border_rect;

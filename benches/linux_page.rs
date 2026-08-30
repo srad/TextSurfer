@@ -5,7 +5,7 @@ use textsurfer::core::geom::Size;
 use textsurfer::core::style::{Palette, RenderContext};
 use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::pipeline::page_load::{PageLoadOptions, PendingPageLoad};
-use textsurfer::pipeline::render::RenderKey;
+use textsurfer::pipeline::render::{BlockingRenderQueue, RenderKey};
 use url::Url;
 
 const SOURCE: &str = include_str!("../tests/fixtures/linux-revision-1371530035.html");
@@ -43,15 +43,18 @@ fn main() {
     let parse_and_discovery = total_started.elapsed();
     let snapshot_started = Instant::now();
     assert!(load.render_if_ready(Duration::from_secs(5)).is_none());
-    let result = load
-        .take_render_job(RenderKey {
-            tab_id: 0,
-            generation: 0,
-            epoch: load.render_epoch(),
-            hard_epoch: load.hard_epoch(),
-        })
-        .unwrap()
-        .execute();
+    let renders = BlockingRenderQueue::new();
+    let result = renders
+        .render(
+            load.take_render_job(RenderKey {
+                tab_id: 0,
+                generation: 0,
+                epoch: load.render_epoch(),
+                hard_epoch: load.hard_epoch(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
     let snapshot_and_render = snapshot_started.elapsed();
     let timings = result.timings;
     let render = timings.cascade + timings.restyle + timings.layout + timings.paint;
@@ -65,15 +68,17 @@ fn main() {
         })
         .is_none()
     );
-    let hover = load
-        .take_render_job(RenderKey {
-            tab_id: 0,
-            generation: 0,
-            epoch: load.render_epoch(),
-            hard_epoch: load.hard_epoch(),
-        })
-        .unwrap()
-        .execute();
+    let hover = renders
+        .render(
+            load.take_render_job(RenderKey {
+                tab_id: 0,
+                generation: 0,
+                epoch: load.render_epoch(),
+                hard_epoch: load.hard_epoch(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
     let hover_timings = hover.timings;
     assert_eq!(hover_timings.layout, Duration::ZERO);
     let hover_render =

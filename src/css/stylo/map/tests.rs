@@ -62,7 +62,10 @@ fn mapped(css: &str) -> (crate::core::style::StyleTree, NodeId) {
     let arena = StyleArena::new();
     let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
-    (style_tree_measured(&dom, context()).0, div)
+    (
+        style_tree_measured(&dom, &engine, &document, context()).0,
+        div,
+    )
 }
 
 fn style_of(css: &str) -> crate::core::style::ComputedStyle {
@@ -294,7 +297,7 @@ fn elements_sharing_computed_values_are_mapped_once() {
     let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
 
-    let (_, stats) = style_tree_measured(&dom, context());
+    let (_, stats) = style_tree_measured(&dom, &engine, &document, context());
     assert_eq!(stats.elements, 66, "html, body and 64 divs");
     assert!(
         stats.distinct < 8,
@@ -334,7 +337,7 @@ fn every_styled_element_reaches_the_tree() {
     let dom = engine.mirror(&arena, &document);
     let styled = engine.cascade(&dom);
 
-    let (tree, stats) = style_tree_measured(&dom, context());
+    let (tree, stats) = style_tree_measured(&dom, &engine, &document, context());
     assert_eq!(
         stats.elements, styled,
         "the mapper saw every element Stylo styled"
@@ -573,7 +576,7 @@ fn identical_presentational_hints_preserve_style_sharing() {
     let arena = StyleArena::new();
     let dom = engine.mirror(&arena, &document);
     engine.cascade(&dom);
-    let (_, stats) = style_tree_measured(&dom, context());
+    let (_, stats) = style_tree_measured(&dom, &engine, &document, context());
     assert_eq!(stats.elements, 66);
     assert!(stats.distinct <= 3, "{stats:?}");
 }

@@ -13,10 +13,9 @@ use stylo_dom::ElementState;
 use web_atoms::{LocalName, Namespace, ns};
 
 use crate::core::dom::{Attr, AttrNs, Document, DomQuirksMode, ElementNs, Node, NodeId};
-use crate::core::form::{ControlKind, control_kind};
+use crate::core::form::{ControlKind, FormState, checkedness, control_kind, is_disabled};
 use crate::core::style::LegacyAlign;
 use crate::css::presentational::synthesized_hints;
-use crate::css::ua::inline_style;
 
 use super::{DocumentNode, ElementNode, MirrorAttr, NodeKind, StyleArena, StyleDom, StyleNode};
 
@@ -31,6 +30,7 @@ pub(crate) const MAX_MIRROR_DEPTH: usize = 512;
 /// pointing at a single block.
 struct Build<'d> {
     document: &'d Document,
+    forms: &'d FormState,
     lock: SharedRwLock,
     quirks_mode: QuirksMode,
     inline: HashMap<&'d str, Option<ServoArc<Locked<PropertyDeclarationBlock>>>>,
@@ -54,8 +54,6 @@ impl<'d> Build<'d> {
         &mut self,
         source: NodeId,
     ) -> Option<ServoArc<Locked<PropertyDeclarationBlock>>> {
-        // `css::ua::inline_style` rather than a second attribute lookup, so the predicate cannot
-        // drift from the one `BasicCascade` uses.
         let css = inline_style(self.document, source)?;
         if let Some(interned) = self.inline.get(css) {
             return interned.clone();
@@ -67,8 +65,6 @@ impl<'d> Build<'d> {
             self.quirks_mode,
             CssRuleType::Style,
         );
-        // An attribute that declares nothing is stored as nothing: it is what `BasicCascade` sees,
-        // and it keeps the element shareable with its attribute-less siblings.
         let block = (!block.is_empty()).then(|| ServoArc::new(self.lock.wrap(block)));
         self.inline.insert(css, block.clone());
         block
@@ -114,6 +110,16 @@ impl<'d> Build<'d> {
     }
 }
 
+fn inline_style(document: &Document, id: NodeId) -> Option<&str> {
+    let Some(Node::Element { attrs, .. }) = document.node(id) else {
+        return None;
+    };
+    attrs
+        .iter()
+        .find(|attr| attr.ns == AttrNs::None && attr.name == "style")
+        .map(|attr| attr.value.as_str())
+}
+
 impl<'a> StyleDom<'a> {
     /// Mirror `document`, wrapping every `style` attribute in `lock`.
     ///
@@ -123,6 +129,7 @@ impl<'a> StyleDom<'a> {
     pub(crate) fn build(
         arena: &'a StyleArena<'a>,
         document: &Document,
+        forms: &FormState,
         lock: SharedRwLock,
     ) -> Self {
         let quirks_mode = quirks_mode(document.quirks_mode());
@@ -146,6 +153,7 @@ impl<'a> StyleDom<'a> {
         };
         let mut build = Build {
             document,
+            forms,
             lock,
             quirks_mode,
             inline: HashMap::new(),
@@ -181,9 +189,12 @@ impl<'a> StyleDom<'a> {
                     *ns,
                     attrs,
                     control_kind(document, source),
-                    build.inline_style(source),
-                    presentational_hints,
-                    legacy_align,
+                    static_state(document, build.forms, source),
+                    ElementStyleInput {
+                        style_attribute: build.inline_style(source),
+                        presentational_hints,
+                        legacy_align,
+                    },
                 ))
             }
             Node::Text { .. } => NodeKind::Text,
@@ -237,14 +248,19 @@ impl super::DocumentNode {
     }
 }
 
+struct ElementStyleInput {
+    style_attribute: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+    presentational_hints: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+    legacy_align: Option<LegacyAlign>,
+}
+
 fn element_node(
     name: &str,
     ns: ElementNs,
     attrs: &[Attr],
     control: Option<ControlKind>,
-    style_attribute: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
-    presentational_hints: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
-    legacy_align: Option<LegacyAlign>,
+    state: ElementState,
+    style_input: ElementStyleInput,
 ) -> ElementNode {
     let mut id = None;
     let mut classes = Vec::new();
@@ -270,18 +286,48 @@ fn element_node(
         classes,
         attrs: mirrored,
         control,
-        state: Cell::new(ElementState::empty()),
+        state: Cell::new(state),
         selector_flags: Cell::new(ElementSelectorFlags::empty()),
         data: ElementDataWrapper::default(),
         allocated: Cell::new(false),
-        style_attribute,
-        presentational_hints,
-        legacy_align,
+        style_attribute: style_input.style_attribute,
+        presentational_hints: style_input.presentational_hints,
+        legacy_align: style_input.legacy_align,
         children_to_process: Cell::new(0),
         dirty_descendants: Cell::new(false),
         has_snapshot: Cell::new(false),
         handled_snapshot: Cell::new(false),
     }
+}
+
+pub(in crate::css::stylo) fn static_state(
+    document: &Document,
+    forms: &FormState,
+    id: NodeId,
+) -> ElementState {
+    let Some(Node::Element { name, ns, .. }) = document.node(id) else {
+        return ElementState::empty();
+    };
+    if *ns != ElementNs::Html {
+        return ElementState::empty();
+    }
+    let mut state = ElementState::empty();
+    if matches!(
+        name.as_str(),
+        "input" | "button" | "select" | "textarea" | "option" | "optgroup" | "fieldset"
+    ) {
+        state |= if is_disabled(document, id) {
+            ElementState::DISABLED
+        } else {
+            ElementState::ENABLED
+        };
+    }
+    if (name == "option" || control_kind(document, id).is_some_and(ControlKind::is_toggle))
+        && checkedness(document, id, forms)
+    {
+        state |= ElementState::CHECKED;
+    }
+    state
 }
 
 fn element_namespace(ns: ElementNs) -> Namespace {

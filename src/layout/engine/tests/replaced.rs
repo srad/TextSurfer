@@ -3,7 +3,7 @@
 
 use crate::core::form::FormState;
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, MediaContext};
+use crate::css::{Cascade, MediaContext, StyloCascade};
 use crate::html::{Html5everParser, HtmlParser};
 use crate::layout::engine::{BoxTree, LayoutEngine, TaffyLayoutEngine};
 
@@ -11,7 +11,7 @@ fn laid_out(source: &str, cols: u16) -> BoxTree {
     let outcome = Html5everParser::new(false).parse_document(source);
     let document = outcome.document.borrow();
     let viewport = Size { cols, rows: 24 };
-    let styles = BasicCascade.apply(
+    let styles = StyloCascade.apply(
         &[],
         &document,
         MediaContext::screen().with_viewport(viewport),

@@ -2,7 +2,7 @@ use crate::core::dom::{Document, SharedDocument};
 use crate::core::form::FormState;
 use crate::core::geom::Size;
 use crate::core::style::{Palette, RenderContext, RenderMetrics, StyleTree, TextRendering};
-use crate::css::{BasicCascade, Cascade, ColorScheme, MediaContext, StyleSheet};
+use crate::css::{ColorScheme, MediaContext};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 use crate::paint::{BasicPainter, DisplayList, Painter};
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions};
@@ -69,14 +69,14 @@ pub fn render_html_with_context(
 
 pub fn render_document(
     document: SharedDocument,
-    sheets: &[StyleSheet],
+    author_css: &[&str],
     media: MediaContext,
     palette: Palette,
     parse_errors: usize,
 ) -> RenderedPage {
     render_document_with_images(
         document,
-        sheets,
+        author_css,
         media,
         palette,
         parse_errors,
@@ -87,19 +87,20 @@ pub fn render_document(
 
 pub(crate) fn render_document_with_images(
     document: SharedDocument,
-    sheets: &[StyleSheet],
+    author_css: &[&str],
     media: MediaContext,
     palette: Palette,
     parse_errors: usize,
     forms: &FormState,
     images: &crate::core::image::ImageResources,
 ) -> RenderedPage {
-    let css_warnings = sheets
-        .iter()
-        .map(|sheet| sheet.diagnostics.total())
-        .sum::<usize>();
-    let styles =
-        Arc::new(BasicCascade.apply_with_form_state(sheets, &document.borrow(), media, forms));
+    let (styles, css_warnings) = crate::css::stylo::cascade_once(
+        &document.borrow(),
+        forms,
+        media.with_palette(palette),
+        author_css,
+    );
+    let styles = Arc::new(styles);
     let mut painted = BasicPainter.paint(
         &TaffyLayoutEngine.layout_with_images(
             &document.borrow(),

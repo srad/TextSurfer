@@ -4,7 +4,7 @@ use crate::core::dom::ElementNs;
 use crate::core::style::{
     BorderEdges, BorderLineStyle, BorderSide, ComputedStyle, Display, Palette,
 };
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::paint::{BasicPainter, Painter};
 use proptest::prelude::*;
 
@@ -23,7 +23,7 @@ fn paragraph(text: &str) -> (Document, StyleTree) {
     let mut document = Document::new();
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
     document.insert_text(Some(p), text);
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     (document, styles)
 }
 
@@ -48,7 +48,7 @@ fn nested_document(text: &str, depth: usize) -> (Document, StyleTree) {
     }
     let p = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
     document.insert_text(Some(p), text);
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     (document, styles)
 }
 
@@ -64,7 +64,7 @@ fn deeply_nested_document(text: &str, depth: usize) -> (Document, StyleTree) {
     }
     let p = document.insert_element(Some(parent), "p", ElementNs::Html, vec![]);
     document.insert_text(Some(p), text);
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     (document, styles)
 }
 
@@ -212,7 +212,7 @@ proptest! {
         let mut document = Document::new();
         let heading = document.insert_element(None, "h1", ElementNs::Html, vec![]);
         document.insert_text(Some(heading), &text);
-        let styles = BasicCascade.apply(
+        let styles = StyloCascade.apply(
             &[],
             &document,
             MediaContext::screen().with_text_rendering(crate::core::style::TextRendering::ScaledBitmap),
@@ -297,7 +297,7 @@ fn block_text_wraps_to_the_terminal_width_and_hidden_nodes_disappear() {
     let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
     let p = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
     document.insert_text(Some(p), "one two three four");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 9, rows: 5 });
     assert_eq!(fragment_text(&tree), vec!["one two", "three", "four"]);
     assert!(
@@ -313,7 +313,7 @@ fn long_words_break_to_terminal_width_even_when_author_css_requests_normal_wrapp
     let p = document.insert_element(None, "p", ElementNs::Html, vec![]);
     document.insert_text(Some(p), "abcdefghijk");
     let sheet = CssparserParser.parse("p { overflow-wrap: normal }");
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
     assert_eq!(fragment_text(&tree), vec!["abcd", "efgh", "ijk"]);
 }
@@ -343,7 +343,7 @@ fn mixed_preformatted_whitespace_stays_in_its_unbreakable_segment() {
     );
     document.insert_text(Some(pre), " \t ");
     document.insert_text(Some(p), "bb");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let flow = build_flow_tree(authored_input(&document, &styles), 40);
     let inline = flow
         .boxes
@@ -366,7 +366,7 @@ fn a_wrapping_tab_breaks_after_its_first_expanded_space() {
         )],
     );
     document.insert_text(Some(p), "aa\tbb");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let flow = build_flow_tree(authored_input(&document, &styles), 40);
     let inline = flow
         .boxes
@@ -381,7 +381,7 @@ fn preformatted_text_preserves_spaces_and_line_breaks() {
     let mut document = Document::new();
     let pre = document.insert_element(None, "pre", ElementNs::Html, vec![]);
     document.insert_text(Some(pre), "  a\n b");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 5 });
     assert_eq!(fragment_text(&tree), vec!["  a", " b"]);
 }
@@ -418,7 +418,7 @@ fn images_render_their_alt_text_and_rules_span_the_content_width() {
     document.insert_element(Some(body), "hr", ElementNs::Html, vec![]);
     let bare = document.insert_element(Some(body), "p", ElementNs::Html, vec![]);
     document.insert_element(Some(bare), "img", ElementNs::Html, vec![]);
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 12, rows: 5 });
     let lines = BasicPainter.paint(&tree, Palette::default()).text_lines();
     assert!(lines.iter().any(|line| line == "[a cat]"));
@@ -448,7 +448,7 @@ fn inline_styles_travel_with_the_text_fragments() {
     let strong = document.insert_element(Some(p), "strong", ElementNs::Html, vec![]);
     document.insert_text(Some(strong), "loud");
     let sheet = CssparserParser.parse("p { color: #112233 }");
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     let plain = tree
         .fragments
@@ -480,7 +480,7 @@ fn links_are_discovered_inside_inline_content() {
         vec![crate::core::dom::Attr::plain("href", "/next")],
     );
     document.insert_text(Some(link), "next");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     assert_eq!(tree.links.len(), 1);
     assert_eq!(tree.links[0].node, link);
@@ -548,7 +548,7 @@ fn mixed_inline_and_block_children_create_ordered_anonymous_runs() {
     let inner = document.insert_element(Some(outer), "p", ElementNs::Html, vec![]);
     let inside = document.insert_text(Some(inner), "inside");
     let after = document.insert_text(Some(outer), "after");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 1 });
     assert_eq!(
         tree.fragments
@@ -594,7 +594,7 @@ fn display_contents_keeps_order_and_inheritance_without_a_principal_box() {
     );
     let inside = document.insert_text(Some(contents), "inside");
     let after = document.insert_text(Some(outer), " after");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 1 });
     assert_eq!(
         tree.fragments
@@ -654,7 +654,7 @@ fn inline_flow_root_is_an_atomic_inline_box_without_forced_breaks() {
     );
     let last_inside = document.insert_text(Some(last_block), "two");
     let after = document.insert_text(Some(outer), " after");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 1 });
     let atom_box = tree
         .boxes
@@ -742,7 +742,7 @@ fn improper_table_roles_form_block_and_inline_anonymous_tables() {
     let inline_text = document.insert_text(Some(inline_cell), "cell");
     let inline_after = document.insert_text(Some(line), " right");
 
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 8 });
     let fragment = |node| {
         tree.fragments
@@ -760,8 +760,10 @@ fn improper_table_roles_form_block_and_inline_anonymous_tables() {
 #[test]
 fn box_sizing_changes_fixed_width_border_geometry() {
     let mut document = Document::new();
+    let html = document.insert_element(None, "html", ElementNs::Html, vec![]);
+    let body = document.insert_element(Some(html), "body", ElementNs::Html, vec![]);
     let content = document.insert_element(
-        None,
+        Some(body),
         "div",
         ElementNs::Html,
         vec![crate::core::dom::Attr::plain(
@@ -771,7 +773,7 @@ fn box_sizing_changes_fixed_width_border_geometry() {
     );
     document.insert_text(Some(content), "x");
     let border = document.insert_element(
-        None,
+        Some(body),
         "div",
         ElementNs::Html,
         vec![crate::core::dom::Attr::plain(
@@ -780,7 +782,7 @@ fn box_sizing_changes_fixed_width_border_geometry() {
         )],
     );
     document.insert_text(Some(border), "x");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 1 });
     let content_box = tree
         .boxes
@@ -804,7 +806,7 @@ fn intrinsic_height_is_not_limited_by_viewport_rows() {
     let pre = document.insert_element(None, "pre", ElementNs::Html, vec![]);
     let text = (0..300).map(|_| "x").collect::<Vec<_>>().join("\n");
     document.insert_text(Some(pre), &text);
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 4, rows: 1 });
     assert_eq!(tree.fragments.len(), 300);
     assert!(tree.height >= 300);
@@ -830,7 +832,7 @@ fn all_white_space_modes_apply_their_collapse_break_and_wrap_rules() {
             vec![crate::core::dom::Attr::plain("style", &declaration)],
         );
         document.insert_text(Some(p), text);
-        let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+        let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
         let tree = TaffyLayoutEngine.layout(
             &document,
             &styles,
@@ -851,7 +853,7 @@ fn segment_breaks_tabs_forced_breaks_and_cross_node_graphemes_stay_owned() {
     let br = document.insert_element(Some(pre), "br", ElementNs::Html, vec![]);
     let base = document.insert_text(Some(pre), "e");
     document.insert_text(Some(pre), "\u{301}");
-    let styles = BasicCascade.apply(&[], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 1 });
     assert_eq!(
         tree.fragments
@@ -940,7 +942,7 @@ fn generated_content_is_tagged_with_its_originating_element_for_hit_testing() {
         .parse_document("<style>a::after { content: ' (link)' }</style><a href='/x'>go</a>");
     let document = outcome.document.borrow();
     let sheets = crate::pipeline::render::embedded_style_sheets(&document);
-    let styles = BasicCascade.apply(&sheets, &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&sheets, &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 24 });
     let link = tree.links.first().unwrap();
     let painted: usize = link.rects.iter().map(|rect| rect.width).sum();

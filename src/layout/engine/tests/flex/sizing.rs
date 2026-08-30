@@ -1,7 +1,7 @@
 use super::{box_for, flex_fixture};
 use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{LayoutEngine, LayoutRect, TaffyLayoutEngine};
 use proptest::prelude::*;
 
@@ -59,7 +59,7 @@ fn flex_grow_distributes_free_space_by_factor() {
     let sheet = CssparserParser.parse(
         "main { display:flex;width:12ch;margin:0 } div { height:16px;margin:0;padding:0;flex-basis:0 } div:first-child { flex-grow:1 } div:last-child { flex-grow:2 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 5 });
     assert_eq!(box_for(&tree, first).border_rect.width, 4);
     assert_eq!(box_for(&tree, second).border_rect.width, 8);
@@ -163,7 +163,7 @@ fn percentage_min_and_max_width_constrain_flex_items() {
     let sheet = CssparserParser.parse(
         "main { display:flex;width:30ch;margin:0 } main > div { height:16px;margin:0;flex:none } main > div:first-child { width:2ch;min-width:20% } main > div:last-child { width:8ch;max-width:20% }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 5 });
     assert_eq!(box_for(&tree, minimum).border_rect.width, 6);
     assert_eq!(box_for(&tree, maximum).border_rect.width, 6);
@@ -180,7 +180,7 @@ fn box_sizing_controls_fixed_flex_item_border_geometry() {
     let sheet = CssparserParser.parse(
         "main { display:flex;width:30ch;margin:0 } main > div { height:16px;margin:0;flex:none;width:4ch;padding:0 1ch;border:solid } main > div:first-child { box-sizing:content-box } main > div:last-child { box-sizing:border-box }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 5 });
     assert_eq!(box_for(&tree, content_box).border_rect.width, 8);
     assert_eq!(box_for(&tree, border_box).border_rect.width, 4);
@@ -247,7 +247,7 @@ proptest! {
         let sheet = CssparserParser.parse(&format!(
             "main {{ display:flex;flex-wrap:wrap;gap:16px 1ch;margin:0 }} main > div {{ width:{item_width}ch;height:16px;flex:none;margin:0 }}"
         ));
-        let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+        let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
         let narrow_tree = TaffyLayoutEngine.layout(
             &document,
             &styles,

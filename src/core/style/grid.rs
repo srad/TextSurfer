@@ -1,6 +1,7 @@
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
+
+use im::{HashMap, Vector};
 
 use super::{CssCalc, CssNumber, CssPercentage};
 
@@ -218,15 +219,15 @@ handle!(GridIdent);
 /// A content-addressed table: equal payloads share one handle, so a rule that applies the same
 /// track list to a thousand elements stores it once.
 #[derive(Clone, Debug)]
-struct Table<T> {
-    values: Vec<Arc<T>>,
+struct Table<T: Eq + Hash> {
+    values: Vector<Arc<T>>,
     ids: HashMap<Arc<T>, u32>,
 }
 
-impl<T> Default for Table<T> {
+impl<T: Eq + Hash> Default for Table<T> {
     fn default() -> Self {
         Self {
-            values: Vec::new(),
+            values: Vector::new(),
             ids: HashMap::new(),
         }
     }
@@ -234,13 +235,13 @@ impl<T> Default for Table<T> {
 
 /// `ids` is an index derived from `values`, so equality is decided by the values alone. A derive
 /// would also demand `T: Hash` of every caller that only wants to compare two style trees.
-impl<T: PartialEq> PartialEq for Table<T> {
+impl<T: Eq + Hash> PartialEq for Table<T> {
     fn eq(&self, other: &Self) -> bool {
         self.values == other.values
     }
 }
 
-impl<T: Eq> Eq for Table<T> {}
+impl<T: Eq + Hash> Eq for Table<T> {}
 
 impl<T: Eq + Hash> Table<T> {
     fn id(&self, value: &T) -> Option<u32> {
@@ -253,21 +254,13 @@ impl<T: Eq + Hash> Table<T> {
         }
         let id = u32::try_from(self.values.len()).ok()?;
         let value = Arc::new(value);
-        self.values.push(value.clone());
+        self.values.push_back(value.clone());
         self.ids.insert(value, id);
         Some(id)
     }
 
     fn get(&self, id: u32) -> Option<&T> {
         self.values.get(id as usize).map(Arc::as_ref)
-    }
-
-    fn rollback(&mut self, length: usize) {
-        while self.values.len() > length {
-            if let Some(value) = self.values.pop() {
-                self.ids.remove(value.as_ref());
-            }
-        }
     }
 }
 
@@ -280,34 +273,7 @@ pub(crate) struct GridStore {
     nodes: usize,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct GridStoreCheckpoint {
-    templates: usize,
-    tracks: usize,
-    areas: usize,
-    idents: usize,
-    nodes: usize,
-}
-
 impl GridStore {
-    pub(crate) fn checkpoint(&self) -> GridStoreCheckpoint {
-        GridStoreCheckpoint {
-            templates: self.templates.values.len(),
-            tracks: self.tracks.values.len(),
-            areas: self.areas.values.len(),
-            idents: self.idents.values.len(),
-            nodes: self.nodes,
-        }
-    }
-
-    pub(crate) fn rollback(&mut self, checkpoint: GridStoreCheckpoint) {
-        self.templates.rollback(checkpoint.templates);
-        self.tracks.rollback(checkpoint.tracks);
-        self.areas.rollback(checkpoint.areas);
-        self.idents.rollback(checkpoint.idents);
-        self.nodes = checkpoint.nodes;
-    }
-
     pub(crate) fn insert_ident(&mut self, name: &str) -> Option<GridIdent> {
         if let Some(id) = self.idents.id(&name.to_owned()) {
             return Some(GridIdent(id));
@@ -369,11 +335,6 @@ impl GridStore {
 
     pub(crate) fn areas(&self, handle: GridAreas) -> Option<&GridAreasData> {
         self.areas.get(handle.0)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn stored_nodes(&self) -> usize {
-        self.nodes
     }
 
     /// Spend from the shared budget. A declaration whose payload does not fit is refused, which

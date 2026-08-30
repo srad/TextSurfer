@@ -13,11 +13,9 @@ static ENABLE: Once = Once::new();
 /// The preferences are process-global atomics, so this runs once and must precede the first
 /// `Stylesheet::from_str`.
 ///
-/// *Not enabled here:* `layout.unimplemented`, which gates `counter-reset`/`counter-increment`
-/// among roughly forty properties we ignore — including `zoom`, which changes length computation.
-/// Counters are M7 S5's problem and that pref is its decision to take.
 pub(super) fn enable() {
     ENABLE.call_once(|| {
         stylo_static_prefs::set_pref!("layout.grid.enabled", true);
+        stylo_static_prefs::set_pref!("layout.unimplemented", true);
     });
 }

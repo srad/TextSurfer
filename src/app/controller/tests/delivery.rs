@@ -2,7 +2,7 @@ use super::*;
 
 struct RefuseOnceRenderQueue {
     refused: std::sync::atomic::AtomicBool,
-    inline: crate::pipeline::render::InlineRenderQueue,
+    blocking: crate::pipeline::render::BlockingRenderQueue,
 }
 
 impl crate::pipeline::render::RenderQueue for RefuseOnceRenderQueue {
@@ -13,12 +13,12 @@ impl crate::pipeline::render::RenderQueue for RefuseOnceRenderQueue {
         if !self.refused.swap(true, std::sync::atomic::Ordering::AcqRel) {
             crate::pipeline::render::RenderSubmitted::Refused(job)
         } else {
-            self.inline.submit(job)
+            self.blocking.submit(job)
         }
     }
 
     fn poll(&self) -> crate::pipeline::render::RenderPoll {
-        self.inline.poll()
+        self.blocking.poll()
     }
 }
 
@@ -27,7 +27,7 @@ fn a_refused_render_job_is_retried_without_losing_its_invalidation() {
     let net = Arc::new(FakeNet::default());
     let renders = Arc::new(RefuseOnceRenderQueue {
         refused: std::sync::atomic::AtomicBool::new(false),
-        inline: crate::pipeline::render::InlineRenderQueue::default(),
+        blocking: crate::pipeline::render::BlockingRenderQueue::default(),
     });
     let mut app = App::with_net_and_render_queue(net, renders.clone());
     app.submit_url("https://example.com/");

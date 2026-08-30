@@ -1,22 +1,14 @@
 pub mod cascade;
-mod effects;
 mod math;
+#[cfg(test)]
 pub mod parser;
 mod presentational;
-mod selectors;
-#[cfg(feature = "stylo")]
-mod stylo;
-mod ua;
-mod values;
-mod variables;
+mod state;
+pub(crate) mod stylo;
 
-pub(crate) use cascade::CascadeState;
-pub use cascade::{BasicCascade, Cascade, MediaContext};
-pub(crate) use effects::{DynamicEffect, StateEffects};
-pub use parser::{
-    ColorScheme, CssDiagnostic, CssDiagnosticKind, CssDiagnostics, CssParser, CssRule,
-    CssSourcePosition, CssparserParser, Declaration, DimensionCondition, ImportRule, MediaAxis,
-    MediaBound, MediaComparison, MediaFeature, MediaQuery, MediaQueryList, MediaRule,
-    ScriptingValue, StyleRule, StyleSheet, parse_media_queries,
-};
-pub use selectors::{DynamicState, FocusSource, FocusedNode, StateDeps};
+pub use cascade::MediaContext;
+#[cfg(test)]
+pub use cascade::{Cascade, StyloCascade};
+#[cfg(test)]
+pub use parser::{CssParser, CssparserParser, StyleSheet};
+pub use state::{ColorScheme, DynamicState, FocusSource, FocusedNode};

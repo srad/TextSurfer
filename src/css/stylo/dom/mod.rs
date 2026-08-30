@@ -3,6 +3,8 @@
 mod build;
 mod traits;
 
+pub(super) use build::static_state;
+
 #[cfg(test)]
 mod tests;
 
@@ -289,6 +291,14 @@ impl<'a> StyloElement<'a> {
         style::dom::TElement::borrow_data(self)
             .filter(|data| data.has_styles())
             .map(|data| data.styles.primary().clone())
+    }
+
+    pub(crate) fn pseudo_style(
+        &self,
+        pseudo: style::selector_parser::PseudoElement,
+    ) -> Option<ServoArc<ComputedValues>> {
+        style::dom::TElement::borrow_data(self)
+            .and_then(|data| data.styles.pseudos.get(&pseudo).cloned())
     }
 }
 

@@ -129,10 +129,24 @@ pub(super) fn list_style_type(values: &ComputedValues) -> ListStyleType {
 
     match &values.clone_list_style_type().0 {
         CounterStyle::None => ListStyleType::None,
-        CounterStyle::Name(name) => {
-            crate::css::values::parse_list_style_type(&name.0).unwrap_or_default()
-        }
+        CounterStyle::Name(name) => list_style_type_name(&name.0).unwrap_or_default(),
         _ => ListStyleType::default(),
+    }
+}
+
+pub(super) fn list_style_type_name(value: &str) -> Option<ListStyleType> {
+    match value.to_ascii_lowercase().as_str() {
+        "none" => Some(ListStyleType::None),
+        "disc" => Some(ListStyleType::Disc),
+        "circle" => Some(ListStyleType::Circle),
+        "square" => Some(ListStyleType::Square),
+        "decimal" => Some(ListStyleType::Decimal),
+        "decimal-leading-zero" => Some(ListStyleType::DecimalLeadingZero),
+        "lower-alpha" | "lower-latin" => Some(ListStyleType::LowerAlpha),
+        "upper-alpha" | "upper-latin" => Some(ListStyleType::UpperAlpha),
+        "lower-roman" => Some(ListStyleType::LowerRoman),
+        "upper-roman" => Some(ListStyleType::UpperRoman),
+        _ => None,
     }
 }
 

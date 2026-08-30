@@ -1,11 +1,11 @@
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 
 use cssparser::EncodingSupport;
 use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use mediatype::{MediaType, names};
 
 use crate::core::dom::DomQuirksMode;
-use crate::css::{CssParser, CssparserParser};
 use crate::net::{
     FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId, charset_from_content_type,
 };
@@ -91,7 +91,7 @@ impl PageLoad {
             .flat_map(|fetch| fetch.occurrences.iter().copied())
             .filter(|occurrence| {
                 !self.occurrences[*occurrence].failed
-                    && self.occurrences[*occurrence].sheet.is_none()
+                    && self.occurrences[*occurrence].source.is_none()
             })
             .collect();
         let mut queued: HashSet<_> = queue.iter().copied().collect();
@@ -123,8 +123,8 @@ impl PageLoad {
             );
             let (decoded, used_encoding, _) = selected.decode(&response.body);
             let cache_key = (fetch_id, used_encoding.name());
-            let sheet = if let Some(sheet) = self.decoded_cache.get(&cache_key) {
-                sheet.clone()
+            let source = if let Some(source) = self.decoded_cache.get(&cache_key) {
+                source.clone()
             } else {
                 if self
                     .decoded_bytes
@@ -135,18 +135,19 @@ impl PageLoad {
                     return;
                 }
                 self.decoded_bytes += decoded.len();
-                let sheet = CssparserParser.parse(&decoded);
-                self.decoded_cache.insert(cache_key, sheet.clone());
-                sheet
+                let source: Arc<str> = Arc::from(decoded.as_ref());
+                self.decoded_cache.insert(cache_key, source.clone());
+                source
             };
-            self.occurrences[occurrence_id].sheet = Some(sheet.clone());
+            self.occurrences[occurrence_id].source = Some(source.clone());
+            self.occurrences[occurrence_id].base_url = response.final_url.clone();
             let mut ancestors = self.occurrences[occurrence_id].ancestors.clone();
             ancestors.push(normalized_url(&self.fetches[fetch_index].requested));
             ancestors.push(normalized_url(&response.final_url));
             ancestors.sort();
             ancestors.dedup();
             let children = self.discover_imports(
-                &sheet,
+                &source,
                 &response.final_url,
                 self.occurrences[occurrence_id].depth + 1,
                 &ancestors,
@@ -159,6 +160,7 @@ impl PageLoad {
                 }
             }
         }
+        self.style_revision = self.style_revision.wrapping_add(1);
     }
 
     fn accepts_stylesheet_response(&self, response: &FetchResponse) -> bool {
@@ -183,6 +185,7 @@ impl PageLoad {
     }
 
     pub(super) fn disable_external(&mut self) {
+        self.style_revision = self.style_revision.wrapping_add(1);
         self.external_disabled = true;
         self.cancel_requested = self.images.is_empty();
         self.raw_bytes = 0;
@@ -194,7 +197,7 @@ impl PageLoad {
             fetch.state = FetchState::Failed;
         }
         for occurrence in &mut self.occurrences {
-            occurrence.sheet = None;
+            occurrence.source = None;
             occurrence.imports.clear();
         }
         self.invalidate_soft(RenderInvalidation::STYLE, RenderCause::Stylesheet);

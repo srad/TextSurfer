@@ -9,6 +9,7 @@ mod color;
 mod display;
 mod edges;
 mod flex;
+mod generated;
 mod grid;
 mod length;
 mod policy;
@@ -33,6 +34,7 @@ use crate::core::style::{
 pub(super) use color::SENTINEL_CSS;
 
 use super::dom::StyleDom;
+use super::engine::StyloEngine;
 use length::Lengths;
 use policy::ElementPolicy;
 
@@ -44,8 +46,13 @@ use policy::ElementPolicy;
 /// carrying engine and mapper together — is S2's job.
 ///
 /// Pseudo-element boxes and list markers stay empty; generated content is S5.
-pub(super) fn style_tree(dom: &StyleDom<'_>, context: RenderContext) -> StyleTree {
-    style_tree_measured(dom, context).0
+pub(super) fn style_tree(
+    dom: &StyleDom<'_>,
+    engine: &StyloEngine,
+    document: &crate::core::dom::Document,
+    context: RenderContext,
+) -> StyleTree {
+    style_tree_measured(dom, engine, document, context).0
 }
 
 /// How much work one [`style_tree`] pass did.
@@ -61,6 +68,8 @@ pub(super) struct MapStats {
 
 pub(super) fn style_tree_measured(
     dom: &StyleDom<'_>,
+    engine: &StyloEngine,
+    document: &crate::core::dom::Document,
     context: RenderContext,
 ) -> (StyleTree, MapStats) {
     let mut mapper = Mapper::new(context);
@@ -117,6 +126,7 @@ pub(super) fn style_tree_measured(
         elements,
         distinct: mapper.memo.len(),
     };
+    generated::populate(dom, engine, document, &mut mapper, &mut tree);
     tree.set_store(mapper.store);
     (tree, stats)
 }
@@ -134,6 +144,15 @@ impl Mapper {
             context,
             lengths: Lengths::new(context.metrics.cell, context.viewport),
             store: StyleStore::default(),
+            memo: HashMap::new(),
+        }
+    }
+
+    fn with_store(context: RenderContext, store: StyleStore) -> Self {
+        Self {
+            context,
+            lengths: Lengths::new(context.metrics.cell, context.viewport),
+            store,
             memo: HashMap::new(),
         }
     }
@@ -232,6 +251,74 @@ impl Mapper {
         };
         policy::hide_fully_transparent(&mut style, values.clone_opacity());
         style
+    }
+}
+
+pub(super) fn restyle_tree_measured(
+    dom: &StyleDom<'_>,
+    engine: &StyloEngine,
+    document: &crate::core::dom::Document,
+    context: RenderContext,
+    previous: &StyleTree,
+    touched: &[crate::core::dom::NodeId],
+) -> (StyleTree, MapStats) {
+    if generated::requires_full_mapping(dom, previous, touched) {
+        return style_tree_measured(dom, engine, document, context);
+    }
+    let mut tree = previous.clone();
+    let mut mapper = Mapper::with_store(context, tree.cloned_store());
+    let mut elements = 0usize;
+    for id in touched {
+        let Some(element) = dom.element(*id) else {
+            continue;
+        };
+        let Some(values) = element.primary_style() else {
+            continue;
+        };
+        let style = mapper.style(&values, policy_for(dom, document, *id, element));
+        tree.insert(*id, style);
+        elements += 1;
+    }
+    let stats = MapStats {
+        elements,
+        distinct: mapper.memo.len(),
+    };
+    tree.set_store(mapper.store);
+    (tree, stats)
+}
+
+fn policy_for(
+    dom: &StyleDom<'_>,
+    document: &crate::core::dom::Document,
+    id: crate::core::dom::NodeId,
+    target: super::dom::StyloElement<'_>,
+) -> ElementPolicy {
+    let mut chain = Vec::new();
+    let mut current = document.parent(id);
+    while let Some(parent) = current {
+        chain.push(parent);
+        current = document.parent(parent);
+    }
+    let mut decorations = TextDecorationLine::empty();
+    let mut legacy_align = LegacyAlign::None;
+    for ancestor in chain.into_iter().rev() {
+        let Some(element) = dom.element(ancestor) else {
+            continue;
+        };
+        let Some(values) = element.primary_style() else {
+            continue;
+        };
+        decorations |= text::decorations(&values);
+        legacy_align = if element.has_author_text_align(&values) {
+            LegacyAlign::None
+        } else {
+            element.legacy_align().unwrap_or(legacy_align)
+        };
+    }
+    ElementPolicy {
+        decorations,
+        control: target.control_kind(),
+        legacy_align: target.legacy_align().unwrap_or(legacy_align),
     }
 }
 

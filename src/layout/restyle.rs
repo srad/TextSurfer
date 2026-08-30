@@ -42,7 +42,29 @@ pub(crate) fn restyle(
     previous: &StyleTree,
     next: &StyleTree,
 ) -> Result<(), RestyleFailure> {
-    if !previous.layout_compatible_with(next) {
+    restyle_impl(tree, previous, next, None)
+}
+
+pub(crate) fn restyle_nodes(
+    tree: &mut BoxTree,
+    previous: &StyleTree,
+    next: &StyleTree,
+    nodes: &[NodeId],
+) -> Result<(), RestyleFailure> {
+    restyle_impl(tree, previous, next, Some(nodes))
+}
+
+fn restyle_impl(
+    tree: &mut BoxTree,
+    previous: &StyleTree,
+    next: &StyleTree,
+    nodes: Option<&[NodeId]>,
+) -> Result<(), RestyleFailure> {
+    let layout_compatible = nodes.map_or_else(
+        || previous.layout_compatible_with(next),
+        |nodes| previous.layout_compatible_for(next, nodes),
+    );
+    if !layout_compatible {
         return Err(RestyleFailure::LayoutChanged);
     }
     if tree.paint_sources.boxes.len() != tree.boxes.len()
@@ -52,7 +74,10 @@ pub(crate) fn restyle(
     {
         return Err(RestyleFailure::SourceCount);
     }
-    let changes = previous.paint_changes(next);
+    let changes = nodes.map_or_else(
+        || previous.paint_changes(next),
+        |nodes| previous.paint_changes_for(next, nodes),
+    );
     if let Some(node) =
         tree.boxes
             .iter()

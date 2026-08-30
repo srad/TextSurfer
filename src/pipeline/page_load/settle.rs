@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use crate::core::style::Palette;
 use crate::css::ColorScheme;
-use crate::css::cascade::media_query_list_matches;
 
 use super::super::render::{RenderCause, RenderedPage};
 use super::{FetchState, PageLoad, RenderInvalidation, RootSource};
@@ -13,6 +12,7 @@ impl PageLoad {
             return false;
         }
         self.palette = palette;
+        self.style_revision = self.style_revision.wrapping_add(1);
         self.media = self
             .media
             .with_palette(palette)
@@ -69,24 +69,21 @@ impl PageLoad {
             return true;
         }
         self.roots.iter().all(|root| match root {
-            RootSource::Inline {
-                queries, imports, ..
-            } => {
-                !media_query_list_matches(queries, self.media)
+            RootSource::Inline { media, imports, .. } => {
+                !self.media_matches(media)
                     || imports
                         .iter()
                         .all(|occurrence| self.occurrence_settled(*occurrence, true))
             }
-            RootSource::External(occurrence) => self.occurrence_settled(*occurrence, true),
+            RootSource::External { occurrence, media } => {
+                !self.media_matches(media) || self.occurrence_settled(*occurrence, true)
+            }
         })
     }
 
     fn occurrence_settled(&self, occurrence_id: usize, inherited_match: bool) -> bool {
         let occurrence = &self.occurrences[occurrence_id];
-        if occurrence.failed
-            || !inherited_match
-            || !media_query_list_matches(&occurrence.queries, self.media)
-        {
+        if occurrence.failed || !inherited_match || !self.media_matches(&occurrence.media) {
             return true;
         }
         let Some(fetch_index) = self.fetch_index.get(&occurrence.fetch_id).copied() else {
@@ -99,5 +96,9 @@ impl PageLoad {
             .imports
             .iter()
             .all(|child| self.occurrence_settled(*child, true))
+    }
+
+    fn media_matches(&self, source: &str) -> bool {
+        crate::css::stylo::media_matches(source, self.media, self.document.borrow().quirks_mode())
     }
 }

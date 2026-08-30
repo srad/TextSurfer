@@ -17,7 +17,7 @@ use std::time::Duration;
 use encoding_rs::Encoding;
 use url::Url;
 
-use crate::core::dom::{AttrNs, Node, NodeId, SharedDocument};
+use crate::core::dom::{NodeId, SharedDocument};
 use crate::core::form::{
     FormError, FormMutationError, FormState, FormSubmission, build_submission,
     build_submission_for_form, form_owner,
@@ -25,10 +25,7 @@ use crate::core::form::{
 use crate::core::geom::Size;
 use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeRequest};
 use crate::core::style::{Palette, RenderContext};
-use crate::css::{
-    CascadeState, ColorScheme, DynamicEffect, DynamicState, MediaContext, MediaQueryList,
-    StateDeps, StateEffects, StyleSheet,
-};
+use crate::css::{ColorScheme, DynamicState, MediaContext};
 use crate::html::{Html5everParser, HtmlParser, ParseOutcome};
 use crate::net::{FetchResponse, ResourceId};
 
@@ -96,20 +93,24 @@ pub struct PageLoadOptions {
 
 enum RootSource {
     Inline {
-        sheet: StyleSheet,
-        queries: MediaQueryList,
+        source: String,
+        media: String,
         imports: Vec<usize>,
     },
-    External(usize),
+    External {
+        occurrence: usize,
+        media: String,
+    },
 }
 
 struct Occurrence {
     fetch_id: ResourceId,
-    queries: MediaQueryList,
+    media: String,
     depth: usize,
     ancestors: Vec<String>,
     environment: &'static Encoding,
-    sheet: Option<StyleSheet>,
+    source: Option<Arc<str>>,
+    base_url: Url,
     imports: Vec<usize>,
     failed: bool,
 }
@@ -190,7 +191,7 @@ pub struct PageLoad {
     fetches: Vec<FetchEntry>,
     fetch_index: HashMap<ResourceId, usize>,
     url_cache: HashMap<String, ResourceId>,
-    decoded_cache: HashMap<(ResourceId, &'static str), StyleSheet>,
+    decoded_cache: HashMap<(ResourceId, &'static str), Arc<str>>,
     commands: Vec<FetchCommand>,
     image_decode_commands: Vec<ImageDecodeRequest>,
     images: Vec<ImageEntry>,
@@ -216,16 +217,15 @@ pub struct PageLoad {
     invalidation: Option<RenderInvalidation>,
     render_causes: RenderCauses,
     cached_styles: Option<Arc<StyleTree>>,
-    cached_cascade_state: Option<Arc<CascadeState>>,
     cached_layout: Option<BoxTree>,
     cached_layout_styles: Option<Arc<StyleTree>>,
     cached_css_warnings: usize,
     deferred_rendering: bool,
     render_epoch: u64,
     hard_epoch: u64,
+    style_revision: u64,
     last_published_epoch: u64,
-    state_deps: StateDeps,
-    state_effects: StateEffects,
+    direct_renders: Option<super::render::BlockingRenderQueue>,
 }
 
 impl PageLoad {
@@ -353,16 +353,15 @@ impl PageLoad {
             invalidation: Some(RenderInvalidation::STYLE),
             render_causes: RenderCauses::one(RenderCause::Initial),
             cached_styles: None,
-            cached_cascade_state: None,
             cached_layout: None,
             cached_layout_styles: None,
             cached_css_warnings: 0,
             deferred_rendering: false,
             render_epoch: 1,
             hard_epoch: 1,
+            style_revision: 1,
             last_published_epoch: 0,
-            state_deps: StateDeps::default(),
-            state_effects: StateEffects::default(),
+            direct_renders: None,
         };
         load.discover_document_sources(&effective_base);
         load.discover_document_images(&effective_base);
@@ -397,6 +396,7 @@ impl PageLoad {
 
     pub fn set_viewport(&mut self, viewport: Size) {
         if self.media.viewport != viewport {
+            self.style_revision = self.style_revision.wrapping_add(1);
             self.media = self.media.with_viewport(viewport);
             self.invalidate(RenderInvalidation::STYLE, RenderCause::Viewport);
         }
@@ -406,46 +406,12 @@ impl PageLoad {
         if self.media.state == state {
             return None;
         }
-        let previous = self.media.state;
         self.media = self.media.with_state(state);
-        if !self.first_painted || !self.restyle_needed(previous, state) {
+        if !self.first_painted {
             return None;
         }
-        let mut effect = self.state_effects.transition(previous, state);
-        if effect == DynamicEffect::None
-            && self.hovered_link(previous.hover) != self.hovered_link(state.hover)
-        {
-            effect = DynamicEffect::Paint;
-        }
-        let invalidation = match effect {
-            DynamicEffect::None => return None,
-            DynamicEffect::Paint | DynamicEffect::Layout => RenderInvalidation::RESTYLE,
-        };
-        self.invalidate(invalidation, RenderCause::DynamicState);
+        self.invalidate(RenderInvalidation::RESTYLE, RenderCause::DynamicState);
         self.render_or_defer()
-    }
-
-    fn restyle_needed(&self, previous: DynamicState, next: DynamicState) -> bool {
-        self.state_deps.hover && previous.hover != next.hover
-            || self.state_deps.focus && previous.focus != next.focus
-            || self.state_deps.active && previous.active != next.active
-            || self.hovered_link(previous.hover) != self.hovered_link(next.hover)
-    }
-
-    fn hovered_link(&self, mut node: Option<NodeId>) -> Option<NodeId> {
-        let document = self.document.borrow();
-        while let Some(id) = node {
-            if matches!(
-                document.node(id),
-                Some(Node::Element { name, attrs, .. })
-                    if name == "a"
-                        && attrs.iter().any(|attr| attr.ns == AttrNs::None && attr.name == "href")
-            ) {
-                return Some(id);
-            }
-            node = document.parent(id);
-        }
-        None
     }
 
     pub fn parse_errors(&self) -> usize {

@@ -15,10 +15,12 @@ use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 
 use crate::core::dom::Document;
+use crate::core::form::FormState;
 use crate::core::geom::Size;
 use crate::core::style::{CellMetric, Palette};
+use crate::pipeline::render::StyleSource;
 
-use super::device::device;
+use super::device::{device, device_for_media};
 use super::dom::{StyleArena, StyleDom, StyloElement};
 use super::sheets;
 use super::traversal::RecalcStyle;
@@ -52,6 +54,7 @@ pub(super) struct StyloEngine {
     lock: SharedRwLock,
     stylist: Stylist,
     painters: NoPainters,
+    css_warnings: usize,
 }
 
 impl StyloEngine {
@@ -100,7 +103,45 @@ impl StyloEngine {
             lock,
             stylist,
             painters: NoPainters,
+            css_warnings: 0,
         }
+    }
+
+    pub(super) fn from_sources(
+        media: crate::css::MediaContext,
+        quirks_mode: QuirksMode,
+        sources: &[StyleSource],
+    ) -> Self {
+        mark_layout_thread();
+        super::prefs::enable();
+        let lock = SharedRwLock::new();
+        let reporter = sheets::WarningCounter::default();
+        let mut stylist = Stylist::new(device_for_media(media, quirks_mode), quirks_mode);
+        {
+            let guard = lock.read();
+            stylist.append_stylesheet(sheets::user_agent_sheet(&lock, quirks_mode), &guard);
+            stylist.append_stylesheet(
+                sheets::user_sheet(media.palette, &lock, quirks_mode),
+                &guard,
+            );
+            for source in sources {
+                stylist.append_stylesheet(
+                    sheets::author_source(source, &lock, quirks_mode, &reporter),
+                    &guard,
+                );
+            }
+            stylist.flush(&StylesheetGuards::same(&guard));
+        }
+        Self {
+            lock,
+            stylist,
+            painters: NoPainters,
+            css_warnings: reporter.count(),
+        }
+    }
+
+    pub(super) fn css_warnings(&self) -> usize {
+        self.css_warnings
     }
 
     /// Mirror `document` for this engine.
@@ -121,7 +162,16 @@ impl StyloEngine {
         arena: &'a StyleArena<'a>,
         document: &Document,
     ) -> StyleDom<'a> {
-        StyleDom::build(arena, document, self.lock.clone())
+        self.mirror_with_form_state(arena, document, FormState::empty())
+    }
+
+    pub(super) fn mirror_with_form_state<'a>(
+        &self,
+        arena: &'a StyleArena<'a>,
+        document: &Document,
+        forms: &FormState,
+    ) -> StyleDom<'a> {
+        StyleDom::build(arena, document, forms, self.lock.clone())
     }
 
     /// Run `f` with a fully assembled style context.
@@ -167,14 +217,26 @@ impl StyloEngine {
     /// child the traversal walks past, so the invalidator is driven for us. What the caller owes is
     /// the snapshot bookkeeping in `super::invalidate`.
     pub(super) fn restyle(&self, dom: &StyleDom<'_>, snapshots: &SnapshotMap) -> usize {
+        self.restyle_with_nodes(dom, snapshots).0
+    }
+
+    pub(super) fn restyle_with_nodes(
+        &self,
+        dom: &StyleDom<'_>,
+        snapshots: &SnapshotMap,
+    ) -> (usize, Vec<crate::core::dom::NodeId>) {
         self.traverse(dom, snapshots)
     }
 
     /// The guard, the shared context and the traversal are all built here because each borrows the
     /// one before it; none can be returned separately.
-    fn traverse(&self, dom: &StyleDom<'_>, snapshots: &SnapshotMap) -> usize {
+    fn traverse(
+        &self,
+        dom: &StyleDom<'_>,
+        snapshots: &SnapshotMap,
+    ) -> (usize, Vec<crate::core::dom::NodeId>) {
         let Some(root) = dom.root_element() else {
-            return 0;
+            return (0, Vec::new());
         };
         let guard = self.lock.read();
         let shared = SharedStyleContext {
@@ -191,12 +253,12 @@ impl StyloEngine {
         let token = RecalcStyle::pre_traverse(root, &shared);
         if !token.should_traverse() {
             // `traverse_dom` panics rather than no-opping on a token that says otherwise.
-            return 0;
+            return (0, Vec::new());
         }
         let traversal = RecalcStyle::new(shared);
         // `None` keeps this the sequential breadth-first walk: no rayon pool is ever built.
         driver::traverse_dom(&traversal, token, None);
-        traversal.visited()
+        (traversal.visited(), traversal.visited_nodes())
     }
 
     /// Resolve `element` and every unstyled ancestor above it, nearest-root first.
@@ -230,5 +292,22 @@ impl StyloEngine {
             .resolve_style_with_default_parents();
             element.set_styles(resolved.into());
         });
+    }
+
+    pub(super) fn marker_style(
+        &self,
+        element: StyloElement<'_>,
+    ) -> Option<servo_arc::Arc<style::properties::ComputedValues>> {
+        let primary = element.primary_style()?;
+        let guard = self.lock.read();
+        self.stylist.lazily_compute_pseudo_element_style(
+            &StylesheetGuards::same(&guard),
+            element,
+            &style::selector_parser::PseudoElement::Marker,
+            RuleInclusion::All,
+            &primary,
+            false,
+            None,
+        )
     }
 }

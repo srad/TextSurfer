@@ -1,35 +1,24 @@
 use crate::core::dom::{Document, ElementNs, Node, NodeId, attr_value};
 use crate::core::style::{LegacyAlign, Rgb};
-use crate::css::Declaration;
-use crate::css::values::parse_list_style_type;
 
 use super::legacy::{dimension, legacy_color, non_negative_integer};
 use super::{HintDeclaration, PresentationalHints};
 
-pub(in crate::css) fn presentational_hints(document: &Document, id: NodeId) -> Vec<Declaration> {
-    let hints = synthesized_hints(document, id);
-    let mut declarations: Vec<_> = hints
-        .declarations
-        .into_iter()
-        .map(|hint| Declaration {
-            name: hint.name,
-            value: hint.value,
-            important: false,
-        })
-        .collect();
-    if let Some(align) = hints.legacy_align {
-        push_declaration(
-            &mut declarations,
-            "-textsurfer-legacy-align",
-            match align {
-                LegacyAlign::Left => "left",
-                LegacyAlign::Right => "right",
-                LegacyAlign::Center => "center",
-                LegacyAlign::None => return declarations,
-            },
-        );
+fn parse_list_style_type(value: &str) -> Option<crate::core::style::ListStyleType> {
+    use crate::core::style::ListStyleType;
+    match value.to_ascii_lowercase().as_str() {
+        "none" => Some(ListStyleType::None),
+        "disc" => Some(ListStyleType::Disc),
+        "circle" => Some(ListStyleType::Circle),
+        "square" => Some(ListStyleType::Square),
+        "decimal" => Some(ListStyleType::Decimal),
+        "decimal-leading-zero" => Some(ListStyleType::DecimalLeadingZero),
+        "lower-alpha" | "lower-latin" => Some(ListStyleType::LowerAlpha),
+        "upper-alpha" | "upper-latin" => Some(ListStyleType::UpperAlpha),
+        "lower-roman" => Some(ListStyleType::LowerRoman),
+        "upper-roman" => Some(ListStyleType::UpperRoman),
+        _ => None,
     }
-    declarations
 }
 
 pub(in crate::css) fn synthesized_hints(document: &Document, id: NodeId) -> PresentationalHints {
@@ -355,14 +344,6 @@ fn push_color(hints: &mut Vec<HintDeclaration>, name: &str, color: Rgb) {
         name,
         &format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b),
     );
-}
-
-fn push_declaration(hints: &mut Vec<Declaration>, name: &str, value: &str) {
-    hints.push(Declaration {
-        name: name.to_string(),
-        value: value.to_string(),
-        important: false,
-    });
 }
 
 fn parse_html_list_type(value: &str) -> Option<&'static str> {

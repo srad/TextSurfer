@@ -1,6 +1,99 @@
 use super::{BorderColor, ComputedStyle, Cursor, StyleTree};
 
 impl StyleTree {
+    pub(crate) fn layout_compatible_for(
+        &self,
+        next: &Self,
+        nodes: &[crate::core::dom::NodeId],
+    ) -> bool {
+        nodes.iter().all(|node| {
+            layout_style(self.get(*node)) == layout_style(next.get(*node))
+                && [super::PseudoElement::Before, super::PseudoElement::After]
+                    .into_iter()
+                    .all(
+                        |which| match (self.pseudo(*node, which), next.pseudo(*node, which)) {
+                            (Some(old), Some(new)) => {
+                                old.text == new.text
+                                    && layout_style(old.style) == layout_style(new.style)
+                            }
+                            (None, None) => true,
+                            _ => false,
+                        },
+                    )
+                && match (self.marker(*node), next.marker(*node)) {
+                    (Some(old), Some(new)) => {
+                        old.text == new.text
+                            && old.reserve == new.reserve
+                            && old.position == new.position
+                            && layout_style(old.style) == layout_style(new.style)
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+    }
+
+    pub(crate) fn paint_changes_for(
+        &self,
+        next: &Self,
+        nodes: &[crate::core::dom::NodeId],
+    ) -> Vec<(ComputedStyle, ComputedStyle)> {
+        let mut changes = Vec::new();
+        for node in nodes {
+            let old = self.get(*node);
+            let new = next.get(*node);
+            if old != new {
+                changes.push((old, new));
+            }
+            for which in [super::PseudoElement::Before, super::PseudoElement::After] {
+                if let (Some(old), Some(new)) =
+                    (self.pseudo(*node, which), next.pseudo(*node, which))
+                    && old.style != new.style
+                {
+                    changes.push((old.style, new.style));
+                }
+            }
+            if let (Some(old), Some(new)) = (self.marker(*node), next.marker(*node))
+                && old.style != new.style
+            {
+                changes.push((old.style, new.style));
+            }
+        }
+        changes
+    }
+
+    pub(crate) fn paint_compatible_for(
+        &self,
+        next: &Self,
+        nodes: &[crate::core::dom::NodeId],
+    ) -> bool {
+        nodes.iter().all(|node| {
+            paint_style(self.get(*node)) == paint_style(next.get(*node))
+                && [super::PseudoElement::Before, super::PseudoElement::After]
+                    .into_iter()
+                    .all(
+                        |which| match (self.pseudo(*node, which), next.pseudo(*node, which)) {
+                            (Some(old), Some(new)) => {
+                                old.text == new.text
+                                    && paint_style(old.style) == paint_style(new.style)
+                            }
+                            (None, None) => true,
+                            _ => false,
+                        },
+                    )
+                && match (self.marker(*node), next.marker(*node)) {
+                    (Some(old), Some(new)) => {
+                        old.text == new.text
+                            && old.reserve == new.reserve
+                            && old.position == new.position
+                            && paint_style(old.style) == paint_style(new.style)
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+    }
+
     pub(crate) fn layout_compatible_with(&self, next: &Self) -> bool {
         self.styles.len() == next.styles.len()
             && self.styles.iter().all(|(node, style)| {

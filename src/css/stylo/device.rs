@@ -17,6 +17,7 @@ use style_traits::{CSSPixel, DevicePixel};
 
 use crate::core::geom::Size;
 use crate::core::style::{CellMetric, LengthAxis};
+use crate::css::{ColorScheme, MediaContext};
 
 /// Font metrics for a character cell.
 ///
@@ -88,11 +89,40 @@ pub(super) fn device(metric: CellMetric, viewport: Size, quirks_mode: QuirksMode
     )
 }
 
+pub(super) fn device_for_media(media: MediaContext, quirks_mode: QuirksMode) -> Device {
+    device_with_color_scheme(
+        media.cell_metric,
+        media.viewport,
+        quirks_mode,
+        Box::new(CellFontMetrics::new(media.cell_metric)),
+        match media.color_scheme {
+            ColorScheme::Dark => PrefersColorScheme::Dark,
+            ColorScheme::Light => PrefersColorScheme::Light,
+        },
+    )
+}
+
 pub(super) fn device_with_metrics(
     metric: CellMetric,
     viewport: Size,
     quirks_mode: QuirksMode,
     metrics: Box<dyn FontMetricsProvider>,
+) -> Device {
+    device_with_color_scheme(
+        metric,
+        viewport,
+        quirks_mode,
+        metrics,
+        PrefersColorScheme::Dark,
+    )
+}
+
+fn device_with_color_scheme(
+    metric: CellMetric,
+    viewport: Size,
+    quirks_mode: QuirksMode,
+    metrics: Box<dyn FontMetricsProvider>,
+    color_scheme: PrefersColorScheme,
 ) -> Device {
     let width = metric.viewport_css_pixels(LengthAxis::Horizontal, viewport) as f32;
     let height = metric.viewport_css_pixels(LengthAxis::Vertical, viewport) as f32;
@@ -105,9 +135,7 @@ pub(super) fn device_with_metrics(
         Scale::new(1.0),
         metrics,
         default_computed_values(),
-        // S5 wires `MediaContext` — palette, colour scheme and pointer capabilities — into the
-        // device. Until then these are placeholders that make the device constructible.
-        PrefersColorScheme::Dark,
+        color_scheme,
         PointerCapabilities::default(),
         PointerCapabilities::default(),
     )

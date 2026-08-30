@@ -1,7 +1,7 @@
 use super::{box_for, viewport};
 use crate::core::dom::{Document, ElementNs};
 use crate::core::geom::Size;
-use crate::css::{BasicCascade, Cascade, CssParser, CssparserParser, MediaContext};
+use crate::css::{Cascade, CssParser, CssparserParser, MediaContext, StyloCascade};
 use crate::layout::{LayoutEngine, TaffyLayoutEngine};
 
 #[test]
@@ -16,7 +16,7 @@ fn contiguous_text_between_boxes_becomes_its_own_anonymous_grid_item() {
         "main { display: grid; margin: 0; grid-template-columns: repeat(3, 2ch); width: 6ch }
          main > div { margin: 0; padding: 0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
     // Three items in three columns: the two text runs are anonymous items around the real box.
     let rect = box_for(&tree, block).border_rect;
@@ -36,7 +36,7 @@ fn whitespace_between_items_does_not_generate_an_item_of_its_own() {
         "main { display: grid; margin: 0; grid-template-columns: 2ch 2ch; width: 4ch }
          main > div { margin: 0; padding: 0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
     assert_eq!(box_for(&tree, first).border_rect.col, 0);
     assert_eq!(box_for(&tree, second).border_rect.col, 2);
@@ -57,7 +57,7 @@ fn a_table_participates_as_a_grid_item() {
          main > * { margin: 0 }
          table { border-spacing: 0 } td { padding: 0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
     assert_eq!(box_for(&tree, after).border_rect.col, 5);
 }
@@ -75,7 +75,7 @@ fn misparented_table_children_are_wrapped_and_placed_as_one_item() {
         "main { display: grid; margin: 0; grid-template-columns: 5ch 5ch; width: 10ch }
          main > * { margin: 0 } td { padding: 0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
     assert_eq!(box_for(&tree, after).border_rect.col, 5);
 }
@@ -94,7 +94,7 @@ fn a_nested_grid_lays_its_own_items_out_inside_its_area() {
          section { display:grid; grid-template-columns:2ch 2ch; margin:0 }
          div { margin:0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, viewport(20));
     assert_eq!(box_for(&tree, nested).border_rect.width, 8);
     assert_eq!(box_for(&tree, first).border_rect.col, 0);
@@ -117,7 +117,7 @@ fn an_inline_grid_shrinks_to_fit_and_sits_on_the_line() {
          span { display: inline-grid; grid-template-columns: 2ch 2ch }
          b { margin: 0; padding: 0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 40, rows: 24 });
     // The whole line fits on one row: the atom did not become a block.
     assert_eq!(tree.height, 1);
@@ -137,7 +137,7 @@ fn a_grid_item_that_is_a_flex_container_keeps_its_own_formatting_context() {
          section { display:flex; justify-content:flex-end; margin:0 }
          div { flex:none; width:2ch; margin:0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, viewport(20));
     assert_eq!(box_for(&tree, flex).border_rect.width, 8);
     assert_eq!(box_for(&tree, child).border_rect.col, 6);
@@ -159,7 +159,7 @@ fn display_contents_children_participate_as_grid_items() {
          section { display:contents }
          div { margin:0 }",
     );
-    let styles = BasicCascade.apply(&[sheet], &document, MediaContext::screen());
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
     let tree = TaffyLayoutEngine.layout(&document, &styles, viewport(20));
     assert_eq!(box_for(&tree, first).border_rect.col, 0);
     assert_eq!(box_for(&tree, second).border_rect.col, 2);

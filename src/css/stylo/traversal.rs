@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use style::context::{SharedStyleContext, StyleContext};
@@ -20,6 +21,7 @@ pub(super) struct RecalcStyle<'a> {
     /// distinguishes a restyle which visited three elements from one which quietly walked the whole
     /// document in a similar time; timing alone cannot tell those apart.
     visited: AtomicUsize,
+    visited_nodes: Mutex<Vec<crate::core::dom::NodeId>>,
 }
 
 impl<'a> RecalcStyle<'a> {
@@ -27,11 +29,16 @@ impl<'a> RecalcStyle<'a> {
         Self {
             context,
             visited: AtomicUsize::new(0),
+            visited_nodes: Mutex::new(Vec::new()),
         }
     }
 
     pub(super) fn visited(&self) -> usize {
         self.visited.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn visited_nodes(&self) -> Vec<crate::core::dom::NodeId> {
+        self.visited_nodes.lock().unwrap().clone()
     }
 }
 
@@ -50,6 +57,9 @@ impl<'a, 'dom> DomTraversal<StyloElement<'dom>> for RecalcStyle<'a> {
             return;
         };
         self.visited.fetch_add(1, Ordering::Relaxed);
+        if let Some(id) = element.dom_id() {
+            self.visited_nodes.lock().unwrap().push(id);
+        }
         let mut data = element.ensure_style_data();
         recalc_style_at(
             self,

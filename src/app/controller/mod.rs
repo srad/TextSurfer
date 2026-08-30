@@ -22,7 +22,7 @@ use crate::core::geom::{Point, Size};
 use crate::core::style::{RenderMetrics, TextRendering};
 use crate::pipeline::image::{ImageDecodePool, ImageDecodeQueue, RasterImageDecoder};
 #[cfg(test)]
-use crate::pipeline::render::InlineRenderQueue;
+use crate::pipeline::render::BlockingRenderQueue;
 #[cfg(not(test))]
 use crate::pipeline::render::ThreadedRenderQueue;
 use crate::pipeline::render::{RenderJob, RenderKey, RenderQueue};
@@ -130,7 +130,7 @@ impl App {
         images: Arc<dyn ImageDecodeQueue>,
     ) -> Self {
         #[cfg(test)]
-        let renders: Arc<dyn RenderQueue> = Arc::new(InlineRenderQueue::default());
+        let renders: Arc<dyn RenderQueue> = Arc::new(BlockingRenderQueue::default());
         #[cfg(not(test))]
         let renders: Arc<dyn RenderQueue> = Arc::new(ThreadedRenderQueue::new());
         Self::with_net_metrics_images_and_renders(net, render_metrics, images, renders)

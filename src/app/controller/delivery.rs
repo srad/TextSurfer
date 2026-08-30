@@ -7,7 +7,7 @@ use crate::paint::DisplayList;
 use crate::pipeline::image::{ImageDecodeJob, ImageDecodePayload, ImageDecodePoll, ImageSubmitted};
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions, PendingPageLoad};
 use crate::pipeline::render::{
-    RenderKey, RenderPoll, RenderSubmitted, RenderedPage, ResponseKind, response_kind,
+    RenderCause, RenderKey, RenderPoll, RenderSubmitted, RenderedPage, ResponseKind, response_kind,
 };
 
 use super::super::tab::Tab;
@@ -281,7 +281,9 @@ impl App {
                             "render job submitted"
                         );
                         self.render_inflight = Some(job_key);
-                        self.touch_status();
+                        if !causes.contains(RenderCause::DynamicState) {
+                            self.touch_status();
+                        }
                     }
                     RenderSubmitted::Refused(job) => {
                         tracing::trace!(
@@ -346,6 +348,7 @@ impl App {
         else {
             return RenderAdvance::default();
         };
+        let dynamic_state = result.causes.contains(RenderCause::DynamicState);
         let Some(page) = tab
             .load
             .as_mut()
@@ -354,7 +357,9 @@ impl App {
             return RenderAdvance::default();
         };
         let painted_changed = apply_rendered_page(tab, page, width, rows);
-        update_load_message(tab);
+        if !dynamic_state {
+            update_load_message(tab);
+        }
         let published = index == active_index;
         RenderAdvance {
             published,

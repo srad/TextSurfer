@@ -1,6 +1,3 @@
-mod differential;
-mod resolved;
-
 use std::sync::atomic::Ordering;
 
 use app_units::Au;
@@ -9,6 +6,7 @@ use style::dom::{TDocument, TElement, TNode};
 use stylo_dom::ElementState;
 
 use crate::core::dom::{Attr, Document, ElementNs, NodeId};
+use crate::core::form::{ControlValue, FormState};
 use crate::core::geom::Size;
 use crate::core::style::{CellMetric, LengthAxis, Palette};
 
@@ -139,6 +137,49 @@ fn the_user_agent_sheet_reaches_the_cascade() {
             "the UA sheet leaves ordinary content visible"
         );
     }
+}
+
+#[test]
+fn form_state_seeds_checked_enabled_and_disabled_selectors() {
+    let (document, ids) = document(&[
+        (
+            "input",
+            vec![Attr::plain("type", "checkbox"), Attr::plain("checked", "")],
+        ),
+        ("button", vec![]),
+        ("button", vec![Attr::plain("disabled", "")]),
+    ]);
+    let mut forms = FormState::default();
+    forms.set(ids[2], ControlValue::Checked(false));
+    let engine = engine(&[
+        ":checked { border-top-width: 9px }",
+        ":enabled { border-right-width: 7px }",
+        ":disabled { border-left-width: 5px }",
+    ]);
+    let arena = StyleArena::new();
+    let dom = engine.mirror_with_form_state(&arena, &document, &forms);
+    engine.cascade(&dom);
+
+    let checkbox = element(&dom, ids[2]);
+    let enabled = element(&dom, ids[3]);
+    let disabled = element(&dom, ids[4]);
+    assert_eq!(border_top(checkbox), Au::from_px(3));
+    assert_eq!(
+        enabled
+            .primary_style()
+            .expect("styled")
+            .clone_border_right_width()
+            .0,
+        Au::from_px(7)
+    );
+    assert_eq!(
+        disabled
+            .primary_style()
+            .expect("styled")
+            .clone_border_left_width()
+            .0,
+        Au::from_px(5)
+    );
 }
 
 #[test]
@@ -275,7 +316,7 @@ fn em_resolves_against_the_inherited_font_size() {
 
 /// The M7 perf measurement, reported rather than asserted.
 ///
-/// Run with `cargo test --features stylo --release -- --ignored --nocapture`. It is `#[ignore]`d
+/// Run with `cargo test --release measure_the_live_page_cascade -- --ignored --nocapture`. It is `#[ignore]`d
 /// because a timing assertion in the standing gate rows would be flaky; the gate decision is made
 /// by reading this against `benches/linux_live.rs`, which measures the same page through the custom
 /// cascade. Node counts are reported alongside because a fast traversal that skipped most of the
@@ -342,6 +383,8 @@ fn measure_the_live_page_cascade() {
     let mapped_at = std::time::Instant::now();
     let (tree, stats) = super::map::style_tree_measured(
         &dom,
+        &engine,
+        &document,
         crate::core::style::RenderContext::terminal(Size {
             cols: 120,
             rows: 40,
