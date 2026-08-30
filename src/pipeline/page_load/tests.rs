@@ -58,12 +58,40 @@ fn pending_documents_decode_character_boundaries_incrementally() {
         );
         let mut completed = None;
         while completed.is_none() {
-            completed = pending.step(1);
+            completed = pending.step(1, Duration::ZERO);
         }
         assert_eq!(pending.progress(), (total, total));
         let page = completed.unwrap().force_render();
         assert!(page.painted.text_lines().join("\n").contains(expected));
     }
+}
+
+#[test]
+fn stylesheet_deadline_starts_when_incremental_parsing_completes() {
+    let mut pending = PendingPageLoad::new(
+        "<link rel=stylesheet href=late.css><p>page</p>".to_string(),
+        Url::parse("https://example.com/incremental").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+    );
+    let completed_at = Duration::from_secs(4);
+    let mut load = pending.step(usize::MAX, completed_at).unwrap();
+    assert!(
+        load.render_if_ready(completed_at + STYLESHEET_DEADLINE - Duration::from_nanos(1))
+            .is_none()
+    );
+    assert!(!load.has_render_work());
+    assert!(
+        load.render_if_ready(completed_at + STYLESHEET_DEADLINE)
+            .is_none()
+    );
+    assert!(load.has_render_work());
 }
 
 #[test]
@@ -253,14 +281,10 @@ fn applicable_sheets_block_until_ready_and_nonmatching_sheets_do_not() {
     let mut matching = load("<link rel=stylesheet href='a.css'><p>x</p>");
     assert!(
         matching
-            .render_if_ready(Duration::from_millis(249))
+            .render_if_ready(STYLESHEET_DEADLINE - Duration::from_nanos(1))
             .is_none()
     );
-    assert!(
-        matching
-            .render_if_ready(Duration::from_millis(250))
-            .is_some()
-    );
+    assert!(matching.render_if_ready(STYLESHEET_DEADLINE).is_some());
 
     let mut print = load("<link rel=stylesheet media=print href='a.css'><p>x</p>");
     assert!(print.render_if_ready(Duration::ZERO).is_some());
@@ -562,7 +586,7 @@ fn occurrence_and_byte_ceiling_failures_discard_all_external_css() {
 }
 
 #[test]
-fn image_fetches_deduplicate_resolve_and_never_block_first_paint() {
+fn image_fetches_deduplicate_and_share_the_initial_resource_window() {
     let mut load =
         load("<base href='/assets/'><img id=one src='cat.png'><img id=two src='./cat.png'>");
     let commands = load.take_commands();
@@ -571,7 +595,12 @@ fn image_fetches_deduplicate_resolve_and_never_block_first_paint() {
         commands[0].url.as_str(),
         "https://example.com/assets/cat.png"
     );
-    assert!(load.render_if_ready(Duration::ZERO).is_some());
+    assert!(load.render_if_ready(Duration::ZERO).is_none());
+    assert!(
+        load.render_if_ready(STYLESHEET_DEADLINE - Duration::from_nanos(1))
+            .is_none()
+    );
+    assert!(load.render_if_ready(STYLESHEET_DEADLINE).is_some());
     assert!(!load.is_settled());
 }
 

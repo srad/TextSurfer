@@ -71,7 +71,7 @@ fn main() {
     let mut slices = 0;
     let mut load = loop {
         let started = Instant::now();
-        let completed = pending.step(SLICE_BYTES);
+        let completed = pending.step(SLICE_BYTES, Duration::ZERO);
         max_owner_slice = max_owner_slice.max(started.elapsed());
         slices += 1;
         if let Some(load) = completed {

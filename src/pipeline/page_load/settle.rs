@@ -32,7 +32,7 @@ impl PageLoad {
     pub fn render_if_ready(&mut self, now: Duration) -> Option<RenderedPage> {
         let settled = self.applicable_graph_settled();
         if !self.first_painted {
-            if !settled && now < self.deadline && !self.external_disabled {
+            if (!settled || !self.images_settled()) && now < self.deadline {
                 return None;
             }
             self.first_painted = true;

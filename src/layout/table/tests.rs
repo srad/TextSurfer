@@ -88,6 +88,23 @@ fn image_alt_fallbacks_match_inside_table_cells() {
 }
 
 #[test]
+fn repeated_inline_table_formatting_reuses_one_cached_output() {
+    let outcome = Html5everParser::new(false).parse_document(
+        "<table id=table><tr><td><table id=inner><tr><td>nested</td></tr></table></td></tr></table>",
+    );
+    let document = outcome.document.borrow();
+    let styles = StyloCascade.apply(&[], &document, MediaContext::screen());
+    let inner = document.element_by_id("inner").unwrap();
+    let formatter = TableFormatter::new(test_input(&document, &styles));
+    let first = formatter.format_inline_atom(inner, 40, TableLimits::default(), 1);
+    assert_eq!(formatter.cached_outputs(), 1);
+    let second = formatter.format_inline_atom(inner, 40, TableLimits::default(), 1);
+    assert_eq!(formatter.cached_outputs(), 1);
+    assert_eq!((first.width, first.height), (second.width, second.height));
+    assert_eq!(first.plain_text(), second.plain_text());
+}
+
+#[test]
 fn constrained_auto_tables_shrink_min_content_columns_inside_their_target_width() {
     let output = formatted(
         "<style id=css>#table { width:100%;border:solid;padding:1ch } td { white-space:nowrap }</style>

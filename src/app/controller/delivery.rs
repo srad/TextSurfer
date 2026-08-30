@@ -164,7 +164,7 @@ impl App {
         let completed = self.tabs.tabs_mut()[index]
             .pending_load
             .as_mut()
-            .and_then(|pending| pending.step(PARSE_BYTES_PER_STEP));
+            .and_then(|pending| pending.step(PARSE_BYTES_PER_STEP, self.now));
         let Some(mut load) = completed else {
             self.touch_status();
             return false;

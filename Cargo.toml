@@ -68,5 +68,9 @@ harness = false
 name = "linux_live"
 harness = false
 
+[[bench]]
+name = "app_render"
+harness = false
+
 [profile.dev]
 opt-level = 1

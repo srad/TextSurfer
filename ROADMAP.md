@@ -119,15 +119,17 @@ before any item is marked `(done)`.
 
 1. Read this status board, then recent `git log` entries for historical context.
 2. M7 is code-complete with Stylo as the only cascade; its three-page native smoke remains.
-3. Add bounded static SVG rasterization, then smoke M6 images and M7 styling in both frontends.
-4. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
+3. Continue the M6 cold-render work from the generic app-level URL benchmark; its initial resource
+   window now produces one coherent initial layout on the live Linux page and pinned fixture.
+4. Add bounded static SVG rasterization, then smoke M6 images and M7 styling in both frontends.
+5. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
    release state-change-through-apply gate is 2.6 ms p95.
-5. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
+6. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
-6. Run the gates before and after; never mark `(done)` with red gates.
-7. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+7. Run the gates before and after; never mark `(done)` with red gates.
+8. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-8. Live repo: no commits without explicit user confirmation.
+9. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -718,10 +720,11 @@ manual mouse walkthrough remain pending.
         A protocol carries its whole picture in one cell's escape and marks the rest
         `CellDiffOption::Skip`; because `FrameComposer` replaces ratatui's diff with its own damage
         tracking, it owes that rule too and must never hand a skipped cell to the backend.
-      - [ ] **Static SVG rasterization** *(next).* Use `resvg` 0.48.1 in the existing decode worker;
-        SVG parsing stays library-owned and returns the same immutable RGBA asset contract as raster
-        formats. Preserve raw-byte, axis, pixel, decoded-byte and per-page budgets; reject malformed
-        or oversized SVG without panic; never fetch external SVG resources or scan system fonts.
+      - [ ] **Static SVG rasterization** *(open; follows the cold-render gate).* Use `resvg` 0.48.1
+        in the existing decode worker; SVG parsing stays library-owned and returns the same immutable
+        RGBA asset contract as raster formats. Preserve raw-byte, axis, pixel, decoded-byte and
+        per-page budgets; reject malformed or oversized SVG without panic; never fetch external SVG
+        resources or scan system fonts.
         Focused fixtures cover a valid path-only SVG, malformed and over-budget inputs, external
         references remaining inert, and the five representative Wikipedia assets.
       - **Human Wikipedia image smoke in both VGA and terminal is the final acceptance gate.**
@@ -756,15 +759,22 @@ manual mouse walkthrough remain pending.
             100-transition release gate measures **0.2 ms restyle p95**, **0.2 ms retained-worker
             p95** and **2.6 ms state-change-through-owner-apply p95**. Native VGA and terminal smoke
             must confirm responsive stationary-pointer scrolling and hover before this slice is done.
-      - [ ] **Remaining cold/owner work.** Move inline and external CSS parsing into a bounded
-            owned-value processor; reuse `format_inline` measurement/emission; keep blank-cell
-            generation allocation-free; and finish indexed hit resolution. Dense painted rows stay
-            only if the fixture proves them cheaper than a sparse representation. Correlated timeline
-            diagnostics are already available. The current release fixture measures 36.0 ms
-            parse/discovery, a 6.9 ms maximum owner slice, 61.1 ms cascade, 1,666.7 ms layout,
-            78.6 ms paint and 1,806.5 ms total worker render; layout therefore owns the cold-worker
-            budget failure. The committed fixture is revision `1371530035`,
-            SHA-256 `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
+      - [ ] **Remaining cold/owner work (in progress).** The five-second initial resource window
+            starts at parse completion; stylesheets and images settling inside it produce one
+            coherent initial layout. Table measurement is reused across Taffy callbacks and measured
+            table output moves into emission. Next move inline and external CSS parsing into a
+            bounded owned-value processor, keep blank-cell generation allocation-free and finish
+            indexed hit resolution. Dense painted rows stay only if the fixture proves them cheaper
+            than a sparse representation. `cargo bench --bench app_render -- --url <URL> --runs 5`
+            measures the production-composed App; `--fixture` selects the delayed pinned fixture.
+            Correlated timeline diagnostics are already available. The generic production-App
+            benchmark's five-run release medians are one initial publication,
+            2,019.8 ms to settled first paint, 84 ms cascade, 1,136 ms layout and 88 ms paint on the
+            live Linux URL; settled resize is one publication in 1,121.8 ms with 842 ms layout. The
+            pinned fixture likewise publishes once, with 1,204 ms initial and 896 ms resize layout.
+            Layout remains the dominant cold-worker cost. The committed fixture is revision
+            `1371530035`, SHA-256
+            `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
 - [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
       config file · `data:` URL scheme · optional Readability-style reader view.
 

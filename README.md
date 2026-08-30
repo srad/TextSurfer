@@ -255,15 +255,26 @@ No test opens a window: the framebuffer frontend is exercised headlessly, includ
 pinned to a 1 MB stack — the size the main thread actually gets, rather than the larger one the test
 harness would otherwise hand it.
 
+The release app-render benchmark composes the production `App`, fetch, image-decode and render
+queues without opening a frontend window. It reports numeric cold-load and settled-resize timings:
+
+```console
+cargo bench --bench app_render -- --url "https://en.wikipedia.org/wiki/Linux" --runs 5
+cargo bench --bench app_render -- --fixture --runs 5
+```
+
+`--url` accepts any supported URL. `--fixture` replaces network access with the pinned Linux page
+and deliberately delayed stylesheets and images so initial-render coalescing stays reproducible.
+
 ## Roadmap
 
 Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: static SVG images and the human image, styling and retained-paint smoke in VGA and terminal,
-then keymap unification, keyboard link hints and the help overlay. In-page search and the remaining
-cold-render M6 performance gate follow that path.
+Next up: continue the cold-render M6 performance gate, then add static SVG images and run the human
+image, styling and retained-paint smoke in VGA and terminal. Keymap unification, keyboard link hints,
+the help overlay and in-page search follow that work.
 
 ## Built on great libraries
 

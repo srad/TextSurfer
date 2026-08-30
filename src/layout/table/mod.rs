@@ -28,7 +28,7 @@ pub(super) struct TableRoot {
     pub(super) style: crate::core::style::ComputedStyle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct TableLimits {
     pub max_rows: usize,
     pub max_cells: usize,
@@ -112,6 +112,7 @@ pub(super) struct TableFormatter<'a> {
     images: Option<&'a crate::core::image::ImageResources>,
     cell_metric: crate::core::style::CellMetric,
     metric_cache: RefCell<HashMap<(NodeId, usize, usize, usize), MetricAtom>>,
+    output_cache: RefCell<HashMap<(NodeId, usize, TableLimits, usize), TableOutput>>,
 }
 
 impl<'a> TableFormatter<'a> {
@@ -131,6 +132,7 @@ impl<'a> TableFormatter<'a> {
             images: input.images,
             cell_metric: input.cell_metric,
             metric_cache: RefCell::new(HashMap::new()),
+            output_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -236,10 +238,22 @@ impl<'a> TableFormatter<'a> {
         limits: TableLimits,
         nesting: usize,
     ) -> TableOutput {
-        if self.styles.get(node).display.is_table() {
+        let available_width = available_width.min(limits.max_width);
+        let key = (node, available_width, limits, nesting);
+        if let Some(output) = self.output_cache.borrow().get(&key).cloned() {
+            return output;
+        }
+        let output = if self.styles.get(node).display.is_table() {
             self.format(node, available_width, limits, nesting)
         } else {
             self.format_atomic(node, available_width, limits, nesting)
-        }
+        };
+        self.output_cache.borrow_mut().insert(key, output.clone());
+        output
+    }
+
+    #[cfg(test)]
+    pub(super) fn cached_outputs(&self) -> usize {
+        self.output_cache.borrow().len()
     }
 }

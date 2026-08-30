@@ -67,7 +67,7 @@ impl RenderInvalidation {
     }
 }
 
-pub const STYLESHEET_DEADLINE: Duration = Duration::from_millis(250);
+pub const STYLESHEET_DEADLINE: Duration = Duration::from_secs(5);
 pub const MAX_EXTERNAL_OCCURRENCES: usize = 64;
 pub const MAX_IMPORT_DEPTH: usize = 8;
 pub const MAX_EXTERNAL_BYTES: usize = 32 * 1024 * 1024;
@@ -505,11 +505,13 @@ impl PageLoad {
                 .fetches
                 .iter()
                 .all(|fetch| !matches!(fetch.state, FetchState::Pending));
-        styles_settled
-            && self
-                .images
-                .iter()
-                .all(|image| matches!(image.state, ImageState::Ready(_) | ImageState::Failed))
+        styles_settled && self.images_settled()
+    }
+
+    fn images_settled(&self) -> bool {
+        self.images
+            .iter()
+            .all(|image| matches!(image.state, ImageState::Ready(_) | ImageState::Failed))
     }
 
     pub fn resource_progress(&self) -> (usize, usize) {

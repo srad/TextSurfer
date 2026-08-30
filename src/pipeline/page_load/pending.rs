@@ -53,7 +53,7 @@ impl PendingPageLoad {
         }
     }
 
-    pub fn step(&mut self, max_bytes: usize) -> Option<PageLoad> {
+    pub fn step(&mut self, max_bytes: usize, now: std::time::Duration) -> Option<PageLoad> {
         let end = self
             .offset
             .saturating_add(max_bytes.max(1))
@@ -80,11 +80,13 @@ impl PendingPageLoad {
             return None;
         }
         let outcome = self.parser.finish()?;
+        let mut options = self.options;
+        options.started = now;
         let mut load = PageLoad::from_outcome(
             outcome,
             self.document_url.clone(),
             self.html_encoding,
-            self.options,
+            options,
         );
         load.defer_rendering();
         Some(load)

@@ -1,12 +1,18 @@
 The full live Wikipedia "Linux" page with the two stylesheets it links, captured 2026-08-28.
 
-This is the input behind the M7 perf gate. `../linux-revision-1371530035.html` is the Parsoid
-article body only and carries no external CSS, so it exercises a much smaller cascade; the external
-stylesheets are what make the custom cascade expensive, and therefore what M7 exists to attack.
+This is the input behind the M6 cold-render and M7 cascade performance gates.
+`../linux-revision-1371530035.html` is the Parsoid article body only and carries no external CSS, so
+it exercises a much smaller cascade.
 
 Captured with `curl -L --fail`, from a browser-equivalent request for the desktop Vector 2022 skin.
 Nothing here is fetched at test time — `AGENTS.md` forbids a test touching the network, so the
 harness feeds these bodies to `PageLoad::deliver` against the resource ids discovery reports.
+
+Run the production-composed app benchmark against this fixture with:
+
+```console
+cargo bench --bench app_render -- --fixture --runs 5
+```
 
 ## page.html
 

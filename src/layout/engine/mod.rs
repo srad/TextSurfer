@@ -378,10 +378,13 @@ fn try_layout_flow(
         cell_metric: _,
     } = input;
     let parent_direction = prepare_flow(&mut flow);
+    let table_formatter = TableFormatter::new(input);
     let mut table_cache = HashMap::new();
     let mut inline_cache: HashMap<(usize, MeasureWidth), Vec<ResolvedInlinePiece>> = HashMap::new();
     let mut shaped_cache: HashMap<(usize, MeasureWidth), ShapedInline> = HashMap::new();
     let mut formatted_cache = HashMap::new();
+    let mut min_content_cache = HashMap::new();
+    let mut max_content_cache = HashMap::new();
     let mut measure = |inputs,
                        index: usize,
                        style: &taffy::Style,
@@ -397,12 +400,7 @@ fn try_layout_flow(
                         .definite(viewport_width)
                         .max(1);
                     let output = table_cache.entry((table, width)).or_insert_with(|| {
-                        TableFormatter::new(input).format(
-                            table,
-                            width,
-                            TableLimits::default(),
-                            nesting,
-                        )
+                        table_formatter.format(table, width, TableLimits::default(), nesting)
                     });
                     baseline = Some(output.baseline() as f32);
                     return TaffySize {
@@ -413,14 +411,26 @@ fn try_layout_flow(
                 let measure = measured_width(known.width, available.width, viewport_width);
                 let key = (index, measure);
                 inline_cache.entry(key).or_insert_with(|| {
-                    resolve_inline(input, viewport_width, &flow[index].inline, measure, nesting)
+                    resolve_inline(
+                        input,
+                        &table_formatter,
+                        viewport_width,
+                        &flow[index].inline,
+                        measure,
+                        nesting,
+                    )
                 });
                 let pieces = inline_cache.get(&key).expect("resolved inline");
-                let natural = intrinsic_width(pieces);
                 let measured_width = known.width.unwrap_or_else(|| match available.width {
                     AvailableSpace::Definite(value) => value,
-                    AvailableSpace::MinContent => min_content_width(pieces) as f32,
-                    AvailableSpace::MaxContent => natural as f32,
+                    AvailableSpace::MinContent => *min_content_cache
+                        .entry(key)
+                        .or_insert_with(|| min_content_width(pieces))
+                        as f32,
+                    AvailableSpace::MaxContent => *max_content_cache
+                        .entry(key)
+                        .or_insert_with(|| intrinsic_width(pieces))
+                        as f32,
                 });
                 if let Some(block) = block.filter(|block| block.has_floats()) {
                     let shaped = shaped_cache.entry(key).or_insert_with(|| {
@@ -515,7 +525,6 @@ fn try_layout_flow(
             height: AvailableSpace::MaxContent,
         },
     );
-
     let layouts: Vec<_> = taffy_nodes
         .iter()
         .map(|node| node.map(|node| taffy.layout(node)))
@@ -577,11 +586,8 @@ fn try_layout_flow(
         if let Some(table) = flow[index].table {
             let width = layout.size.width.max(1.0) as usize;
             let output = table_cache
-                .entry((table, width))
-                .or_insert_with(|| {
-                    TableFormatter::new(input).format(table, width, TableLimits::default(), 0)
-                })
-                .clone();
+                .remove(&(table, width))
+                .unwrap_or_else(|| table_formatter.format(table, width, TableLimits::default(), 0));
             let starts = OutputStarts::new(&tree);
             append_table_output(
                 &mut tree,
@@ -721,7 +727,14 @@ fn try_layout_flow(
             let measure = MeasureWidth::Definite(layout_width);
             let key = (index, measure);
             inline_cache.entry(key).or_insert_with(|| {
-                resolve_inline(input, viewport_width, &flow[index].inline, measure, nesting)
+                resolve_inline(
+                    input,
+                    &table_formatter,
+                    viewport_width,
+                    &flow[index].inline,
+                    measure,
+                    nesting,
+                )
             });
             let starts = OutputStarts::new(&tree);
             if let Some(shaped) = shaped_cache.get(&key) {
@@ -1001,6 +1014,7 @@ impl MeasureWidth {
 
 fn resolve_inline(
     input: LayoutInput<'_>,
+    table_formatter: &TableFormatter<'_>,
     viewport_width: usize,
     pieces: &[flow::InlinePiece],
     measure: MeasureWidth,
@@ -1048,7 +1062,7 @@ fn resolve_inline(
                     InlineAtom::Layout(Box::new(AtomicLayout { tree, baseline }))
                 }
                 InlineAtomSource::Node(node) => {
-                    InlineAtom::Table(Box::new(TableFormatter::new(input).format_inline_atom(
+                    InlineAtom::Table(Box::new(table_formatter.format_inline_atom(
                         *node,
                         available,
                         TableLimits::default(),
