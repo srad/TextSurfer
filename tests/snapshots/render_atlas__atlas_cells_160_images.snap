@@ -7,16 +7,18 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   1..13 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
   13..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
   161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                                                                 │
+│           ▀▀▀▀                                                                                                                                                 │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..9 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
-  9..16 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  1..12 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  12..14 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  14..16 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
   16..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                                                                 │
+│[fallback] ▀▀▀▀                                                                                                                                                 │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..9 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
-  9..16 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  1..12 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  12..14 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  14..16 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
   16..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                                                                                                                                                                │

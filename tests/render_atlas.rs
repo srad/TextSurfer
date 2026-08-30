@@ -19,6 +19,7 @@ use textsurfer::pipeline::page_load::{PageLoad, PageLoadOptions};
 use textsurfer::pipeline::render::RenderedPage;
 use textsurfer::ui::PAPER_WHITE;
 use textsurfer::ui::widgets::content::{Content, ContentLines};
+use unicode_width::UnicodeWidthChar;
 
 const CASES: &[&str] = &[
     "ua-flow",
@@ -108,6 +109,31 @@ fn atlas_image(asset_id: textsurfer::core::image::ImageAssetId, revision: u64) -
         width: 16,
         height: 16,
         rgba: rgba.into(),
+    }
+}
+
+fn assert_image_rects_are_text_free(painted: &DisplayList) {
+    for image in &painted.images {
+        for row in image.rect.row..image.rect.row.saturating_add(image.rect.height) {
+            let Some(painted_row) = painted.rows.get(row) else {
+                continue;
+            };
+            for span in &painted_row.spans {
+                let mut col = span.col;
+                for character in span.text.chars() {
+                    let width = character.width().unwrap_or_default();
+                    let overlaps = col < image.rect.col.saturating_add(image.rect.width)
+                        && col.saturating_add(width) > image.rect.col;
+                    assert!(
+                        character.is_whitespace() || !overlaps,
+                        "text {character:?} from {:?} overlaps image {:?} at ({col}, {row})",
+                        span.text,
+                        image.rect,
+                    );
+                    col = col.saturating_add(width);
+                }
+            }
+        }
     }
 }
 
@@ -233,6 +259,7 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
         assert_eq!(decoded.parse_errors, 0);
         assert_eq!(decoded.css_warnings, 0);
         assert_eq!(decoded.painted.images.len(), 5);
+        assert_image_rects_are_text_free(&decoded.painted);
         assert!(first.painted.text_lines().join("\n").contains("[linked]"));
         let text = decoded.painted.text_lines().join("\n");
         for hidden in [

@@ -2,10 +2,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use textsurfer::core::geom::Size;
+use textsurfer::core::image::DecodedImage;
 use textsurfer::core::style::{
     BorderCollapse, BorderSpacing, CaptionSide, Palette, RenderContext, Rgb, Rgba,
 };
 use textsurfer::css::{ColorScheme, DynamicState};
+use textsurfer::net::FetchResponse;
 use textsurfer::paint::DisplayList;
 use textsurfer::pipeline::page_load::{PageLoad, PageLoadOptions};
 use textsurfer::pipeline::render::{RenderedPage, render_html};
@@ -115,6 +117,53 @@ fn render_source(source: &str, width: u16) -> RenderedPage {
     )
 }
 
+fn load_source_with_image(source: &str, width: u16) -> PageLoad {
+    let mut load = PageLoad::new(
+        source,
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            render: RenderContext::terminal(Size {
+                cols: width,
+                rows: 24,
+            }),
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+    );
+    load.force_render();
+    let command = load.take_commands().pop().unwrap();
+    assert!(load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            final_url: command.url,
+            status: 200,
+            body: vec![1],
+            content_type: Some("image/png".to_string()),
+        })
+    ));
+    let decode = load.take_image_decode_commands().pop().unwrap();
+    assert!(load.deliver_image_decode(
+        decode.asset_id,
+        decode.revision,
+        Ok(DecodedImage {
+            asset_id: decode.asset_id,
+            revision: decode.revision,
+            width: 64,
+            height: 64,
+            rgba: vec![255; 64 * 64 * 4].into(),
+        })
+    ));
+    load
+}
+
+fn render_source_with_image(source: &str, width: u16) -> RenderedPage {
+    let mut load = load_source_with_image(source, width);
+    load.render_after_image().unwrap()
+}
+
 fn nonempty_lines(page: &RenderedPage) -> Vec<String> {
     page.painted
         .text_lines()
@@ -192,6 +241,76 @@ fn float_decoration_paints_above_a_later_in_flow_block_background() {
     };
     assert_eq!(background_at(1, 1), Some(Rgb::new(255, 0, 0)));
     assert_eq!(background_at(5, 1), Some(Rgb::new(0, 0, 255)));
+}
+
+#[test]
+fn an_inline_image_reserves_only_its_own_cells() {
+    let page = render_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}img{width:4ch;height:32px}</style><p><img alt=fallback> <a href=/image><img src=image.png alt=image></a> after</p>",
+        24,
+    );
+    let image = page.painted.images.first().unwrap();
+    assert_eq!(
+        image.rect,
+        textsurfer::layout::LayoutRect {
+            col: 11,
+            row: 0,
+            width: 4,
+            height: 2,
+        }
+    );
+    assert_eq!(page.painted.text_lines(), ["", "[fallback]      after"]);
+}
+
+#[test]
+fn resizing_recomputes_an_inline_images_atomic_box() {
+    let mut load = load_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}img{width:50%;height:auto}</style><p><img src=image.png alt=image> after</p>",
+        24,
+    );
+    let first = load.render_after_image().unwrap();
+    assert_eq!(
+        (
+            first.painted.images[0].rect.width,
+            first.painted.images[0].rect.height
+        ),
+        (12, 6)
+    );
+    let resized = load.resize(Size { cols: 12, rows: 24 }).unwrap();
+    assert_eq!(
+        (
+            resized.painted.images[0].rect.width,
+            resized.painted.images[0].rect.height
+        ),
+        (6, 3)
+    );
+}
+
+#[test]
+fn a_floated_image_reserves_every_cell_its_pixels_cover() {
+    let page = render_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}figure{float:right;width:8ch}img{width:8ch;height:64px}</style><main><figure><a href=/image><img src=image.png alt=image></a><figcaption>caption</figcaption></figure><p>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda</p></main>",
+        24,
+    );
+    let image = page.painted.images.first().unwrap();
+    assert_eq!((image.rect.width, image.rect.height), (8, 4));
+    let lines = page.painted.text_lines();
+    for (row, line) in lines
+        .iter()
+        .enumerate()
+        .skip(image.rect.row)
+        .take(image.rect.height)
+    {
+        assert!(
+            line.chars()
+                .skip(image.rect.col)
+                .take(image.rect.width)
+                .all(|character| character == ' '),
+            "text occupies image cells on row {row} for {:?}: {:?}",
+            image.rect,
+            line
+        );
+    }
 }
 
 #[test]

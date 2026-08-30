@@ -7,10 +7,10 @@ use taffy::prelude::{
 use taffy::style::{
     AlignContent as TaffyAlignContent, AlignContentKeyword as TaffyContentKeyword,
     AlignItems as TaffyAlignItems, AlignItemsKeyword as TaffyItemKeyword,
-    AlignmentSafety as TaffySafety, Clear as TaffyClear, FlexDirection as TaffyFlexDirection,
-    FlexWrap as TaffyFlexWrap, Float as TaffyFloat, GridAutoFlow as TaffyGridAutoFlow,
-    GridPlacement as TaffyGridPlacement, GridTemplateArea as TaffyGridTemplateArea,
-    GridTemplateAreas as TaffyGridTemplateAreas,
+    AlignmentSafety as TaffySafety, Clear as TaffyClear, Contain as TaffyContain,
+    FlexDirection as TaffyFlexDirection, FlexWrap as TaffyFlexWrap, Float as TaffyFloat,
+    GridAutoFlow as TaffyGridAutoFlow, GridPlacement as TaffyGridPlacement,
+    GridTemplateArea as TaffyGridTemplateArea, GridTemplateAreas as TaffyGridTemplateAreas,
     GridTemplateComponent as TaffyGridTemplateComponent,
     GridTemplateRepetition as TaffyGridTemplateRepetition, MaxTrackSizingFunction as TaffyMaxTrack,
     MinTrackSizingFunction as TaffyMinTrack, Overflow as TaffyOverflow, Position as TaffyPosition,
@@ -80,6 +80,12 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
                 width: Dimension::auto(),
                 height: Dimension::auto(),
             },
+            clear: match flow.style.clear {
+                Clear::None => TaffyClear::None,
+                Clear::Left => TaffyClear::Left,
+                Clear::Right => TaffyClear::Right,
+                Clear::Both => TaffyClear::Both,
+            },
             ..Default::default()
         };
     }
@@ -112,6 +118,7 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
     });
     let inside = flow.style.display.inside();
     let is_grid = matches!(inside, Some(DisplayInside::Grid));
+    let is_block = !matches!(inside, Some(DisplayInside::Flex | DisplayInside::Grid));
     TaffyStyle {
         display: match inside {
             Some(DisplayInside::Flex) => TaffyDisplay::Flex,
@@ -148,6 +155,11 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             Clear::Left => TaffyClear::Left,
             Clear::Right => TaffyClear::Right,
             Clear::Both => TaffyClear::Both,
+        },
+        contain: if is_block {
+            TaffyContain::PAINT
+        } else {
+            TaffyContain::NONE
         },
         inset: TaffyRect {
             left: inset(flow.style.inset.left, styles, calc_values),

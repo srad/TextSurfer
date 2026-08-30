@@ -15,9 +15,9 @@ case floats rows=91..98
 case images rows=98..120
 case presentational rows=120..131
 link href=/atlas-link rects=[LayoutRect { col: 0, row: 20, width: 4, height: 1 }] paint=123
-link href=/image-link rects=[LayoutRect { col: 0, row: 99, width: 15, height: 2 }] paint=174
+link href=/image-link rects=[LayoutRect { col: 11, row: 99, width: 4, height: 2 }] paint=174
 hits=204
-image asset=ImageAssetId(1) rect=LayoutRect { col: 0, row: 99, width: 15, height: 2 } clip=LayoutRect { col: 0, row: 99, width: 15, height: 2 } depth=5
+image asset=ImageAssetId(1) rect=LayoutRect { col: 11, row: 99, width: 4, height: 2 } clip=LayoutRect { col: 11, row: 99, width: 4, height: 2 } depth=5
 image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 103, width: 8, height: 4 } clip=LayoutRect { col: 1, row: 103, width: 8, height: 4 } depth=3
 image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 108, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 108, width: 4, height: 2 } depth=9
 image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 112, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 112, width: 4, height: 2 } depth=4

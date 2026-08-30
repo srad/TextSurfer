@@ -103,13 +103,24 @@ impl FlowBox {
 pub(super) enum InlineAtomSource {
     Ready(Box<TableOutput>),
     Node(NodeId),
+    Image(InlineImage),
     Offset(isize),
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct InlineImage {
+    node: NodeId,
+    asset_id: crate::core::image::ImageAssetId,
+    revision: u64,
+    width: usize,
+    height: usize,
 }
 
 impl Atom for InlineAtomSource {
     fn width(&self) -> usize {
         match self {
             Self::Ready(output) => output.width,
+            Self::Image(image) => image.width,
             Self::Node(_) | Self::Offset(_) => 0,
         }
     }
@@ -117,6 +128,7 @@ impl Atom for InlineAtomSource {
     fn height(&self) -> usize {
         match self {
             Self::Ready(output) => output.height,
+            Self::Image(image) => image.height,
             Self::Node(_) | Self::Offset(_) => 0,
         }
     }
@@ -124,6 +136,7 @@ impl Atom for InlineAtomSource {
     fn baseline(&self) -> usize {
         match self {
             Self::Ready(output) => output.baseline(),
+            Self::Image(image) => image.height.saturating_sub(1),
             Self::Node(_) | Self::Offset(_) => 0,
         }
     }
@@ -133,6 +146,7 @@ impl Atom for InlineAtomSource {
 pub(super) enum InlineAtom {
     Table(Box<TableOutput>),
     Layout(Box<AtomicLayout>),
+    Image(InlineImage),
     Offset(isize),
 }
 
@@ -147,6 +161,7 @@ impl Atom for InlineAtom {
         match self {
             Self::Table(output) => output.width,
             Self::Layout(output) => output.tree.width,
+            Self::Image(image) => image.width,
             Self::Offset(_) => 0,
         }
     }
@@ -155,6 +170,7 @@ impl Atom for InlineAtom {
         match self {
             Self::Table(output) => output.height,
             Self::Layout(output) => output.tree.height,
+            Self::Image(image) => image.height,
             Self::Offset(_) => 0,
         }
     }
@@ -163,6 +179,7 @@ impl Atom for InlineAtom {
         match self {
             Self::Table(output) => output.baseline(),
             Self::Layout(output) => output.baseline,
+            Self::Image(image) => image.height.saturating_sub(1),
             Self::Offset(_) => 0,
         }
     }
@@ -684,6 +701,19 @@ fn build_flow_tree_from(
                                 width_basis: Some(viewport_width),
                             },
                         ) {
+                            let atom = if replaced.image {
+                                images.and_then(|images| images.get(node)).map(|image| {
+                                    InlineAtomSource::Image(InlineImage {
+                                        node,
+                                        asset_id: image.asset_id,
+                                        revision: image.revision,
+                                        width: replaced.intrinsic_cols,
+                                        height: replaced.intrinsic_rows,
+                                    })
+                                })
+                            } else {
+                                None
+                            };
                             // Inline-level replaced content: an `<img>`, or a control the author
                             // left at its UA `display: inline`. It renders at its intrinsic size,
                             // because an inline box has no border or padding to fill. This arm has
@@ -692,7 +722,7 @@ fn build_flow_tree_from(
                             // does not have, which is exactly nothing painted.
                             buffer.push(InlinePiece {
                                 node,
-                                text: replaced.text,
+                                text: atom.as_ref().map_or(replaced.text, |_| String::new()),
                                 white_space: if replaced.preformatted {
                                     WhiteSpace::Pre
                                 } else {
@@ -701,7 +731,7 @@ fn build_flow_tree_from(
                                 depth: context.depth,
                                 style: style.cell_style(),
                                 hidden: style.visibility.is_hidden(),
-                                atom: None,
+                                atom,
                             });
                         } else {
                             if style.display.is_list_item()
@@ -1280,6 +1310,24 @@ fn append_inline_line(
                         pieces[index].depth,
                         merge_base.saturating_mul(1_000).saturating_add(index),
                     ),
+                    InlineAtom::Image(image) => {
+                        if !pieces[index].hidden && current_col >= 0 && row >= 0 {
+                            let rect = super::LayoutRect {
+                                col: current_col as usize,
+                                row: row as usize,
+                                width: image.width,
+                                height: image.height,
+                            };
+                            tree.images.push(super::ImagePlacement {
+                                node: image.node,
+                                asset_id: image.asset_id,
+                                revision: image.revision,
+                                rect,
+                                clip: rect,
+                                depth: pieces[index].depth,
+                            });
+                        }
+                    }
                 }
             }
             current_col = current_col.saturating_add(glyph.width as isize);

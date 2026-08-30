@@ -97,6 +97,9 @@ impl ReplacedBox {
 pub(super) struct Replaced {
     pub(super) text: String,
     pub(super) preformatted: bool,
+    pub(super) image: bool,
+    pub(super) intrinsic_cols: usize,
+    pub(super) intrinsic_rows: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -119,6 +122,9 @@ pub(super) fn replaced_content(
     Some(Replaced {
         text: box_.intrinsic_text(),
         preformatted: box_.preformatted,
+        image: box_.image,
+        intrinsic_cols: box_.intrinsic_cols,
+        intrinsic_rows: box_.intrinsic_rows,
     })
 }
 

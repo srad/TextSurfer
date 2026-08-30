@@ -272,9 +272,10 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: continue the cold-render M6 performance gate, then add static SVG images and run the human
-image, styling and retained-paint smoke in VGA and terminal. Keymap unification, keyboard link hints,
-the help overlay and in-page search follow that work.
+Next up: preserve CSS-pixel precision through replaced sizing, then add static SVG and run the
+representative-page image and styling smoke in VGA and terminal. The
+cold-render M6 performance gate resumes after rendering correctness; retained-paint smoke, keymap
+unification, keyboard link hints, the help overlay and in-page search follow that work.
 
 ## Built on great libraries
 

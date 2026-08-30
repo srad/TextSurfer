@@ -82,7 +82,7 @@ signed off.
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
 | M5 — Boa | Boa 0.21.1 behind the trait; host bindings subset; job pump; test262 slice | (open) |
-| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (SVG + smoke pending) · floats ✅ · perf | (in progress) |
+| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (CSS-pixel precision + SVG + smoke pending) · floats ✅ · perf | (in progress) |
 | M7 — Stylo cascade | Stylo 0.20.0 as the sole full and incremental cascade | (done — smoke pending) |
 
 Cross-cutting: test infrastructure (in progress — static WPT backfill, corpus error-count and
@@ -90,8 +90,8 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
-Test counts at the last green run (2026-08-30): **912 total** with the default VGA frontend and
-**804** with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
+Test counts at the last green run (2026-08-30): **920 total** with the default VGA frontend and
+**812** with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -118,18 +118,23 @@ before any item is marked `(done)`.
 ## Session handoff
 
 1. Read this status board, then recent `git log` entries for historical context.
-2. M7 is code-complete with Stylo as the only cascade; its three-page native smoke remains.
-3. Continue the M6 cold-render work from the generic app-level URL benchmark; its initial resource
-   window now produces one coherent initial layout on the live Linux page and pinned fixture.
-4. Add bounded static SVG rasterization, then smoke M6 images and M7 styling in both frontends.
-5. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
+2. Image layout integration is green: decoded raster images are atomic layout boxes, the atlas
+   rejects text in every image rectangle, and the floated-image regression is generic rather than
+   tied to one site's markup.
+3. Fix CSS-pixel precision for replaced sizing, then add bounded static SVG rasterization and audit
+   the currently skipped SVG sizing reftests.
+4. Smoke the representative static pages in both frontends; this also closes M6 images and the M7
+   styling smoke when their acceptance criteria pass.
+5. Resume the M6 cold-render work from the generic app-level URL benchmark only after rendering
+   correctness; its initial resource window already produces one coherent initial layout.
+6. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
    release state-change-through-apply gate is 2.6 ms p95.
-6. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
+7. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
-7. Run the gates before and after; never mark `(done)` with red gates.
-8. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+8. Run the gates before and after; never mark `(done)` with red gates.
+9. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-9. Live repo: no commits without explicit user confirmation.
+10. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -672,7 +677,8 @@ manual mouse walkthrough remain pending.
       inside auto-repeat, where Taffy's fixed-component contract cannot represent them.
       *Explicit limits:* `subgrid`, masonry, RTL/writing modes, Grid absolute positioning, aspect
       ratio, `z-index`.
-- [ ] **Images** *(in progress — raster work green; SVG and human VGA/terminal smoke pending)*. One
+- [ ] **Images** *(in progress — loading, decoding and layout integration green; CSS-pixel
+      precision, SVG and human VGA/terminal smoke pending)*. One
       delivery across the shared pipeline and both frontends. Static HTML `<img src>` is the first
       boundary. Static SVG is the final promoted format step; animation, `srcset`/`picture`, CSS
       images, `object-fit`, lazy loading, `data:` URLs and cross-page caching remain deferred.
@@ -696,15 +702,10 @@ manual mouse walkthrough remain pending.
         is set to 64 MiB as defense in depth only, because it is non-strict. Crossing a budget
         refuses that resource and reports one aggregate warning; unlike external CSS, decoded images
         are not discarded atomically.
-      - [x] **Replaced layout and shared paint.** Layout consumes image state and intrinsic metadata,
-        not pixel buffers. Pending or failed images use the existing fallback geometry; decoded
-        assets use intrinsic size and aspect ratio with CSS and legacy constraints. `min-*`/`max-*`
-        follow CSS 2.1 §10.4's constraint table, resizing both axes at once, measuring padding and
-        border when `box-sizing: border-box` says to, and quantising a natural size the way an
-        authored length does. Successful decode reflows only when used geometry changes. Image boxes
-        participate in inline, block, table, flex and grid layout, overflow clipping, anchors and hit
-        testing. `BoxTree` carries ordered placements; `DisplayList` carries one paint-ordered
-        overlay stream for scaled text and images plus an ID/revision-addressed immutable asset store.
+      - [x] **Image layout integration.** Layout owns raster placements as atomic boxes across inline,
+        block, table, flex and grid; fallback-to-decoded and resize reflow preserve anchor, hit and
+        clip geometry, float formatting contexts exclude text, and both frontends present the
+        reserved rectangle without moving, resizing or paint-masking text.
       - [x] **Native VGA output.** The adapter nearest-samples only visible target pixels from
         immutable RGBA and alpha-blends through the framebuffer overlay path — no resize allocation
         or encoding. Image and scaled-text overlays share CSS paint order and obey content clipping,
@@ -720,7 +721,7 @@ manual mouse walkthrough remain pending.
         A protocol carries its whole picture in one cell's escape and marks the rest
         `CellDiffOption::Skip`; because `FrameComposer` replaces ratatui's diff with its own damage
         tracking, it owes that rule too and must never hand a skipped cell to the backend.
-      - [ ] **Static SVG rasterization** *(open; follows the cold-render gate).* Use `resvg` 0.48.1
+      - [ ] **Static SVG rasterization** *(open; follows raster layout correctness).* Use `resvg` 0.48.1
         in the existing decode worker; SVG parsing stays library-owned and returns the same immutable
         RGBA asset contract as raster formats. Preserve raw-byte, axis, pixel, decoded-byte and
         per-page budgets; reject malformed or oversized SVG without panic; never fetch external SVG
@@ -734,7 +735,7 @@ manual mouse walkthrough remain pending.
       and links. *Limits:* horizontal LTR rectangular margin boxes only; no `shape-outside`, logical
       directions/writing modes, `z-index`, deliberate negative-margin overlap, or positioned
       descendants whose containing block crosses the atomic float boundary.
-- [ ] **Perf gate (in progress).** Standing budgets on the reference Windows machine: the pinned
+- [ ] **Perf gate (in progress; optimization deferred until rendering correctness).** Standing budgets on the reference Windows machine: the pinned
       Linux Wikipedia revision commits in <250 ms debug, worker layout+paint is <200 ms, no
       owner-sequence work slice exceeds 8 ms, and a warmed paint-only interaction completes through
       owner application in <16.667 ms p95. Input, DOM and future JavaScript remain on one
@@ -769,8 +770,9 @@ manual mouse walkthrough remain pending.
             measures the production-composed App; `--fixture` selects the delayed pinned fixture.
             Correlated timeline diagnostics are already available. The generic production-App
             benchmark's five-run release medians are one initial publication,
-            2,019.8 ms to settled first paint, 84 ms cascade, 1,136 ms layout and 88 ms paint on the
-            live Linux URL; settled resize is one publication in 1,121.8 ms with 842 ms layout. The
+            2,070.6 ms to settled first paint, 85 ms cascade, 1,160 ms layout and 98 ms paint on the
+            live Linux URL; settled resize is one publication in 1,172.5 ms with 84 ms cascade,
+            876 ms layout and 82 ms paint. The
             pinned fixture likewise publishes once, with 1,204 ms initial and 896 ms resize layout.
             Layout remains the dominant cold-worker cost. The committed fixture is revision
             `1371530035`, SHA-256

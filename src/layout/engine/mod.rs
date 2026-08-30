@@ -1028,6 +1028,7 @@ fn resolve_inline(
             let atom = piece.atom.as_ref().map(|source| match source {
                 InlineAtomSource::Ready(output) => InlineAtom::Table(output.clone()),
                 InlineAtomSource::Offset(offset) => InlineAtom::Offset(*offset),
+                InlineAtomSource::Image(image) => InlineAtom::Image(*image),
                 InlineAtomSource::Node(node)
                     if matches!(
                         styles.get(*node).display.inside(),
