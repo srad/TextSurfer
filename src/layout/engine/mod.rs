@@ -574,10 +574,11 @@ fn try_layout_flow(
         let child_clip = if propagates {
             inherited_clip
         } else {
+            let paint_contained = flow[index].style.contain.paints();
             inherited_clip.intersect_axes(
                 padding_rect,
-                flow[index].style.overflow.x.clips(),
-                flow[index].style.overflow.y.clips(),
+                flow[index].style.overflow.x.clips() || paint_contained,
+                flow[index].style.overflow.y.clips() || paint_contained,
             )
         };
         if !fixed_subtree && let Some(bottom) = inherited_clip.vertical_end(border_rect) {

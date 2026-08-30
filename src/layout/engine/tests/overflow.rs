@@ -16,6 +16,43 @@ fn zero_height_hidden_overflow_emits_nothing_below_its_padding_box() {
     assert!(text.contains("after"));
 }
 
+/// Horizontal overflow, so a clipped glyph disappears instead of being overwritten by whatever the
+/// next block paints on the same row — the confound a zero-height box would introduce.
+fn narrow_box(containment: &str) -> String {
+    let page = render(
+        &format!(
+            "<div style='width:16px;height:16px;white-space:nowrap;{containment}'>abcdefgh</div>"
+        ),
+        20,
+    );
+    page.painted.text_lines().join("\n")
+}
+
+#[test]
+fn without_containment_a_narrow_box_still_paints_what_overflows_it() {
+    assert!(narrow_box("").contains("abcdefgh"));
+}
+
+#[test]
+fn paint_containment_clips_what_overflows_its_padding_box() {
+    let text = narrow_box("contain:paint");
+    assert!(text.contains("ab"));
+    assert!(!text.contains("abc"));
+}
+
+#[test]
+fn contain_shorthands_that_include_paint_clip_too() {
+    for value in ["content", "strict", "layout paint"] {
+        let text = narrow_box(&format!("contain:{value}"));
+        assert!(!text.contains("abc"), "contain:{value} did not clip");
+    }
+}
+
+#[test]
+fn containment_without_paint_leaves_overflow_visible() {
+    assert!(narrow_box("contain:layout").contains("abcdefgh"));
+}
+
 #[test]
 fn horizontal_overflow_clips_whole_graphemes_without_reflowing_them() {
     let page = render(

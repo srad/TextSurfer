@@ -2,10 +2,12 @@ use style::properties::ComputedValues;
 use style::properties::longhands;
 use style::values::computed::{MaxSize, Size};
 use style::values::generics::box_::PositionProperty;
-use style::values::specified::box_::{Clear as StyloClear, Float as StyloFloat, Overflow};
+use style::values::specified::box_::{
+    Clear as StyloClear, Contain as StyloContain, Float as StyloFloat, Overflow,
+};
 
 use crate::core::style::{
-    BoxSizing, CalcRange, Clear, CssFloat, CssMaxSize, CssPercentage, CssSize, LengthAxis,
+    BoxSizing, CalcRange, Clear, Contain, CssFloat, CssMaxSize, CssPercentage, CssSize, LengthAxis,
     Overflow as CellOverflow, OverflowAxes, Position, StyleStore,
 };
 
@@ -88,6 +90,24 @@ pub(super) fn overflow(values: &ComputedValues) -> OverflowAxes {
         y: axis_overflow(values.clone_overflow_y()),
     }
     .computed()
+}
+
+/// Stylo's `content` and `strict` keywords already carry their component bits, so reading the
+/// components alone covers every spelling of the property.
+pub(super) fn contain(values: &ComputedValues) -> Contain {
+    let value = values.clone_contain();
+    let mut contain = Contain::NONE;
+    for (flag, component) in [
+        (StyloContain::SIZE, Contain::SIZE),
+        (StyloContain::LAYOUT, Contain::LAYOUT),
+        (StyloContain::STYLE, Contain::STYLE),
+        (StyloContain::PAINT, Contain::PAINT),
+    ] {
+        if value.contains(flag) {
+            contain = contain.union(component);
+        }
+    }
+    contain
 }
 
 fn axis_overflow(value: Overflow) -> CellOverflow {

@@ -123,6 +123,33 @@ impl OverflowAxes {
     }
 }
 
+/// The components of `contain`, kept as flags because `content` and `strict` are exactly unions of
+/// them. Only paint containment reaches layout today: it clips a box's overflow the way
+/// `overflow: hidden` does. Size, layout and style containment parse and are carried, but nothing
+/// reads them yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Contain(u8);
+
+impl Contain {
+    pub const NONE: Self = Self(0);
+    pub const SIZE: Self = Self(1 << 0);
+    pub const LAYOUT: Self = Self(1 << 1);
+    pub const STYLE: Self = Self(1 << 2);
+    pub const PAINT: Self = Self(1 << 3);
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn paints(self) -> bool {
+        self.contains(Self::PAINT)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Position {
     #[default]

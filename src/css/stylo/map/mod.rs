@@ -224,6 +224,7 @@ impl Mapper {
             order: values.clone_order(),
             box_sizing: sizing::box_sizing(values),
             overflow: sizing::overflow(values),
+            contain: sizing::contain(values),
             position: sizing::position(values),
             inset: edges::insets(values, lengths, store),
             margin: edges::margins(values, lengths, store),

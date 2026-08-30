@@ -94,8 +94,8 @@ with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green run (2026-08-30): **920 total** with the default VGA frontend and
-**812** with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
+Test counts at the last green run (2026-08-30): **924 total** with the default VGA frontend and
+**816** with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -466,6 +466,16 @@ content belongs to M4/M5.
   Exercise applicable cases at 40, 100 and 160 columns in terminal and VGA. Every visible fix needs
   a focused regression plus rendering-atlas or static-WPT coverage where applicable; production
   behavior may not depend on URLs, site names, classes or known markup.
+- [x] **`contain` paint containment.** `contain` now reaches `ComputedStyle` from Stylo, which
+  already parses it because `src/css/stylo/prefs.rs` enables `layout.unimplemented`; the value was
+  being computed and discarded. Paint containment clips a box's overflow exactly as
+  `overflow: hidden` does, through the same `ClipRegion`. This was the whole of the reported
+  Wikipedia breakage: `.vector-column-start` carries `contain: paint`, and without it the sticky
+  table of contents painted over the `<h1>` — `LinuUser interface` at 100 columns, one lost glyph.
+  *Limits a future reader must honour:* size, layout and style containment are mapped and carried on
+  `ComputedStyle` but nothing reads them, and paint containment does not yet make the box a
+  containing block for absolutely positioned descendants or establish a stacking context — M1-F's
+  stacking bullet owns that.
 - [ ] **General flow correctness.** Close block-formatting-context, margin-collapse, anonymous-box
   and replaced-element interactions across block, float, table, flex and grid layout before
   advancing to paint-order work.

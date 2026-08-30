@@ -24,7 +24,7 @@ pub use alignment::{
     Alignment, AlignmentSafety, AlignmentStyle, ContentAlignment, CssGap, ItemAlignment,
 };
 pub use box_model::{
-    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, CssInset, CssMargin,
+    BorderColor, BorderEdges, BorderLineStyle, BorderSide, BoxSizing, Contain, CssInset, CssMargin,
     CssMaxSize, CssPadding, CssPercentage, CssSignedPercentage, CssSize, CssWidth, EdgeSizes,
     InsetEdges, MarginEdges, Overflow, OverflowAxes, PaddingEdges, Position,
 };
@@ -154,6 +154,7 @@ pub struct ComputedStyle {
     pub order: i32,
     pub box_sizing: BoxSizing,
     pub overflow: OverflowAxes,
+    pub contain: Contain,
     pub visibility: Visibility,
     pub position: Position,
     pub inset: InsetEdges,
