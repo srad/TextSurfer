@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "slug": "example",
+  "url": "https://example.com/",
+  "requested": "https://example.com",
+  "capturedWith": "chromium",
+  "resources": [
+    {
+      "url": "https://example.com/",
+      "status": 200,
+      "mimeType": "text/html",
+      "file": "document.html",
+      "sha256": "ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d"
+    }
+  ]
+}

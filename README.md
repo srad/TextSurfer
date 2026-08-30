@@ -237,6 +237,12 @@ its override key (usually `Shift`) while TextSurfer has the screen.
 - **Static WPT profiles** — a pinned, vendored slice run offline in an isolated child with a parent
   watchdog: `terminal-cell-v1` for cell rendering and crash safety, `vga-pixel-v1` for exact-RGB
   raster reftests. These are TextSurfer slices, not browser pixel conformance.
+- **Browser-reference corpus** — real pages captured once from a headless Chromium with scripting
+  disabled, storing both the bytes it fetched and the geometry it laid out, then compared offline.
+  Because a terminal cell is exactly 8×16 CSS pixels, the browser's viewport is the same canvas we
+  lay out in. The comparison is structural, never pixels: text the browser shows must appear, in its
+  reading order, and text it keeps apart must never share a cell. Capturing is human-run; tests stay
+  offline.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -272,11 +278,11 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: reproduce visible failures against the practical-fidelity corpus, then close general flow,
-stacking and inline-layout correctness alongside CSS-pixel replaced sizing and static SVG. Run the
-representative-page image and styling smoke in VGA and terminal before resuming cold-render
-optimization; retained-paint smoke, keymap unification, keyboard link hints, the help overlay and
-in-page search follow that work.
+Next up: close general flow correctness against the browser-reference corpus, starting with spanning
+table cells that truncate instead of wrapping, then stacking and inline-layout correctness alongside
+CSS-pixel replaced sizing and static SVG. Run the representative-page image and styling smoke in VGA
+and terminal before resuming cold-render optimization; retained-paint smoke, keymap unification,
+keyboard link hints, the help overlay and in-page search follow that work.
 
 ## Built on great libraries
 

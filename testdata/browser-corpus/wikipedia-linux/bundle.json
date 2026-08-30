@@ -1,0 +1,443 @@
+{
+  "schema": 1,
+  "slug": "wikipedia-linux",
+  "url": "https://en.wikipedia.org/wiki/Linux",
+  "requested": "https://en.wikipedia.org/wiki/Linux",
+  "capturedWith": "chromium",
+  "resources": [
+    {
+      "url": "https://en.wikipedia.org/w/load.php?lang=en&modules=ext.cite.parsoid.styles%7Cext.cite.styles%7Cext.flaggedRevs.basic%7Cext.phonos.icons%2Cstyles%7Cext.uls.interlanguage%7Cext.visualEditor.desktopArticleTarget.noscript%7Cext.wikimediaBadges%7Cext.wikimediaBadges.ulsV2%7Cext.wikimediamessages.styles%7Cjquery.makeCollapsible.styles%7Cmediawiki.codex.messagebox.styles%7Cmediawiki.skinning.content.parsoid%7Cmediawiki.skins.legacy%7Cskins.vector.icons%2Cstyles%7Cskins.vector.search.codex.styles%7Cwikibase.client.init&only=styles&skin=vector-2022",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r000.css",
+      "sha256": "1e0c28fd478a83294fbf5347253769cd44bf4bc8a00d2c04bc743dd6ff37a69d"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?lang=en&modules=site.styles&only=styles&skin=vector-2022",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r001.css",
+      "sha256": "776a17712cefe2a971dc7dad0b40560215c75f84c01cef34ae574c472a2cfe38"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/icons/enwiki-25.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r002.svg",
+      "sha256": "095fb188212ac25419535feb7aee7a6a7b2d58270ae42a168abf9942d1b44315"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/mobile/copyright/wikipedia-tagline-en-25.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r003.svg",
+      "sha256": "400508c091b4e9cd71f55512b8c871e08e4ad6ddfc54597c6ec0733d67d064ca"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/mobile/copyright/wikipedia-wordmark-en-25.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r004.svg",
+      "sha256": "169241aebac0b1222230274878e82c34fd51865f825c29516386810fcdbf6fc2"
+    },
+    {
+      "url": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"%23000\"><path d=\"m16.7 8-6 6H9.3l-6-6 1.4-1.4 5.3 5.3 5.3-5.3z\"/></svg>",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r005.svg",
+      "sha256": "5bc2ff21be391234895c1177e3f8abb6912d4531b331e252c7138f45d89affce"
+    },
+    {
+      "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r006.png",
+      "sha256": "63ef318d96b5d0d0ceba6e04a4e622b1158335cdc67c49e27839132c6f655058"
+    },
+    {
+      "url": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"%23000\"><path d=\"M18 0v20H2V0zM4 2v16h12V6.799l-5.341 6.97h-1.3l-3.767-3.141 1.28-1.536 2.967 2.471L16 3.508V2z\"/></svg>",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r007.svg",
+      "sha256": "eaa17449d630469f1484023b454663270c189dbde02aa6ab298a63e8b0c2bdb9"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/Tux.svg/250px-Tux.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r008.webp",
+      "sha256": "01121273fa6b33fcd4f6ae1f88b1d532369f4ffd4ee42972822b7ec6b44971ec"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=menu&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r009.svg",
+      "sha256": "f95bdd835f49a42def318ad8c291d14b46a3fdfb12b4a69031c94367dc663765"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=search&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r010.svg",
+      "sha256": "e3c3f409daed8b352e66c602eacaa02e8e553ffa8909868ca7b79089bbcf7a51"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=userAvatar&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r011.svg",
+      "sha256": "9030062ecfd77880b308dccf7ad119f57da3f2e5fe29daf47643b0f46898a8cc"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=logIn&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r012.svg",
+      "sha256": "c6fb02b34f352720c6bc7f5da5f68218001d21c0d362c6e052d55ddb43a85f0f"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=heart&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r013.svg",
+      "sha256": "a6412eec1710f2032c0da112e6a8bff50d25dd9bfb008cd04fa611352d4b712b"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/skins/Vector/resources/skins.vector.styles/images/arrow-down-progressive.svg?5cd6d",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r014.svg",
+      "sha256": "57e3ab07391cd97b6b0c95e7d0142f34af796bff0932d8a83179b0638256a188"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=language&variant=progressive&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r015.svg",
+      "sha256": "b665bdf3802a04109a9c5aac7ad6a085856250bb64b6276e997d6f7e55199ac6"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/b/b7/Pending-protection-shackle.svg/20px-Pending-protection-shackle.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r016.webp",
+      "sha256": "5b519640444498fc29e4790921f15631268a758896cb84e15dcbdcf3236297af"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/extensions/WikimediaBadges/resources/images/badge-golden-star.png?ed948",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r017.png",
+      "sha256": "e1695562d09d55016f262251c2b992b14058a11ea684358c211d4f50623df47b"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=verticalEllipsis&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r018.svg",
+      "sha256": "f7e5fd7b1f8c36c951633d54ad17be0736501c17c487862e5698a517c137d8f0"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=eye&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r019.svg",
+      "sha256": "a7c66ba3f771527b08507c0e2e57398808898e17c0e6ad6ccd465799758f14ea"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=ext.phonos.icons&image=volumeUp&format=original&lang=en&skin=vector-2022&version=1vgmd",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r020.svg",
+      "sha256": "ff403e4c803533c8ae397a8fe0ca7605c10ebd23450b618565b530412460a406"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/5c/Linus_Torvalds_%28cropped%29.jpg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail_unscaled",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r021.jpeg",
+      "sha256": "8c26c50cea8f97f6e3d595fb6f3e80bc1d1f560fac4d320b69e5827e0b21c4e9"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Nexus_5X_%28White%29.jpg/120px-Nexus_5X_%28White%29.jpg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r022.jpeg",
+      "sha256": "a016a666e911775580ee2a8c36b32048581bf323b7750f8c116bb56085f409f4"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ee/Linux_0_12.jpg/250px-Linux_0_12.jpg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r023.jpeg",
+      "sha256": "0782757908992433890ecfa881815c68cbbb0745edbc002927825a21f263a960"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Gnulinux.svg/250px-Gnulinux.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r024.webp",
+      "sha256": "7a14c7eafda3fd76e0415b37e9f5ea837c03f38b3464638499106f895ec0eee9"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/In_flight_system_Linux_bootup_flat.jpg/250px-In_flight_system_Linux_bootup_flat.jpg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r025.jpeg",
+      "sha256": "117bcd510e1fb6e0264b14e39e0a17a8114938b13308ebdb2d3fd5ae093f675f"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/01/Fedora_Linux_40_KDE_Plasma.png/250px-Fedora_Linux_40_KDE_Plasma.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r026.png",
+      "sha256": "2cd2b795990a4e16a7ec4ba51dd3236df952502fb4273f2f08e3c6f694076312"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Cinnamon_4.4.8_on_Linux_Mint_19.3.png/250px-Cinnamon_4.4.8_on_Linux_Mint_19.3.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r027.png",
+      "sha256": "0efe0a768e7bdd288ad9c2fffb3cdaf6ceca0fc499725117c2d1e08e91e509e6"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/Elementary_OS_7.0_Horus.jpg/250px-Elementary_OS_7.0_Horus.jpg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r028.jpeg",
+      "sha256": "fc1f215226a3e6b60b337be4c861e8655cc67817a4671165fc0982e52197e1c4"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/62/Custom_Miniature_Linux_Server_%282005%29.jpeg/250px-Custom_Miniature_Linux_Server_%282005%29.jpeg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r029.jpeg",
+      "sha256": "5619c229223d21a578ed1a40ed2bf6a858227984e5ec68ba2e19f4f5bf20c33b"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/Free_and_open-source_software_logo_%282009%29.svg/40px-Free_and_open-source_software_logo_%282009%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r030.webp",
+      "sha256": "77c109c341f6ac1829597f89d5d35777d8d28f55e4588a9cb91dd0c97c7049cd"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/ChromebookStaplesStore.jpg/250px-ChromebookStaplesStore.jpg?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/jpeg",
+      "file": "r031.jpeg",
+      "sha256": "f862fdf673e512839f302c896acdd49c99312cecc7591c906654193b86bf6214"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/97/GNOME_Shell.png/250px-GNOME_Shell.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r032.png",
+      "sha256": "65e19389928040b135b2778a9c99d670b27d9ff7b8cf237bf083c5c48ed439bf"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/I3_window_manager_screenshot.png/250px-I3_window_manager_screenshot.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r033.png",
+      "sha256": "ce976dc50edd0ab405d11ae7a8361dcfadaa2e4aba3e083045caec3cfb76ac9b"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Unix_timeline.en.svg/960px-Unix_timeline.en.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r034.webp",
+      "sha256": "fad9a30518902e6f985c8285b189cec0b254326b314029b9ef1f4c73bbf17670"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Gnucash_2_screenshot.png/250px-Gnucash_2_screenshot.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r035.png",
+      "sha256": "cd7f6c2321a221eed02339556c78086a0ebabb580fe42ebfc8640ceffd801bec"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/NewTux.svg/40px-NewTux.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r036.webp",
+      "sha256": "bc63ace7045bc019f3c9f299c8cc8ac035e1b0b14b0d3e14957ce9dc52bcdd1c"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Linux_kernel_ubiquity.svg/960px-Linux_kernel_ubiquity.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r037.webp",
+      "sha256": "9566e9c7cc59bf8529ee45f7b155ee375d1a80c3ff30626321e74cc105fbb629"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/VirtualBox_debian64_XFCE_Hebrew.png/250px-VirtualBox_debian64_XFCE_Hebrew.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r038.png",
+      "sha256": "e1fdd3731191258d483b89b2c08bb442e3ccd014be1afb58d0a4c6c70c53ee31"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Linux",
+      "status": 200,
+      "mimeType": "text/html",
+      "file": "document.html",
+      "sha256": "3ec311b22e42fc3ae9cfe127bf1d91b3dc22d7083dba258ed9dc5f74864c054f"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/4d/Icon_pdf_file.png",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r039.png",
+      "sha256": "a524ef7507020b455c32f5ed4cfc65a13a047c432b3000477443ff23502575a5"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/skins/Vector/resources/skins.vector.styles/images/link-external-small-ltr-progressive.svg?fb64d",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r040.svg",
+      "sha256": "b324430a72a978ffc29853c1dbb95679833c58b30e5b5d10e5063f96f98c5ba2"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/Wiktionary-logo-en-v2.svg/40px-Wiktionary-logo-en-v2.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r041.webp",
+      "sha256": "b2cd8418b4a1b5918c9760aa4538b62cf4aeef0d4b65e6f54752238e1dabf4cb"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Wikibooks-logo.svg/40px-Wikibooks-logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r042.webp",
+      "sha256": "38bfecebe445a695c5aaf735b5b9c92952415059140633e20e82c877401351fc"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/4/4a/Commons-logo.svg/20px-Commons-logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r043.webp",
+      "sha256": "aa2c11f9e17cd03436c00a74afd2ec9c75f8ae1e444d0d66f778d13a3c47d621"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/Wikisource-logo.svg/40px-Wikisource-logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r044.webp",
+      "sha256": "32f54ed0696c9f6998e6c0183ea4b9e3b0ea2f7eb70e59cab24c656ffb624edf"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/d/db/Symbol_list_class.svg/20px-Symbol_list_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r045.webp",
+      "sha256": "3e81e803dbecb91ee53867f3a881db87e022bac9c63fdd3bc22ed8b03590d497"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Wikiquote-logo.svg/40px-Wikiquote-logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r046.webp",
+      "sha256": "e6c13c7c1753b1bb046578f407d03606cf04181b52a1725d8f1056951582759a"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Wikiversity_logo_2017.svg/40px-Wikiversity_logo_2017.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r047.webp",
+      "sha256": "6a4520e08635b6b67f9881bb32057c1119293ad2c5107fcce831f4c753b7e651"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/9/96/Symbol_category_class.svg/20px-Symbol_category_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r048.webp",
+      "sha256": "f26ce6db4c1bf269a17fc1775688be66b6cee25266424370da814f453fd6cbf9"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/6/6a/Symbol_na_class.svg/20px-Symbol_na_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r049.webp",
+      "sha256": "c81c63a647f32f2b56049a455c5cb7249504558981bb5fe2c79501b95cc5d4fb"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/e/e2/Symbol_portal_class.svg/20px-Symbol_portal_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r050.webp",
+      "sha256": "3c8c3a03088c930f81f07e08d5391c25ce7ca76f9f2374087d566fe74b8f7b23"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/aa/Lock-red-alt-2.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r051.svg",
+      "sha256": "173faf34d7d2cf53a5c015af700edef3baf779a910acbdcbb0b22c61b211e7ab"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/8/8a/OOjs_UI_icon_edit-ltr-progressive.svg/20px-OOjs_UI_icon_edit-ltr-progressive.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r052.webp",
+      "sha256": "659912e3ebc4dd65a4e0c8c75d0812b921715cb90d9d2387f1b57d6872593d5c"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/resources/assets/mediawiki_compact.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r053.svg",
+      "sha256": "d0b9c6e983d71f5c033beab214ce122f4a6dba1fd1173b344e3487afb0f730fa"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/footer/wikimedia.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r054.svg",
+      "sha256": "c989c591b888781ee3bf6ef2f4a273f1509310e0e238579c33602e0fd7b34d02"
+    },
+    {
+      "url": "https://auth.wikimedia.org/metawiki/wiki/Special:CentralAutoLogin/checkLoggedIn?useformat=desktop&wikiid=enwiki&usesul3=1&type=1x1",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r055.png",
+      "sha256": "fe67e12a6497f8518ef1673fd8cf5622871935ff85f204715e78b2009dd48588"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/favicon/wikipedia.ico",
+      "status": 200,
+      "mimeType": "image/vnd.microsoft.icon",
+      "file": "r056.vnd.microsoft.icon",
+      "sha256": "3638de61226857e62cf5187d7d59cf902111ad4f792b5bdff1bfed3f5ed5e608"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/resources/src/mediawiki.skinning/images/magnify-clip-ltr.svg?8330e",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r057.svg",
+      "sha256": "78f5ef3e585b3073c58b955ace7c662e51ee29bb2ff4ef4b0769bc46e8d7110c"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/footer/wikimedia-button.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r058.svg",
+      "sha256": "0c2aa872dd39b943efde8b4e444bd7c627e5ab740684356046bbb8a2248b57cd"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/resources/assets/poweredby_mediawiki.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r059.svg",
+      "sha256": "75444929595b7c4040288c822835ce3e8f82d7b67eb6b9a3546765ad74698ede"
+    },
+    {
+      "url": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"%23000\"><path d=\"M8 1a7 7 0 015.605 11.191l5.102 5.102-1.414 1.414-5.102-5.102A7 7 0 118 1m0 2a5 5 0 100 10A5 5 0 008 3\"/></svg>",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r060.svg",
+      "sha256": "65b41e1581b31f9335a754c3f4b6b84822d8f5dbbf1a1625975c91136a4afdad"
+    }
+  ]
+}

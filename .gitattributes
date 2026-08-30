@@ -18,3 +18,7 @@ testdata/*.pin -text
 testdata/*.sha256 -text
 testdata/wpt/** -text
 testdata/wpt/SHA256SUMS text eol=lf
+
+# Browser-corpus captures are hashed byte-for-byte in bundle.json; normalising them would break
+# the integrity check on the next checkout.
+testdata/browser-corpus/** -text

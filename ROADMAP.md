@@ -94,8 +94,8 @@ with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green run (2026-08-30): **924 total** with the default VGA frontend and
-**816** with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
+Test counts at the last green run (2026-08-30): **925 total** (922 passing, 3 ignored) with the
+default VGA frontend and **818** (815 passing, 3 ignored) with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -460,18 +460,48 @@ real static pages. Completion means broadly readable, structurally correct horiz
 within TextSurfer's text-mode constraints, not browser pixel parity. Script-dependent missing
 content belongs to M4/M5.
 
-- [ ] **Defect intake and offline corpus.** Reduce every reported defect to a resource-closed page
+- [ ] **Defect intake and offline corpus** *(in progress — the probe reports, the manifest and the
+  supervised worker are open).* Reduce every reported defect to a resource-closed page
   capture or minimal standards fixture before changing production code. Cover a long article with
   media, a dense table/list page, forms/search, flex/grid documentation and horizontal RTL content.
   Exercise applicable cases at 40, 100 and 160 columns in terminal and VGA. Every visible fix needs
   a focused regression plus rendering-atlas or static-WPT coverage where applicable; production
   behavior may not depend on URLs, site names, classes or known markup.
+  *Landed — a browser is the oracle, not hand-written invariants.* `tools/capture-browser-reference.mjs`
+  drives the Chromium that Playwright leaves on disk over CDP, with page script disabled to match
+  `scripting: false` and the viewport set to `cols*8 x rows*16` — the exact canvas
+  `CellMetric::viewport_css_pixels` lays out in. One human-run capture writes both halves of a
+  corpus entry under `testdata/browser-corpus/<slug>/`: every byte the browser fetched, and the
+  word geometry it laid out. `tests/render_corpus.rs` then renders those bytes offline and compares.
+  Node's global `WebSocket` and `fetch` carry the protocol, so there is no `package.json` and no
+  npm install; Rust tests still never touch the network.
+  **Comparison unit: maximal alphanumeric runs, not words.** Word and contiguity boundaries are
+  width-dependent — the browser reads `Linux (kernel)[9][g]` as one clump where our narrower line
+  breaks it — so any rule built on them manufactures failures on every wrapped paragraph. Two
+  earlier tokenisations were tried and discarded on measurement.
+  **Asserted:** A3, that text the browser keeps apart never shares our cells — zero across every
+  capture, and disabling the `contain` fix below makes it fire at exactly the two widths that were
+  broken, which is what validates the oracle. **Ratcheted, not yet classified:** A1 distinct runs
+  the browser paints and we do not, and A2 the preserved fraction of reading order. Today's
+  Wikipedia numbers are 366/207/196 missing and 728/793/799 permille order at 40/100/160 columns;
+  `example.com` is exact at every width. Those A1/A2 totals mix real defects with known-legitimate
+  divergence (narrow-line clipping, windowed form values, fixed-advance line breaking) and are
+  ceilings that may only fall, not targets.
+  A band number locates a finding in the *browser's* coordinates only: the two documents drift
+  apart vertically as line breaking differs, so never compare them at the same band index.
+  `TEXTSURFER_CORPUS_TRIAGE=1` clusters the findings by band and prints the browser's own text
+  around each, which is how the two causes under general flow correctness below were identified.
+  *Still open:* finish reducing A1/A2 findings to owned causes with an xfail table, move the page
+  list and expectations into `tools/browser-reference.json`, make the sort direction-aware before an
+  RTL page is admitted (band-then-x is LTR visual order), and add the remaining corpus shapes.
 - [x] **`contain` paint containment.** `contain` now reaches `ComputedStyle` from Stylo, which
   already parses it because `src/css/stylo/prefs.rs` enables `layout.unimplemented`; the value was
   being computed and discarded. Paint containment clips a box's overflow exactly as
   `overflow: hidden` does, through the same `ClipRegion`. This was the whole of the reported
   Wikipedia breakage: `.vector-column-start` carries `contain: paint`, and without it the sticky
   table of contents painted over the `<h1>` — `LinuUser interface` at 100 columns, one lost glyph.
+  Disabling the clip makes the browser-reference A3 assertion fire at exactly 40 and 100 columns and
+  stay silent at 160, which is both the regression net for this fix and what validates the oracle.
   *Limits a future reader must honour:* size, layout and style containment are mapped and carried on
   `ComputedStyle` but nothing reads them, and paint containment does not yet make the box a
   containing block for absolutely positioned descendants or establish a stacking context — M1-F's
@@ -479,6 +509,17 @@ content belongs to M4/M5.
 - [ ] **General flow correctness.** Close block-formatting-context, margin-collapse, anonymous-box
   and replaced-element interactions across block, float, table, flex and grid layout before
   advancing to paint-order work.
+  *Classified from the browser corpus, in priority order:*
+  1. **A spanning table cell truncates instead of wrapping.** A `colspan` cell renders one line and
+     silently drops the rest — no wrap, no ellipsis, and nothing on `LayoutLimits`; at 40 columns a
+     whole non-spanning column disappears as well. Reproduces in ten lines with no CSS: an outer
+     table whose cell holds a table with a `rowspan` header and a `colspan` row. This is what erased
+     Wikipedia's "Linux kernel architecture" table — `evdev` occurs once in that document and never
+     reached our output, while the same table rendered completely in isolation — and it accounts for
+     51 of the 207 findings at 100 columns. Narrow widths are where it bites, which is this
+     browser's whole domain.
+  2. **Footer navboxes at 40 columns.** 75 clusters over bands 4288–4579 of the same page, and the
+     reason 40 columns reports 366 findings against 100 columns' 207. Unreduced.
 - [ ] **Stacking and positioned content.** Implement `z-index` and bounded stacking contexts,
   relative positioning for inline boxes, positioned table descendants, and true fixed/sticky
   behavior. Paint order and hit testing must agree on the topmost box.
