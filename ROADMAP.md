@@ -78,17 +78,21 @@ signed off.
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` | (done — smoke pending) |
 | M1-D — Layout completeness | Tables, generated content + markers, length units, presentational attrs, VGA typography | (done — VGA smoke pending) |
 | M1-E — Overflow and positioning | Element overflow clipping, inherited visibility, CSS positioning | (done — smoke pending) |
+| M1-F — Practical rendering fidelity | Cross-context correctness, stacking, inline geometry, horizontal RTL | (open — next) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, in-page search, forms | (in progress) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
 | M5 — Boa | Boa 0.21.1 behind the trait; host bindings subset; job pump; test262 slice | (open) |
-| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · images (CSS-pixel precision + SVG + smoke pending) · floats ✅ · perf | (in progress) |
+| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · practical image fidelity · floats ✅ · perf | (in progress) |
 | M7 — Stylo cascade | Stylo 0.20.0 as the sole full and incremental cascade | (done — smoke pending) |
 
 Cross-cutting: test infrastructure (in progress — static WPT backfill, corpus error-count and
 astral attribute-order gaps) · gates (done, local only) · coverage floor (open — optional local,
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
+
+M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
+open until M1-F practical-fidelity and M6 image acceptance pass.
 
 Test counts at the last green run (2026-08-30): **920 total** with the default VGA frontend and
 **812** with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
@@ -118,23 +122,26 @@ before any item is marked `(done)`.
 ## Session handoff
 
 1. Read this status board, then recent `git log` entries for historical context.
-2. Image layout integration is green: decoded raster images are atomic layout boxes, the atlas
-   rejects text in every image rectangle, and the floated-image regression is generic rather than
-   tied to one site's markup.
-3. Fix CSS-pixel precision for replaced sizing, then add bounded static SVG rasterization and audit
+2. Reproduce each visible rendering failure as a resource-closed fixture or minimal standards case;
+   classify it under M1-F, M6 images or M4/M5 before changing production code.
+3. Advance M1-F in order, starting with general flow correctness across the offline corpus. Every
+   defect gets a focused regression plus rendering-atlas or WPT coverage where applicable; never
+   add URL-, class- or site-specific production behavior.
+4. Fix CSS-pixel precision for replaced sizing, then add bounded static SVG rasterization and audit
    the currently skipped SVG sizing reftests.
-4. Smoke the representative static pages in both frontends; this also closes M6 images and the M7
-   styling smoke when their acceptance criteria pass.
-5. Resume the M6 cold-render work from the generic app-level URL benchmark only after rendering
-   correctness; its initial resource window already produces one coherent initial layout.
-6. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
+5. Smoke the representative static pages in both frontends; this closes M1-F, M6 images and the M7
+   styling smoke only when their acceptance criteria pass.
+6. Keep the generic app-level URL benchmark as the performance reference after each correctness
+   tranche. Resume optimization only after rendering acceptance; its initial resource window
+   already produces one coherent initial layout.
+7. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
    release state-change-through-apply gate is 2.6 ms p95.
-7. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
+8. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
-8. Run the gates before and after; never mark `(done)` with red gates.
-9. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+9. Run the gates before and after; never mark `(done)` with red gates.
+10. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-10. Live repo: no commits without explicit user confirmation.
+11. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -326,8 +333,9 @@ before any item is marked `(done)`.
   `file:///…` in a `<link>`. Cross-scheme occurrences count as failed resources.
 - **A non-2xx response keeps its body** — a server's own error page is a page — but is never
   accepted as a subresource; a 404 is not a stylesheet.
-- Out of scope until a page needs them: relative colours, `background-image`, `line-height`, fonts,
-  border-radius, inline-element borders.
+- Relative colours, remote `@font-face`/custom font-family selection and border radius remain out of
+  scope until a concrete readability case promotes them. M1-F and M6 own `line-height`, inline box
+  decoration and CSS background images.
 
 ### Deferred — decision gates with explicit triggers
 
@@ -439,11 +447,47 @@ content; cascaded and laid out `position`, `inset` and the four longhands, block
 boxes and resolving containing blocks through a source-order-preserving flow-tree pass; constrained
 definite-width auto-layout tables with a one-cell column floor and grapheme-boundary clipping.
 
-**Deliberate limits:** `z-index`, `clip: rect()`, relative positioning of non-replaced inline boxes,
+**Deliberate limits:** M1-F owns `z-index`, relative positioning of non-replaced inline boxes,
 positioned descendants inside the table-cell formatter, true sticky behavior and a fixed-position
-repaint layer remain unimplemented.
+repaint layer. `clip: rect()` remains deferred until a concrete readability case requires it.
 
 ## Open milestones
+
+### M1-F — Practical web rendering fidelity (open — next)
+
+M1-B through M1-E remain completed component contracts; this milestone owns their interaction on
+real static pages. Completion means broadly readable, structurally correct horizontal documents
+within TextSurfer's text-mode constraints, not browser pixel parity. Script-dependent missing
+content belongs to M4/M5.
+
+- [ ] **Defect intake and offline corpus.** Reduce every reported defect to a resource-closed page
+  capture or minimal standards fixture before changing production code. Cover a long article with
+  media, a dense table/list page, forms/search, flex/grid documentation and horizontal RTL content.
+  Exercise applicable cases at 40, 100 and 160 columns in terminal and VGA. Every visible fix needs
+  a focused regression plus rendering-atlas or static-WPT coverage where applicable; production
+  behavior may not depend on URLs, site names, classes or known markup.
+- [ ] **General flow correctness.** Close block-formatting-context, margin-collapse, anonymous-box
+  and replaced-element interactions across block, float, table, flex and grid layout before
+  advancing to paint-order work.
+- [ ] **Stacking and positioned content.** Implement `z-index` and bounded stacking contexts,
+  relative positioning for inline boxes, positioned table descendants, and true fixed/sticky
+  behavior. Paint order and hit testing must agree on the topmost box.
+- [ ] **Inline geometry and typography.** Preserve CSS-pixel `line-height`, inline borders and
+  backgrounds, and `aspect-ratio` through layout and paint. CP437/Unifont and integer VGA scaling
+  remain the font contract; this item does not introduce remote fonts or arbitrary font families.
+- [ ] **Horizontal international layout.** Add bidi/RTL ordering, direction-aware physical behavior
+  and the common logical sizing, spacing and inset properties. Vertical writing modes remain
+  deferred.
+
+A critical corpus failure is missing or reordered in-flow content, unintended overlap, a wrong
+topmost hit/link target, divergence after resize or late resource completion, or an abort/hang.
+M1-F remains open until the offline corpus has no unclassified critical failures, the authoritative
+rendering profiles do not regress, and the manual example.com, lite.duckduckgo.com and wikipedia.org
+smokes pass in both native frontends. Run the generic app benchmark after each tranche and report
+the numbers, but treat performance as secondary to correctness until this acceptance gate closes.
+
+Relative colours, remote/custom fonts, border radius, transforms, multicolumn layout and vertical
+writing remain deferred unless a concrete corpus readability failure promotes them.
 
 ### M2 — Tabs & keyboard navigation (in progress)
 
@@ -675,13 +719,14 @@ manual mouse walkthrough remain pending.
       text, generated content, tables, flex items and `display: contents`; rollback-safe bounded
       interning; topmost paint/hit/link behavior. Math-valued tracks use the shared math store except
       inside auto-repeat, where Taffy's fixed-component contract cannot represent them.
-      *Explicit limits:* `subgrid`, masonry, RTL/writing modes, Grid absolute positioning, aspect
-      ratio, `z-index`.
+      M1-F owns Grid absolute positioning, aspect ratio, `z-index` and horizontal RTL/logical
+      integration. *Explicit limits:* `subgrid`, masonry and vertical writing modes.
 - [ ] **Images** *(in progress — loading, decoding and layout integration green; CSS-pixel
-      precision, SVG and human VGA/terminal smoke pending)*. One
+      precision, responsive sources, replaced-fit painting, CSS backgrounds, bounded data sources,
+      SVG and human VGA/terminal smoke pending)*. One
       delivery across the shared pipeline and both frontends. Static HTML `<img src>` is the first
-      boundary. Static SVG is the final promoted format step; animation, `srcset`/`picture`, CSS
-      images, `object-fit`, lazy loading, `data:` URLs and cross-page caching remain deferred.
+      boundary. Animation, lazy loading and cross-page caching remain deferred; the remaining
+      static-web contracts are open below.
       - [x] **Shared loading and decoding.** `image` 0.25.10 pinned with default features off and
         only PNG, JPEG, WebP and GIF enabled (GIF and animated WebP expose the first frame only);
         `ratatui-image` 11.0.6 pinned as a terminal adapter with only `crossterm` enabled. `PageLoad`
@@ -726,15 +771,30 @@ manual mouse walkthrough remain pending.
         RGBA asset contract as raster formats. Preserve raw-byte, axis, pixel, decoded-byte and
         per-page budgets; reject malformed or oversized SVG without panic; never fetch external SVG
         resources or scan system fonts.
-        Focused fixtures cover a valid path-only SVG, malformed and over-budget inputs, external
-        references remaining inert, and the five representative Wikipedia assets.
-      - **Human Wikipedia image smoke in both VGA and terminal is the final acceptance gate.**
+        Fixtures cover intrinsic dimensions and `viewBox`, path-only content, malformed and
+        over-budget inputs, external references remaining inert, and representative generic-corpus
+        assets.
+      - [ ] **Responsive sources and replaced-fit painting.** Parse `<picture>`, `srcset` and `sizes`,
+        select deterministically from the CSS viewport at an effective density of 1 dppx independent
+        of the frontend, and re-evaluate on width changes without stale placements. Implement
+        `object-fit` and `object-position` inside the laid-out content rectangle; clipping or scaling
+        may not change that rectangle or cover neighboring text.
+      - [ ] **CSS background images.** Route bounded static `background-image: url(...)` resources
+        through the existing per-page image graph, decoder, generation checks and budgets. Support
+        size, position and repeat within the owning box's clip; paint backgrounds below borders,
+        content and descendants. Gradients remain deferred until a readability case requires them.
+      - [ ] **Bounded data image URLs.** Accept base64 and percent-encoded `data:image/...` sources
+        only through the shared decoder and existing raw/decoded budgets, with the same MIME allowlist
+        and failure reporting as fetched images; they never become top-level navigation or bypass
+        per-page accounting.
+      - **Human acceptance:** the representative image corpus and Wikipedia image smoke pass in both
+        VGA and terminal without missing in-flow content, overlap or resize/resource divergence.
 - [x] **Floats** — Taffy 0.14.0 `float_layout` owns CSS 2 physical placement, clearance and
       shrink-to-fit sizing; source-ordered text wraps through cell-rounded bands, including generated
       clearfixes and legacy HTML `align`/`hspace`/`vspace`/`br[clear]`, with float-aware paint, hits
-      and links. *Limits:* horizontal LTR rectangular margin boxes only; no `shape-outside`, logical
-      directions/writing modes, `z-index`, deliberate negative-margin overlap, or positioned
-      descendants whose containing block crosses the atomic float boundary.
+      and links. M1-F owns horizontal RTL/logical behavior, `z-index` and positioned descendants
+      whose containing block crosses the atomic float boundary. *Limits:* rectangular margin boxes
+      only; no `shape-outside`, vertical writing or deliberate negative-margin overlap.
 - [ ] **Perf gate (in progress; optimization deferred until rendering correctness).** Standing budgets on the reference Windows machine: the pinned
       Linux Wikipedia revision commits in <250 ms debug, worker layout+paint is <200 ms, no
       owner-sequence work slice exceeds 8 ms, and a warmed paint-only interaction completes through
@@ -778,7 +838,7 @@ manual mouse walkthrough remain pending.
             `1371530035`, SHA-256
             `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
 - [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
-      config file · `data:` URL scheme · optional Readability-style reader view.
+      config file · top-level `data:` URL navigation · optional Readability-style reader view.
 
 ### M7 — Stylo cascade (done — smoke pending)
 
@@ -1112,7 +1172,7 @@ incrementally.
 
 ## Non-goals (locked unless a milestone re-opens them)
 
-Page-content selection/copy, iframes/`<frame>`, bidi/RTL/writing modes, `line-height`/fonts,
-border-radius, inline-element borders, cookies, `addEventListener` DOM events (click-only v0),
-top-level await, full CSS/DOM, window-title setting, syscall sandboxing, config files pre-M6, drag
-input pre-M6.
+Page-content selection/copy, iframes/`<frame>`, vertical writing modes, remote `@font-face`/custom
+font-family selection, border radius, transforms, multicolumn layout, cookies, `addEventListener`
+DOM events (click-only v0), top-level await, full CSS/DOM, window-title setting, syscall sandboxing,
+config files pre-M6, drag input pre-M6.
