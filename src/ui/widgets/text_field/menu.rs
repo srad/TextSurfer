@@ -14,6 +14,16 @@ pub enum TextFieldMenuAction {
     SelectAll,
 }
 
+impl TextFieldMenuAction {
+    pub fn is_enabled(self, can_copy: bool, can_cut: bool) -> bool {
+        match self {
+            Self::Cut => can_cut,
+            Self::Copy => can_copy,
+            Self::Paste | Self::SelectAll => true,
+        }
+    }
+}
+
 const ITEMS: [(TextFieldMenuAction, &str); 4] = [
     (TextFieldMenuAction::Cut, "Cut"),
     (TextFieldMenuAction::Copy, "Copy"),
@@ -35,7 +45,12 @@ pub fn menu_rect(bounds: Rect, anchor: Point) -> Rect {
 pub fn menu_action_at(bounds: Rect, anchor: Point, at: Point) -> Option<TextFieldMenuAction> {
     let rect = menu_rect(bounds, anchor);
     let position = Position::new(at.col, at.row);
-    if !rect.contains(position) || at.row == rect.y || at.row + 1 == rect.bottom() {
+    if !rect.contains(position)
+        || at.col == rect.x
+        || at.col.saturating_add(1) == rect.right()
+        || at.row == rect.y
+        || at.row.saturating_add(1) == rect.bottom()
+    {
         return None;
     }
     ITEMS
@@ -47,6 +62,7 @@ pub struct TextFieldMenu<'a> {
     pub anchor: Point,
     pub can_copy: bool,
     pub can_cut: bool,
+    pub selected: Option<TextFieldMenuAction>,
     pub theme: &'a Theme,
 }
 
@@ -70,18 +86,23 @@ impl Widget for TextFieldMenu<'_> {
             if row as u16 + 2 >= rect.height {
                 break;
             }
-            let enabled = match action {
-                TextFieldMenuAction::Cut => self.can_cut,
-                TextFieldMenuAction::Copy => self.can_copy,
-                TextFieldMenuAction::Paste | TextFieldMenuAction::SelectAll => true,
+            let enabled = action.is_enabled(self.can_copy, self.can_cut);
+            let selected = enabled && self.selected == Some(*action);
+            let mut style = if selected {
+                self.theme.selected()
+            } else {
+                Style::default()
+                    .fg(self.theme.bar_text)
+                    .bg(self.theme.bar_bg)
             };
-            let mut style = Style::default()
-                .fg(self.theme.bar_text)
-                .bg(self.theme.bar_bg);
             if !enabled {
                 style = style.add_modifier(Modifier::DIM);
             }
-            buffer.set_string(rect.x + 1, rect.y + 1 + row as u16, label, style);
+            let y = rect.y + 1 + row as u16;
+            if selected {
+                buffer.set_style(Rect::new(rect.x + 1, y, rect.width - 2, 1), style);
+            }
+            buffer.set_string(rect.x + 1, y, label, style);
         }
     }
 }

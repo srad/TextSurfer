@@ -493,6 +493,15 @@ fn dragging_selects_address_text_and_the_context_menu_uses_that_selection() {
         ratatui::layout::Rect::new(0, 0, 80, 24),
         context.anchor,
     );
+    app.take_damage();
+    app.handle_mouse(moved(at(rect.x + 1, rect.y + 2)));
+    assert_eq!(
+        app.chrome_view().text_field_menu.unwrap().selected,
+        Some(crate::ui::widgets::text_field::TextFieldMenuAction::Copy)
+    );
+    assert!(app.take_damage().content.full);
+    app.handle_mouse(moved(at(rect.x + 2, rect.y + 2)));
+    assert!(app.take_damage().is_empty());
     app.handle_mouse(press(MouseButton::Left, at(rect.x + 1, rect.y + 2)));
     assert_eq!(
         app.take_clipboard_request(),
@@ -500,6 +509,35 @@ fn dragging_selects_address_text_and_the_context_menu_uses_that_selection() {
             "xam".to_string()
         ))
     );
+}
+
+#[test]
+fn context_menu_hover_ignores_disabled_rows_and_clears_on_exit() {
+    let mut app = App::new();
+    app.handle_mouse(press(MouseButton::Right, at(ADDRESS_TEXT, ADDRESS_ROW)));
+    let context = app.chrome_view().text_field_menu.expect("a context menu");
+    assert!(!context.can_copy);
+    assert_eq!(context.selected, None);
+    let rect = crate::ui::widgets::text_field::menu_rect(
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        context.anchor,
+    );
+
+    app.take_damage();
+    app.handle_mouse(moved(at(rect.x + 1, rect.y + 1)));
+    assert_eq!(app.chrome_view().text_field_menu.unwrap().selected, None);
+    assert!(app.take_damage().is_empty());
+
+    app.handle_mouse(moved(at(rect.x + 1, rect.y + 3)));
+    assert_eq!(
+        app.chrome_view().text_field_menu.unwrap().selected,
+        Some(crate::ui::widgets::text_field::TextFieldMenuAction::Paste)
+    );
+    assert!(app.take_damage().content.full);
+
+    app.pointer_left();
+    assert_eq!(app.chrome_view().text_field_menu.unwrap().selected, None);
+    assert!(app.take_damage().content.full);
 }
 
 #[test]
@@ -523,10 +561,24 @@ fn a_form_context_menu_keeps_and_copies_the_clicked_selection() {
     ));
     let context = app.chrome_view().text_field_menu.expect("a context menu");
     assert!(context.can_copy);
+    assert_eq!(app.pointer_cursor(), crate::core::style::Cursor::Default);
+    assert!(
+        crate::ui::chrome::cursor_position(
+            &app.chrome_view(),
+            ratatui::layout::Rect::new(0, 0, 80, 24)
+        )
+        .is_none()
+    );
     let rect = crate::ui::widgets::text_field::menu_rect(
         ratatui::layout::Rect::new(0, 0, 80, 24),
         context.anchor,
     );
+    app.handle_mouse(moved(at(rect.x + 1, rect.y + 2)));
+    assert_eq!(
+        app.chrome_view().text_field_menu.unwrap().selected,
+        Some(crate::ui::widgets::text_field::TextFieldMenuAction::Copy)
+    );
+    assert_eq!(app.pointer_cursor(), crate::core::style::Cursor::Default);
     app.handle_mouse(press(MouseButton::Left, at(rect.x + 1, rect.y + 2)));
     assert_eq!(
         app.take_clipboard_request(),

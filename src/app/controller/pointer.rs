@@ -10,7 +10,7 @@ use crate::ui::chrome::address_index_at;
 use crate::ui::keymap::Action;
 use crate::ui::mouse::{ChromeState, ChromeTarget};
 use crate::ui::widgets::scrollbar::{ScrollExtent, ScrollbarPart};
-use crate::ui::widgets::text_field::{TextFieldMenuAction, menu_action_at};
+use crate::ui::widgets::text_field::{TextFieldMenuAction, menu_action_at, menu_rect};
 
 use super::App;
 
@@ -63,6 +63,14 @@ impl App {
             }
             self.text_context = None;
             self.touch();
+        }
+        if event.kind == MouseKind::Move && self.text_context.is_some() {
+            let previous = self.selected_text_field_menu_action();
+            self.pointer = Some(event.at);
+            if previous != self.selected_text_field_menu_action() {
+                self.touch();
+            }
+            return;
         }
         if event.kind == MouseKind::Move
             && let Some(target) = self.text_drag
@@ -167,6 +175,7 @@ impl App {
     pub fn pointer_left(&mut self) {
         let previous_toolbar = self.hovered_toolbar_button();
         let had_href = self.hovered_href().is_some();
+        let had_text_field_selection = self.selected_text_field_menu_action().is_some();
         self.pointer = None;
         self.pressed = None;
         self.scroll_drag = None;
@@ -174,11 +183,47 @@ impl App {
         self.hover = None;
         self.damage_toolbar_hover(previous_toolbar);
         let painted_changed = self.sync_dynamic_state();
-        if painted_changed {
+        if painted_changed || had_text_field_selection {
             self.touch();
         } else if had_href {
             self.touch_status();
         }
+    }
+
+    pub(super) fn text_field_menu_capabilities(&self, target: TextFieldTarget) -> (bool, bool) {
+        let has_selection = match target {
+            TextFieldTarget::Address => self.address.selection().is_some(),
+            TextFieldTarget::Form(node) => self
+                .tabs
+                .active()
+                .text_fields
+                .get(&node)
+                .is_some_and(|field| field.selection().is_some()),
+        };
+        (has_selection, has_selection)
+    }
+
+    pub(super) fn selected_text_field_menu_action(&self) -> Option<TextFieldMenuAction> {
+        let context = self.text_context?;
+        let at = self.pointer?;
+        let bounds =
+            ratatui::layout::Rect::new(0, 0, self.geometry.size.cols, self.geometry.size.rows);
+        let action = menu_action_at(bounds, context.anchor, at)?;
+        let (can_copy, can_cut) = self.text_field_menu_capabilities(context.target);
+        action.is_enabled(can_copy, can_cut).then_some(action)
+    }
+
+    pub(super) fn pointer_over_text_field_menu(&self) -> bool {
+        let (Some(context), Some(at)) = (self.text_context, self.pointer) else {
+            return false;
+        };
+        let bounds =
+            ratatui::layout::Rect::new(0, 0, self.geometry.size.cols, self.geometry.size.rows);
+        let menu = menu_rect(bounds, context.anchor);
+        at.col >= menu.x
+            && at.col < menu.x.saturating_add(menu.width)
+            && at.row >= menu.y
+            && at.row < menu.y.saturating_add(menu.height)
     }
 
     pub(super) fn target_at(&self, at: Point) -> ChromeTarget {

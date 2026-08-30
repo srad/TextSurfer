@@ -2,7 +2,7 @@ use proptest::prelude::*;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Widget;
 
 use crate::core::event::{Key, KeyEvent, KeyModifiers};
@@ -224,6 +224,48 @@ fn context_menu_actions_use_the_same_selection_commands() {
 }
 
 #[test]
+fn context_menu_hover_selects_only_enabled_rows() {
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let anchor = crate::core::geom::Point { col: 3, row: 2 };
+    terminal
+        .draw(|frame| {
+            TextFieldMenu {
+                anchor,
+                can_copy: false,
+                can_cut: false,
+                selected: Some(TextFieldMenuAction::Copy),
+                theme: &crate::ui::theme::DEFAULT,
+            }
+            .render(frame.area(), frame.buffer_mut());
+        })
+        .unwrap();
+    let rect = menu_rect(terminal.backend().buffer().area, anchor);
+    let selected = crate::ui::theme::DEFAULT.selected();
+    let copy = &terminal.backend().buffer()[(rect.x + 1, rect.y + 2)];
+    assert_ne!(copy.bg, selected.bg.unwrap());
+    assert!(copy.modifier.contains(Modifier::DIM));
+
+    terminal
+        .draw(|frame| {
+            TextFieldMenu {
+                anchor,
+                can_copy: false,
+                can_cut: false,
+                selected: Some(TextFieldMenuAction::Paste),
+                theme: &crate::ui::theme::DEFAULT,
+            }
+            .render(frame.area(), frame.buffer_mut());
+        })
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    for col in rect.x + 1..rect.right() - 1 {
+        assert_eq!(buffer[(col, rect.y + 3)].fg, selected.fg.unwrap());
+        assert_eq!(buffer[(col, rect.y + 3)].bg, selected.bg.unwrap());
+    }
+}
+
+#[test]
 fn context_menu_is_an_opaque_chrome_themed_surface() {
     let backend = TestBackend::new(20, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -241,6 +283,7 @@ fn context_menu_is_an_opaque_chrome_themed_surface() {
                 anchor: crate::core::geom::Point { col: 3, row: 2 },
                 can_copy: false,
                 can_cut: false,
+                selected: None,
                 theme: &crate::ui::theme::DEFAULT,
             }
             .render(frame.area(), frame.buffer_mut());

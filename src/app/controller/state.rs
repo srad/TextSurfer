@@ -36,6 +36,9 @@ impl App {
     }
 
     pub fn pointer_cursor(&self) -> Cursor {
+        if self.pointer_over_text_field_menu() {
+            return Cursor::Default;
+        }
         let Some(mut node) = self.hover.as_ref().map(|hover| hover.node) else {
             return Cursor::Auto;
         };

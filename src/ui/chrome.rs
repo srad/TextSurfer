@@ -46,6 +46,7 @@ pub struct TextFieldMenuView {
     pub anchor: crate::core::geom::Point,
     pub can_copy: bool,
     pub can_cut: bool,
+    pub selected: Option<crate::ui::widgets::text_field::TextFieldMenuAction>,
 }
 
 pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
@@ -160,6 +161,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
             anchor: menu.anchor,
             can_copy: menu.can_copy,
             can_cut: menu.can_cut,
+            selected: menu.selected,
             theme: &view.theme,
         }
         .render(area, buffer);
@@ -176,12 +178,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         .render(area, buffer);
     }
 
-    if view.address_focused
-        && let Some(toolbar) = layout.toolbar
-    {
-        return address_cursor_position(view, toolbar);
-    }
-    page_cursor_position(view, area)
+    cursor_position(view, area)
 }
 
 pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
@@ -242,6 +239,9 @@ fn draw_scrollbar(buffer: &mut Buffer, view: &ChromeView<'_>, rect: Option<Rect>
 }
 
 pub fn cursor_position(view: &ChromeView<'_>, area: Rect) -> Option<Position> {
+    if view.text_field_menu.is_some() {
+        return None;
+    }
     if view.address_focused
         && let Some(toolbar) = view.geometry.layout(area).toolbar
     {

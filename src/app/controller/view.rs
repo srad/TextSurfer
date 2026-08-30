@@ -10,7 +10,6 @@ use crate::ui::widgets::tabs::TabChip;
 use crate::ui::widgets::text_field::TextFieldView;
 
 use super::App;
-use super::pointer::TextFieldTarget;
 
 impl App {
     pub(super) fn load_progress(&self) -> Option<LoadProgress> {
@@ -120,17 +119,12 @@ impl App {
             },
             flash: self.flash_message(),
             text_field_menu: self.text_context.map(|context| {
-                let has_selection = match context.target {
-                    TextFieldTarget::Address => self.address.selection().is_some(),
-                    TextFieldTarget::Form(node) => active
-                        .text_fields
-                        .get(&node)
-                        .is_some_and(|field| field.selection().is_some()),
-                };
+                let (can_copy, can_cut) = self.text_field_menu_capabilities(context.target);
                 TextFieldMenuView {
                     anchor: context.anchor,
-                    can_copy: has_selection,
-                    can_cut: has_selection,
+                    can_copy,
+                    can_cut,
+                    selected: self.selected_text_field_menu_action(),
                 }
             }),
         }

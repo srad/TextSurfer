@@ -579,9 +579,11 @@ path.
       fresh navigations.
 - [x] **Basic forms** — mixed DOM-order link/control focus; the URL bar, text/password inputs and
       multiline textarea share one ratatui text-field widget with selection, clipboard commands,
-      pointer placement and an opaque context menu painted with the active chrome theme; selection
-      foreground/background come from that theme. A retained field owns and clears its full paint
-      area, so authored placeholder glyphs disappear as soon as the edited value is non-empty; its
+      pointer placement and an opaque context menu painted with the active chrome theme; enabled
+      menu rows follow pointer hover with that theme's selected foreground/background, while
+      disabled rows stay dim, and the popup keeps the normal arrow cursor while hiding the focused
+      field's caret. A retained field owns and clears its full paint area, so authored
+      placeholder glyphs disappear as soon as the edited value is non-empty; its
       end-of-text caret always occupies a visible blank cell rather than covering the last glyph.
       Page-field cursor coordinates include the content frame's left rail, so the widget and native
       caret address the same cell. Text edits repaint only their retained field rows.
