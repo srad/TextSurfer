@@ -6,12 +6,26 @@ pub use scheduler::{EVENTS_PER_FRAME, FRAME_INTERVAL, FrameScheduler};
 
 const MAX_ROW_RANGES: usize = 32;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ChromeDamage {
-    #[default]
-    None,
-    Status,
-    Full,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChromeDamage(u8);
+
+impl ChromeDamage {
+    pub const NONE: Self = Self(0);
+    pub const STATUS: Self = Self(1);
+    pub const TOOLBAR: Self = Self(2);
+    pub const FULL: Self = Self(4);
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn is_full(self) -> bool {
+        self.contains(Self::FULL)
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -79,7 +93,7 @@ pub struct FrameDamage {
 impl FrameDamage {
     pub const fn full() -> Self {
         Self {
-            chrome: ChromeDamage::Full,
+            chrome: ChromeDamage::FULL,
             content: ContentDamage {
                 scroll_rows: 0,
                 repaint: RowDamage::Full,
@@ -89,14 +103,14 @@ impl FrameDamage {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.chrome == ChromeDamage::None
+        self.chrome == ChromeDamage::NONE
             && self.content.scroll_rows == 0
             && self.content.repaint == RowDamage::None
             && !self.content.full
     }
 
     pub fn damage_chrome(&mut self, damage: ChromeDamage) {
-        self.chrome = self.chrome.max(damage);
+        self.chrome.merge(damage);
     }
 
     pub fn scroll(&mut self, rows: i32) {
@@ -118,7 +132,7 @@ impl FrameDamage {
     }
 
     pub fn repaint_all(&mut self) {
-        self.damage_chrome(ChromeDamage::Full);
+        self.damage_chrome(ChromeDamage::FULL);
         self.repaint_content();
     }
 

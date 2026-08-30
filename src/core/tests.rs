@@ -79,14 +79,14 @@ fn frame_damage_preserves_scroll_and_row_repaint() {
     damage.scroll(-1);
     damage.repaint_rows(8..10);
     damage.repaint_rows(9..12);
-    damage.damage_chrome(ChromeDamage::Status);
+    damage.damage_chrome(ChromeDamage::STATUS);
 
     assert_eq!(damage.content.scroll_rows, 3);
     assert_eq!(
         damage.content.repaint,
         RowDamage::Ranges(std::iter::once(8..12).collect())
     );
-    assert_eq!(damage.chrome, ChromeDamage::Status);
+    assert_eq!(damage.chrome, ChromeDamage::STATUS);
     assert!(!damage.is_empty());
 
     damage.repaint_content();

@@ -1,7 +1,9 @@
 use crate::core::geom::{Point, Size};
 use crate::ui::widgets::menu::{popup_item_at, title_at};
 use crate::ui::widgets::tabs::{TabChip, TabSlot, tab_at};
-use crate::ui::widgets::toolbar::{BUTTON_COUNT, BUTTON_PITCH};
+use crate::ui::widgets::toolbar::{
+    EXPANDED_MIN_ROWS, EXPANDED_MIN_WIDTH, ToolbarTarget, layout_toolbar,
+};
 use ratatui::layout::{Position, Rect};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,19 +15,12 @@ pub enum MouseZone {
     Outside,
 }
 
-pub const CHROME_ROWS: u16 = 6;
+pub const COMPACT_CHROME_ROWS: u16 = 6;
+pub const EXPANDED_CHROME_ROWS: u16 = 8;
 
 /// Document rows one wheel notch moves. Frontends size a pixel-delta notch by it, so a
 /// trackpad and a wheel travel the same distance.
 pub const WHEEL_ROWS: i32 = 3;
-
-/// Which `[‹][›][↻][⌂]` button covers a toolbar column, if any. The glyph and its two
-/// brackets are all live, matching what the eye reads as one button.
-fn button_at(col: u16) -> Option<usize> {
-    let offset = col.checked_sub(1)?;
-    let index = offset / BUTTON_PITCH;
-    (index < BUTTON_COUNT && offset % BUTTON_PITCH < 3).then_some(usize::from(index))
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChromeLayout {
@@ -90,25 +85,17 @@ pub struct ContentView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChromeGeometry {
     pub size: Size,
-    pub menu_rows: u16,
-    pub tabs_rows: u16,
-    pub toolbar_rows: u16,
-    pub status_rows: u16,
 }
 
 impl ChromeGeometry {
     pub fn for_size(size: Size) -> Self {
-        Self {
-            size,
-            menu_rows: 1,
-            tabs_rows: 2,
-            toolbar_rows: 2,
-            status_rows: 1,
-        }
+        Self { size }
     }
 
     pub fn content_rows(&self) -> usize {
-        self.size.rows.saturating_sub(CHROME_ROWS) as usize
+        self.layout(Rect::new(0, 0, self.size.cols, self.size.rows))
+            .content
+            .map_or(0, |rect| usize::from(rect.height))
     }
 
     pub fn content_cols(&self) -> usize {
@@ -194,10 +181,10 @@ impl ChromeGeometry {
                 .toolbar
                 .filter(|rect| rect.contains(position))
                 .map_or(ChromeTarget::Inert, |rect| {
-                    let col = at.col - rect.x;
-                    match button_at(col) {
-                        Some(button) => ChromeTarget::ToolbarButton(button),
-                        None => ChromeTarget::Address { col },
+                    match layout_toolbar(rect).target_at(position) {
+                        Some(ToolbarTarget::Button(button)) => ChromeTarget::ToolbarButton(button),
+                        Some(ToolbarTarget::Address { col }) => ChromeTarget::Address { col },
+                        None => ChromeTarget::Inert,
                     }
                 }),
             MouseZone::Content => self
@@ -248,20 +235,36 @@ impl ChromeGeometry {
     pub fn layout(&self, area: Rect) -> ChromeLayout {
         let band =
             |row: u16| (row < area.height).then(|| Rect::new(area.x, area.y + row, area.width, 1));
-        let content_rows = area.height.saturating_sub(CHROME_ROWS);
-        let content =
-            (content_rows > 0).then(|| Rect::new(area.x, area.y + 5, area.width, content_rows));
+        let expanded = area.width >= EXPANDED_MIN_WIDTH && area.height >= EXPANDED_MIN_ROWS;
+        let toolbar_height = if expanded { 3 } else { 1 };
+        let divider_row = 3 + toolbar_height;
+        let content_row = divider_row + 1;
+        let chrome_rows = if expanded {
+            EXPANDED_CHROME_ROWS
+        } else {
+            COMPACT_CHROME_ROWS
+        };
+        let content_rows = area.height.saturating_sub(chrome_rows);
+        let content = (content_rows > 0)
+            .then(|| Rect::new(area.x, area.y + content_row, area.width, content_rows));
         ChromeLayout {
             menu: band(0),
             tabs: band(1),
             tab_divider: band(2),
-            toolbar: band(3),
-            toolbar_divider: band(4),
+            toolbar: (3 < area.height).then(|| {
+                Rect::new(
+                    area.x,
+                    area.y + 3,
+                    area.width,
+                    toolbar_height.min(area.height - 3),
+                )
+            }),
+            toolbar_divider: band(divider_row),
             content,
             scrollbar: content
                 .filter(|rect| rect.width >= 2)
                 .map(|rect| Rect::new(rect.right() - 1, rect.y, 1, rect.height)),
-            status: (area.height >= CHROME_ROWS)
+            status: (area.height >= chrome_rows)
                 .then(|| Rect::new(area.x, area.bottom() - 1, area.width, 1)),
         }
     }
@@ -283,8 +286,9 @@ mod tests {
         assert_eq!(g.zone_at(Point { col: 5, row: 2 }), MouseZone::Tabs);
         assert_eq!(g.zone_at(Point { col: 5, row: 3 }), MouseZone::Address);
         assert_eq!(g.zone_at(Point { col: 5, row: 4 }), MouseZone::Address);
-        assert_eq!(g.zone_at(Point { col: 5, row: 5 }), MouseZone::Content);
-        assert_eq!(g.zone_at(Point { col: 5, row: 6 }), MouseZone::Content);
+        assert_eq!(g.zone_at(Point { col: 5, row: 5 }), MouseZone::Address);
+        assert_eq!(g.zone_at(Point { col: 5, row: 6 }), MouseZone::Address);
+        assert_eq!(g.zone_at(Point { col: 5, row: 7 }), MouseZone::Content);
         assert_eq!(g.zone_at(Point { col: 5, row: 23 }), MouseZone::Outside);
     }
 
@@ -321,19 +325,19 @@ mod tests {
     }
 
     #[test]
-    fn the_toolbar_row_splits_into_buttons_and_the_field() {
-        for (col, button) in [(1, 0), (3, 0), (5, 1), (13, 3)] {
-            assert_eq!(
-                target(Point { col, row: 3 }, None),
-                ChromeTarget::ToolbarButton(button),
-                "column {col}",
-            );
+    fn the_toolbar_rows_split_into_buttons_and_the_field() {
+        for (col, button) in [(2, 0), (6, 0), (8, 1), (24, 3)] {
+            for row in 3..=5 {
+                assert_eq!(
+                    target(Point { col, row }, None),
+                    ChromeTarget::ToolbarButton(button),
+                    "cell {col},{row}",
+                );
+            }
         }
-        // The gap between two brackets belongs to neither button.
-        assert_eq!(
-            target(Point { col: 4, row: 3 }, None),
-            ChromeTarget::Address { col: 4 }
-        );
+        assert_eq!(target(Point { col: 7, row: 3 }, None), ChromeTarget::Inert);
+        assert_eq!(target(Point { col: 1, row: 4 }, None), ChromeTarget::Inert);
+        assert_eq!(target(Point { col: 78, row: 4 }, None), ChromeTarget::Inert);
         assert_eq!(
             target(Point { col: 30, row: 3 }, None),
             ChromeTarget::Address { col: 30 }
@@ -343,30 +347,30 @@ mod tests {
     #[test]
     fn divider_rows_carry_no_target() {
         assert_eq!(target(Point { col: 5, row: 2 }, None), ChromeTarget::Inert);
-        assert_eq!(target(Point { col: 5, row: 4 }, None), ChromeTarget::Inert);
+        assert_eq!(target(Point { col: 5, row: 6 }, None), ChromeTarget::Inert);
     }
 
     #[test]
     fn content_cells_are_reported_relative_to_the_view() {
         assert_eq!(
-            target(Point { col: 1, row: 5 }, None),
+            target(Point { col: 1, row: 7 }, None),
             ChromeTarget::Content { col: 0, row: 0 }
         );
         assert_eq!(
             target(Point { col: 78, row: 22 }, None),
-            ChromeTarget::Content { col: 77, row: 17 }
+            ChromeTarget::Content { col: 77, row: 15 }
         );
         // The left rail is not the document, and the right one is the scrollbar.
-        assert_eq!(target(Point { col: 0, row: 5 }, None), ChromeTarget::Inert);
+        assert_eq!(target(Point { col: 0, row: 7 }, None), ChromeTarget::Inert);
         assert_eq!(
-            target(Point { col: 79, row: 5 }, None),
+            target(Point { col: 79, row: 7 }, None),
             ChromeTarget::Scrollbar { row: 0 }
         );
     }
 
     #[test]
     fn the_scrollbar_owns_the_right_hand_column_of_the_content_band() {
-        for (row, expected) in [(5u16, 0u16), (22, 17)] {
+        for (row, expected) in [(7u16, 0u16), (22, 15)] {
             assert_eq!(
                 target(Point { col: 79, row }, None),
                 ChromeTarget::Scrollbar { row: expected },
@@ -375,7 +379,7 @@ mod tests {
         }
         // Above and below the band it is chrome, not bar.
         assert_ne!(
-            target(Point { col: 79, row: 4 }, None),
+            target(Point { col: 79, row: 6 }, None),
             ChromeTarget::Scrollbar { row: 0 }
         );
         assert_eq!(
@@ -389,7 +393,7 @@ mod tests {
         // The popup is anchored under its title and never reaches the right edge, so
         // the bar stays live while a menu is open.
         assert_eq!(
-            target(Point { col: 79, row: 5 }, Some(0)),
+            target(Point { col: 79, row: 7 }, Some(0)),
             ChromeTarget::Scrollbar { row: 0 }
         );
     }
@@ -434,11 +438,10 @@ mod tests {
 
     #[test]
     fn an_open_dropdown_wins_over_the_rows_it_covers() {
-        // Row 5 is content until the File menu is open over it, and the popup's own
-        // bottom border on row 6 is not an item.
+        // Row 5 is toolbar until the File menu opens over it; its bottom border is inert.
         assert_eq!(
             target(Point { col: 3, row: 5 }, None),
-            ChromeTarget::Content { col: 2, row: 0 }
+            ChromeTarget::ToolbarButton(0)
         );
         assert_eq!(
             target(Point { col: 3, row: 5 }, Some(0)),
@@ -446,7 +449,7 @@ mod tests {
         );
         assert_eq!(
             target(Point { col: 3, row: 6 }, Some(0)),
-            ChromeTarget::Content { col: 2, row: 1 }
+            ChromeTarget::Inert
         );
         assert_eq!(
             target(Point { col: 3, row: 0 }, Some(0)),
@@ -457,7 +460,7 @@ mod tests {
     #[test]
     fn content_rows_track_the_chrome_height() {
         let g = geometry();
-        assert_eq!(g.content_rows(), 18);
+        assert_eq!(g.content_rows(), 16);
         let small = ChromeGeometry::for_size(Size { cols: 40, rows: 8 });
         assert_eq!(small.content_rows(), 2);
         let tiny = ChromeGeometry::for_size(Size { cols: 40, rows: 2 });
@@ -465,11 +468,24 @@ mod tests {
     }
 
     #[test]
+    fn expanded_toolbar_requires_both_width_and_height() {
+        let narrow = ChromeGeometry::for_size(Size { cols: 46, rows: 9 });
+        let short = ChromeGeometry::for_size(Size { cols: 47, rows: 8 });
+        let expanded = ChromeGeometry::for_size(Size { cols: 47, rows: 9 });
+        let narrow_area = Rect::new(0, 0, narrow.size.cols, narrow.size.rows);
+        let short_area = Rect::new(0, 0, short.size.cols, short.size.rows);
+        let expanded_area = Rect::new(0, 0, expanded.size.cols, expanded.size.rows);
+        assert_eq!(narrow.layout(narrow_area).toolbar.unwrap().height, 1);
+        assert_eq!(short.layout(short_area).toolbar.unwrap().height, 1);
+        assert_eq!(expanded.layout(expanded_area).toolbar.unwrap().height, 3);
+    }
+
+    #[test]
     fn the_content_view_is_the_cells_the_content_widget_writes() {
         let view = geometry().content_view().expect("a content view");
-        assert_eq!(view.origin, Point { col: 1, row: 5 });
+        assert_eq!(view.origin, Point { col: 1, row: 7 });
         assert_eq!(view.cols, 78);
-        assert_eq!(view.rows, 18);
+        assert_eq!(view.rows, 16);
         assert_eq!(usize::from(view.cols), geometry().content_cols());
         assert_eq!(usize::from(view.rows), geometry().content_rows());
     }

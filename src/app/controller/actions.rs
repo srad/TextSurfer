@@ -202,7 +202,7 @@ impl App {
     }
 
     pub(super) fn touch_status(&mut self) {
-        self.damage.damage_chrome(ChromeDamage::Status);
+        self.damage.damage_chrome(ChromeDamage::STATUS);
     }
 }
 

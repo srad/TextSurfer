@@ -5,10 +5,11 @@ use crate::core::frame::{ChromeDamage, RowDamage};
 use crate::core::geom::Point;
 use crate::ui::mouse::WHEEL_ROWS;
 use crate::ui::widgets::menu::popup_rect;
-use crate::ui::widgets::toolbar::FIELD_TEXT;
 
 /// The default geometry's content origin, where document cell `(0, scroll)` is painted.
-const ORIGIN: Point = Point { col: 1, row: 5 };
+const ORIGIN: Point = Point { col: 1, row: 7 };
+const ADDRESS_TEXT: u16 = 28;
+const ADDRESS_ROW: u16 = 4;
 
 /// The loaded fixture's URL, as the fetch's `final_url` normalises it.
 const PAGE: &str = "https://a.example/";
@@ -45,7 +46,7 @@ fn wheel(rows: i32, at: Point) -> MouseEvent {
     }
 }
 
-/// A document taller than the default 18-row viewport, so scrolling has somewhere to go.
+/// A document taller than the default 16-row viewport, so scrolling has somewhere to go.
 fn tall_page() -> String {
     let mut html = String::from("<a href='/next'>go</a>");
     for line in 0..40 {
@@ -188,7 +189,7 @@ fn a_wheel_batch_keeps_an_incremental_scroll_and_never_forces_a_full_repaint() {
         "a wheel notch must stay an incremental scroll"
     );
     assert_eq!(damage.content.repaint, RowDamage::None);
-    assert_eq!(damage.chrome, ChromeDamage::None);
+    assert_eq!(damage.chrome, ChromeDamage::NONE);
 }
 
 /// The screen cell holding row `row` of the page scrollbar.
@@ -387,12 +388,12 @@ fn the_toolbar_buttons_do_what_their_keys_do() {
     let mut app = loaded("<p>hi</p>");
     app.submit_url("https://b.example");
     app.step(Duration::ZERO);
-    // `[‹]` occupies columns 1..=3 of the toolbar row.
+    // The framed back button occupies columns 2..=6 across all three toolbar rows.
     app.handle_mouse(press(MouseButton::Left, at(2, 3)));
     app.step(Duration::ZERO);
     assert_eq!(app.active_url(), PAGE);
     // `[⌂]` is the fourth button.
-    app.handle_mouse(press(MouseButton::Left, at(14, 3)));
+    app.handle_mouse(press(MouseButton::Left, at(21, 5)));
     assert_eq!(app.active_url(), "about:blank");
 }
 
@@ -404,11 +405,35 @@ fn a_dimmed_arrow_says_what_the_key_says() {
 }
 
 #[test]
+fn toolbar_hover_repaints_only_when_the_enabled_button_changes() {
+    let mut app = App::new();
+    app.take_damage();
+
+    app.handle_mouse(moved(at(15, 4)));
+    assert_eq!(app.chrome_view().hovered_button, Some(2));
+    let damage = app.take_damage();
+    assert!(damage.chrome.contains(ChromeDamage::TOOLBAR));
+    assert!(!damage.content.full);
+    assert_eq!(damage.content.repaint, RowDamage::None);
+
+    app.handle_mouse(moved(at(16, 5)));
+    assert!(app.take_damage().is_empty());
+
+    app.handle_mouse(moved(at(21, 4)));
+    assert_eq!(app.chrome_view().hovered_button, Some(3));
+    assert!(app.take_damage().chrome.contains(ChromeDamage::TOOLBAR));
+
+    app.pointer_left();
+    assert_eq!(app.chrome_view().hovered_button, None);
+    assert!(app.take_damage().chrome.contains(ChromeDamage::TOOLBAR));
+}
+
+#[test]
 fn clicking_the_address_field_focuses_it_and_places_the_caret() {
     let mut app = loaded("<p>hi</p>");
     app.handle_mouse(press(MouseButton::Left, at(ORIGIN.col, ORIGIN.row)));
     assert_eq!(app.focus(), Focus::Content);
-    app.handle_mouse(press(MouseButton::Left, at(FIELD_TEXT + 5, 3)));
+    app.handle_mouse(press(MouseButton::Left, at(ADDRESS_TEXT + 5, ADDRESS_ROW)));
     assert_eq!(app.focus(), Focus::Address);
     assert_eq!(app.address.text(), PAGE);
     assert_eq!(app.address.cursor(), 5);
@@ -420,7 +445,7 @@ fn clicking_the_field_while_typing_keeps_the_edit() {
     for ch in "example.com".chars() {
         app.handle_key(super::press(Key::Char(ch)));
     }
-    app.handle_mouse(press(MouseButton::Left, at(FIELD_TEXT + 3, 3)));
+    app.handle_mouse(press(MouseButton::Left, at(ADDRESS_TEXT + 3, ADDRESS_ROW)));
     assert_eq!(app.focus(), Focus::Address);
     assert_eq!(app.address.text(), "example.com");
     assert_eq!(app.address.cursor(), 3);
@@ -432,9 +457,12 @@ fn dragging_selects_address_text_and_the_context_menu_uses_that_selection() {
     for ch in "example.com".chars() {
         app.handle_key(super::press(Key::Char(ch)));
     }
-    app.handle_mouse(press(MouseButton::Left, at(FIELD_TEXT + 1, 3)));
-    app.handle_mouse(moved(at(FIELD_TEXT + 4, 3)));
-    app.handle_mouse(release(MouseButton::Left, at(FIELD_TEXT + 4, 3)));
+    app.handle_mouse(press(MouseButton::Left, at(ADDRESS_TEXT + 1, ADDRESS_ROW)));
+    app.handle_mouse(moved(at(ADDRESS_TEXT + 4, ADDRESS_ROW)));
+    app.handle_mouse(release(
+        MouseButton::Left,
+        at(ADDRESS_TEXT + 4, ADDRESS_ROW),
+    ));
     assert_eq!(app.address.selection(), Some(1..4));
 
     let chrome = app.chrome_view();
@@ -445,12 +473,21 @@ fn dragging_selects_address_text_and_the_context_menu_uses_that_selection() {
         .draw(|frame| crate::ui::chrome::draw(frame, &chrome))
         .unwrap();
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(FIELD_TEXT + 1, 3)].fg, selected.fg.unwrap());
-    assert_eq!(buffer[(FIELD_TEXT + 1, 3)].bg, selected.bg.unwrap());
-    assert_ne!(buffer[(FIELD_TEXT, 3)].bg, selected.bg.unwrap());
-    assert_ne!(buffer[(FIELD_TEXT + 4, 3)].bg, selected.bg.unwrap());
+    assert_eq!(
+        buffer[(ADDRESS_TEXT + 1, ADDRESS_ROW)].fg,
+        selected.fg.unwrap()
+    );
+    assert_eq!(
+        buffer[(ADDRESS_TEXT + 1, ADDRESS_ROW)].bg,
+        selected.bg.unwrap()
+    );
+    assert_ne!(buffer[(ADDRESS_TEXT, ADDRESS_ROW)].bg, selected.bg.unwrap());
+    assert_ne!(
+        buffer[(ADDRESS_TEXT + 4, ADDRESS_ROW)].bg,
+        selected.bg.unwrap()
+    );
 
-    app.handle_mouse(press(MouseButton::Right, at(FIELD_TEXT + 2, 3)));
+    app.handle_mouse(press(MouseButton::Right, at(ADDRESS_TEXT + 2, ADDRESS_ROW)));
     let context = app.chrome_view().text_field_menu.expect("a context menu");
     let rect = crate::ui::widgets::text_field::menu_rect(
         ratatui::layout::Rect::new(0, 0, 80, 24),

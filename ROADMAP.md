@@ -94,8 +94,8 @@ with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green run (2026-08-30): **929 total** (926 passing, 3 ignored) with the
-default VGA frontend and **821** (819 passing, 2 ignored) with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
+Test counts at the last green default run (2026-08-31): **935 total** (932 passing, 3 ignored).
+The last `--no-default-features` run remains **821** (819 passing, 2 ignored) from 2026-08-30. The WPT target contributes 7 tests (6 passing and 1 ignored;
 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -375,9 +375,10 @@ passes only.
 
 ### M1.5 — Chrome redesign (complete)
 `ui::theme` with a zero-literal rule and five session-selectable palettes; full-width menu bar with
-`Alt+F/N/V/H` dropdowns; raised NC-style tab strip with an aligned active divider; `[‹][›][↻][⌂]`
-toolbar wired to per-tab history plus a bordered `URL:` field; context bar; `CHROME_ROWS = 6` with
-`MouseZone` mapping Menu 0 / Tabs 1–2 / Address 3–4 / Content 5+.
+`Alt+F/N/V/H` dropdowns; raised NC-style tab strip with an aligned active divider; three-row framed
+navigation buttons wired to per-tab history; a framed `URL:` field; one-cell outer toolbar padding;
+themed enabled-button hover; context bar. The one-row compact layout remains below 47 columns or
+nine rows. Drawing, hit-testing and URL editing share one geometry, and hover repaints only chrome.
 
 ### M1-B — Style, layout, paint (done — smoke pending)
 cssparser 0.37 + selectors 0.40 adapters with specificity and structural matching; the first
@@ -610,7 +611,7 @@ path.
       four quit paths call `Navigate::shutdown`, which detaches instead of joining. The VGA window
       close path enters an irreversible closing state, releases frontend resources and performs no
       later app ticks before the event loop returns.
-- [x] Designed start page — `about:blank` is a viewport-aware half-block scene with an exact 78×18
+- [x] Designed start page — `about:blank` is a viewport-aware half-block scene with an exact 78×16
       default canvas that scales and centers with the content viewport. It deliberately carries no
       instructional copy; the help overlay owns the keymap reference.
 - [x] Page screenshots — `F12` writes the rendered page, not the screen: every painted row, no

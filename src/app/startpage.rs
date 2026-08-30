@@ -52,7 +52,7 @@ const START_PAGE_PIXELS: [&str; 36] = [
 ];
 
 pub fn start_page() -> DisplayList {
-    start_page_for(Size { cols: 78, rows: 18 })
+    start_page_for(Size { cols: 78, rows: 16 })
 }
 
 pub fn start_page_for(viewport: Size) -> DisplayList {
@@ -274,7 +274,7 @@ mod tests {
     fn start_page_is_the_exact_colored_default_terminal_canvas() {
         let page = start_page();
 
-        assert_eq!(page.rows.len(), 18);
+        assert_eq!(page.rows.len(), 16);
         assert!(
             page.text_lines()
                 .iter()
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn start_page_renders_inside_the_default_content_frame() {
         let page = start_page();
-        let backend = TestBackend::new(80, 18);
+        let backend = TestBackend::new(80, 16);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {

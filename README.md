@@ -25,7 +25,9 @@ implementations are replaceable and testable in isolation.
  File  Navigate  View  Help                 TextSurfer
 │┌ example.com [■]┐                                  │
 │┘                └──────────────────────────────────┤
-│[‹] [›] [↻] [⌂]  URL: │https://example.com          │
+│ ┌───┐ ┌───┐ ┌───┐ ┌───┐  ┌─ URL ─────────────────┐ │
+│ │ ‹ │ │ › │ │ ↻ │ │ ⌂ │  │https://example.com    │ │
+│ └───┘ └───┘ └───┘ └───┘  └───────────────────────┘ │
 ├────────────────────────────────────────────────────┤
 │Example Domain                                      ▲
 │                                                    █
@@ -87,9 +89,10 @@ Ready                              https://example.com
 
 **Chrome and interaction**
 
-- DOS/QBasic menu bar, raised tab strip with Turbo Vision `[■]` close boxes, navigation toolbar,
-  shared grapheme-safe text-field widget for the address and page forms, and a page scrollbar whose
-  caps step, trough pages and thumb drags
+- DOS/QBasic menu bar, raised tab strip with Turbo Vision `[■]` close boxes, three-row framed
+  navigation buttons with hover feedback, and a framed address field. Narrow or short windows use
+  the compact one-row toolbar; the address and page forms share one grapheme-safe text-field widget
+- A page scrollbar whose caps step, trough pages and thumb drags
 - Five session-scoped retro colour schemes in the View menu: Turbo Vision, Norton, Amber CRT, Green
   Phosphor and Paper White (which also exposes a light `prefers-color-scheme` to CSS)
 - Mouse navigation in both frontends: links activate on release over the press target, middle-click

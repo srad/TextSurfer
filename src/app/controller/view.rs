@@ -98,6 +98,7 @@ impl App {
             theme_index: self.theme_index(),
             can_back: active.history_pos > 0,
             can_forward: active.history_pos + 1 < active.history.len(),
+            hovered_button: self.hovered_toolbar_button(),
             address,
             address_focused: self.focus == Focus::Address,
             content_cursor: self.content_cursor(),

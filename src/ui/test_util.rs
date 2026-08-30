@@ -24,6 +24,7 @@ pub fn draft_view() -> ChromeView<'static> {
         theme_index: DEFAULT_THEME_INDEX,
         can_back: false,
         can_forward: false,
+        hovered_button: None,
         address: crate::ui::widgets::text_field::TextFieldView::display("https://example.com"),
         address_focused: false,
         content_cursor: None,

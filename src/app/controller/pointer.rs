@@ -4,6 +4,7 @@ use crate::core::dom::{Node, NodeId, attr_value};
 use crate::core::event::{MouseButton, MouseEvent, MouseKind};
 use crate::core::focus::Focus;
 use crate::core::form::{ControlKind, control_kind};
+use crate::core::frame::ChromeDamage;
 use crate::core::geom::Point;
 use crate::ui::chrome::address_index_at;
 use crate::ui::keymap::Action;
@@ -48,6 +49,7 @@ pub(super) struct TextFieldContext {
 
 impl App {
     pub fn handle_mouse(&mut self, event: MouseEvent) {
+        let previous_toolbar = self.hovered_toolbar_button();
         if let Some(context) = self.text_context
             && matches!(event.kind, MouseKind::Press(MouseButton::Left))
         {
@@ -95,6 +97,7 @@ impl App {
             MouseKind::Release(button) => self.release(target, button),
         }
         let painted_changed = self.sync_dynamic_state();
+        self.damage_toolbar_hover(previous_toolbar);
         if painted_changed {
             self.touch();
         } else if previous_href.as_deref() != self.hovered_href() {
@@ -107,6 +110,33 @@ impl App {
         self.hover
             .as_ref()
             .is_some_and(|hover| hover.href.is_some())
+    }
+
+    pub(super) fn hovered_toolbar_button(&self) -> Option<usize> {
+        if self.menu_open
+            || self.text_context.is_some()
+            || self.text_drag.is_some()
+            || self.scroll_drag.is_some()
+        {
+            return None;
+        }
+        let at = self.pointer?;
+        let ChromeTarget::ToolbarButton(button) = self.target_at(at) else {
+            return None;
+        };
+        match button {
+            0 => (self.tabs.active().history_pos > 0).then_some(button),
+            1 => (self.tabs.active().history_pos + 1 < self.tabs.active().history.len())
+                .then_some(button),
+            2 | 3 => Some(button),
+            _ => None,
+        }
+    }
+
+    fn damage_toolbar_hover(&mut self, previous: Option<usize>) {
+        if previous != self.hovered_toolbar_button() {
+            self.damage.damage_chrome(ChromeDamage::TOOLBAR);
+        }
     }
 
     pub(super) fn hovered_href(&self) -> Option<&str> {
@@ -135,12 +165,14 @@ impl App {
     /// A thumb drag ends here too. Nothing captures the pointer, so a button released
     /// outside the window is never reported to us and the drag would otherwise stick.
     pub fn pointer_left(&mut self) {
+        let previous_toolbar = self.hovered_toolbar_button();
         let had_href = self.hovered_href().is_some();
         self.pointer = None;
         self.pressed = None;
         self.scroll_drag = None;
         self.text_drag = None;
         self.hover = None;
+        self.damage_toolbar_hover(previous_toolbar);
         let painted_changed = self.sync_dynamic_state();
         if painted_changed {
             self.touch();
@@ -255,7 +287,7 @@ impl App {
             ChromeTarget::Address { col } => {
                 let index = address_index_at(
                     crate::ui::widgets::text_field::TextFieldView::new(&self.address),
-                    self.geometry.size.cols,
+                    self.geometry,
                     col,
                 );
                 let keep_selection = self.focus == Focus::Address
@@ -331,7 +363,7 @@ impl App {
             TextFieldTarget::Address => {
                 let index = address_index_at(
                     crate::ui::widgets::text_field::TextFieldView::new(&self.address),
-                    self.geometry.size.cols,
+                    self.geometry,
                     at.col,
                 );
                 self.address.set_cursor(index, true);
@@ -515,7 +547,7 @@ impl App {
         }
         let index = address_index_at(
             crate::ui::widgets::text_field::TextFieldView::new(&self.address),
-            self.geometry.size.cols,
+            self.geometry,
             col,
         );
         self.address.set_cursor(index, false);

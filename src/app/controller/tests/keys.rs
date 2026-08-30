@@ -83,9 +83,9 @@ fn scroll_clamps_to_the_content_window() {
     let mut app = App::new();
     app.handle_key(press(Key::Esc));
     app.on_resize(Size { cols: 80, rows: 9 });
-    assert_eq!(app.geometry.content_rows(), 3);
+    assert_eq!(app.geometry.content_rows(), 1);
     app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 10]).into();
-    let max = app.tabs.active().painted.len().saturating_sub(3);
+    let max = app.tabs.active().painted.len().saturating_sub(1);
     for _ in 0..10 {
         app.handle_key(press(Key::Char('j')));
     }
@@ -171,7 +171,10 @@ fn resize_refits_the_start_page_to_the_content_viewport() {
         cols: 158,
         rows: 42,
     });
-    assert_eq!(app.tabs.active().painted.rows.len(), 36);
+    assert_eq!(
+        app.tabs.active().painted.rows.len(),
+        app.geometry.content_rows()
+    );
     assert!(
         app.tabs
             .active()
@@ -188,7 +191,10 @@ fn long_documents_scroll_past_u16_max_without_wrapping() {
     app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 70_000]).into();
     app.handle_key(press(Key::Esc));
     app.handle_key(press(Key::End));
-    assert_eq!(app.tabs.active().scroll, 69_982);
+    assert_eq!(
+        app.tabs.active().scroll,
+        70_000 - app.geometry.content_rows()
+    );
 }
 
 #[test]

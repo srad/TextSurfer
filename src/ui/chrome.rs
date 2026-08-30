@@ -17,7 +17,7 @@ use crate::ui::widgets::status::{StatusBar, StatusView};
 use crate::ui::widgets::tabs::{TabBar, TabChip, active_span};
 use crate::ui::widgets::text_field::TextFieldView;
 use crate::ui::widgets::text_field::{TextFieldMenu, menu_rect};
-use crate::ui::widgets::toolbar::{FIELD_TEXT, Toolbar};
+use crate::ui::widgets::toolbar::{Toolbar, layout_toolbar};
 
 pub struct ChromeView<'a> {
     pub geometry: ChromeGeometry,
@@ -25,6 +25,7 @@ pub struct ChromeView<'a> {
     pub theme_index: usize,
     pub can_back: bool,
     pub can_forward: bool,
+    pub hovered_button: Option<usize>,
     pub address: TextFieldView<'a>,
     pub address_focused: bool,
     pub content_cursor: Option<(usize, usize)>,
@@ -126,6 +127,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
             focused: view.address_focused,
             back_enabled: view.can_back,
             forward_enabled: view.can_forward,
+            hovered_button: view.hovered_button,
             theme: &view.theme,
         }
         .render(rect, buffer);
@@ -177,7 +179,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
     if view.address_focused
         && let Some(toolbar) = layout.toolbar
     {
-        return Some(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
+        return address_cursor_position(view, toolbar);
     }
     page_cursor_position(view, area)
 }
@@ -196,6 +198,21 @@ pub fn compose_status(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) ->
     clear_rect(buffer, rect, Style::default().bg(view.theme.bar_bg));
     StatusBar {
         view: &view.status,
+        theme: &view.theme,
+    }
+    .render(rect, buffer);
+    Some(rect)
+}
+
+pub fn compose_toolbar(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    let rect = view.geometry.layout(area).toolbar?;
+    clear_rect(buffer, rect, Style::default().bg(view.theme.bg));
+    Toolbar {
+        address: view.address,
+        focused: view.address_focused,
+        back_enabled: view.can_back,
+        forward_enabled: view.can_forward,
+        hovered_button: view.hovered_button,
         theme: &view.theme,
     }
     .render(rect, buffer);
@@ -228,7 +245,7 @@ pub fn cursor_position(view: &ChromeView<'_>, area: Rect) -> Option<Position> {
     if view.address_focused
         && let Some(toolbar) = view.geometry.layout(area).toolbar
     {
-        return Some(Position::new(address_cursor_cell(view, toolbar), toolbar.y));
+        return address_cursor_position(view, toolbar);
     }
     page_cursor_position(view, area)
 }
@@ -328,28 +345,27 @@ fn buf_set_string(buffer: &mut Buffer, rect: Rect, col: u16, text: &str, style: 
 ///
 /// The inverse of [`address_cursor_cell`]: it walks the same widths and stops at the same
 /// visible budget, so clicking a caret's own cell puts the caret back where it was.
-pub fn address_index_at(address: TextFieldView<'_>, toolbar_width: u16, col: u16) -> usize {
-    address.index_at(
-        Rect::new(
-            FIELD_TEXT,
-            0,
-            toolbar_width.saturating_sub(FIELD_TEXT + 1),
-            1,
-        ),
-        col,
-        0,
-    )
+pub fn address_index_at(address: TextFieldView<'_>, geometry: ChromeGeometry, col: u16) -> usize {
+    let area = Rect::new(0, 0, geometry.size.cols, geometry.size.rows);
+    let Some(text) = geometry
+        .layout(area)
+        .toolbar
+        .and_then(|toolbar| layout_toolbar(toolbar).address_text)
+    else {
+        return 0;
+    };
+    address.index_at(text, col, text.y)
 }
 
-fn address_cursor_cell(view: &ChromeView<'_>, toolbar: Rect) -> u16 {
-    view.address
-        .cursor_in(Rect::new(
-            toolbar.x + FIELD_TEXT,
-            toolbar.y,
-            toolbar.width.saturating_sub(FIELD_TEXT + 1),
-            1,
-        ))
-        .map_or(toolbar.x + FIELD_TEXT, |(col, _)| col)
+fn address_cursor_position(view: &ChromeView<'_>, toolbar: Rect) -> Option<Position> {
+    let text = layout_toolbar(toolbar).address_text?;
+    Some(
+        view.address
+            .cursor_in(text)
+            .map_or(Position::new(text.x, text.y), |(col, row)| {
+                Position::new(col, row)
+            }),
+    )
 }
 
 #[cfg(test)]
@@ -393,13 +409,13 @@ mod tests {
     fn a_flash_notice_sits_in_front_of_the_page() {
         let mut view = draft();
         view.flash = Some("saved screenshots/x.png");
-        insta::assert_snapshot!(render(&view, Size { cols: 60, rows: 10 }));
+        insta::assert_snapshot!(render(&view, Size { cols: 60, rows: 12 }));
     }
 
     #[test]
     fn a_flash_notice_is_an_occlusion_so_overlays_stay_off_it() {
         let mut view = draft();
-        let area = Rect::new(0, 0, 60, 10);
+        let area = Rect::new(0, 0, 60, 12);
         assert!(occlusion_rects(&view, area).is_empty());
 
         view.flash = Some("saved screenshots/x.png");
@@ -418,7 +434,7 @@ mod tests {
     #[test]
     fn the_content_rect_starts_where_the_first_document_cell_is_painted() {
         let view = draft();
-        let size = Size { cols: 60, rows: 10 };
+        let size = Size { cols: 60, rows: 12 };
         let backend = TestBackend::new(size.cols, size.rows);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
@@ -437,7 +453,7 @@ mod tests {
     #[test]
     fn the_content_rect_ends_on_the_last_row_the_widget_draws() {
         let view = draft();
-        let size = Size { cols: 60, rows: 10 };
+        let size = Size { cols: 60, rows: 12 };
         let backend = TestBackend::new(size.cols, size.rows);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
@@ -515,7 +531,7 @@ mod tests {
         view.address = TextFieldView::new(&address);
         view.address_focused = true;
         terminal.draw(|frame| draw(frame, &view)).unwrap();
-        assert_eq!(terminal.backend().cursor_position(), Position::new(43, 3));
+        assert_eq!(terminal.backend().cursor_position(), Position::new(47, 4));
     }
 
     #[test]

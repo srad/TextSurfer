@@ -5,7 +5,7 @@ use crate::core::frame::RowDamage;
 use crate::core::geom::Point;
 use crate::core::style::{Cursor, Rgb};
 
-const ORIGIN: Point = Point { col: 1, row: 5 };
+const ORIGIN: Point = Point { col: 1, row: 7 };
 
 struct DeferredCssNet {
     html: Vec<u8>,
@@ -275,7 +275,7 @@ fn chrome_focus_hides_and_restores_retained_dom_focus() {
     assert!(app.tabs.active().styles.as_ref().unwrap().get(link).bold);
     app.handle_mouse(event(
         MouseKind::Press(MouseButton::Left),
-        Point { col: 20, row: 3 },
+        Point { col: 30, row: 4 },
     ));
     assert!(!app.tabs.active().styles.as_ref().unwrap().get(link).bold);
     app.handle_key(press(Key::Esc));

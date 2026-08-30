@@ -15,7 +15,7 @@ use crate::core::frame::{ChromeDamage, FrameDamage, RowDamage};
 
 use super::chrome::{
     ChromeView, compose, compose_content_rows, compose_flash, compose_scrollbar, compose_status,
-    content_rect, cursor_position,
+    compose_toolbar, content_rect, cursor_position,
 };
 
 pub struct FrameComposer {
@@ -256,7 +256,12 @@ impl FrameComposer {
             if content_changed && let Some(rect) = compose_flash(&mut self.current, view, area) {
                 regions.push(rect);
             }
-            if damage.chrome == ChromeDamage::Status
+            if damage.chrome.contains(ChromeDamage::TOOLBAR)
+                && let Some(rect) = compose_toolbar(&mut self.current, view, area)
+            {
+                regions.push(rect);
+            }
+            if damage.chrome.contains(ChromeDamage::STATUS)
                 && let Some(rect) = compose_status(&mut self.current, view, area)
             {
                 regions.push(rect);
@@ -583,7 +588,7 @@ trait FullDamage {
 
 impl FullDamage for FrameDamage {
     fn full(&self) -> bool {
-        matches!(self.chrome, crate::core::frame::ChromeDamage::Full)
+        self.chrome.is_full()
     }
 }
 
@@ -729,11 +734,30 @@ mod tests {
             .present(&mut backend, &view, &FrameDamage::full())
             .unwrap();
         let mut damage = FrameDamage::default();
-        damage.damage_chrome(crate::core::frame::ChromeDamage::Status);
+        damage.damage_chrome(crate::core::frame::ChromeDamage::STATUS);
         composer.present(&mut backend, &view, &damage).unwrap();
         assert_eq!(
             composer.last_drawn_cells(),
             usize::from(view.geometry.size.cols)
+        );
+    }
+
+    #[test]
+    fn toolbar_and_status_damage_draw_only_their_four_rows() {
+        let area = Rect::new(0, 0, 80, 24);
+        let view = draft_view();
+        let mut backend = TestBackend::new(area.width, area.height);
+        let mut composer = FrameComposer::new(area);
+        composer
+            .present(&mut backend, &view, &FrameDamage::full())
+            .unwrap();
+        let mut damage = FrameDamage::default();
+        damage.damage_chrome(crate::core::frame::ChromeDamage::TOOLBAR);
+        damage.damage_chrome(crate::core::frame::ChromeDamage::STATUS);
+        composer.present(&mut backend, &view, &damage).unwrap();
+        assert_eq!(
+            composer.last_drawn_cells(),
+            usize::from(view.geometry.size.cols) * 4
         );
     }
 
@@ -815,7 +839,7 @@ mod tests {
         damage.scroll(1);
         composer.present(&mut backend, &view, &damage).unwrap();
         assert_eq!(composer.image_protocols.len(), 1);
-        assert_eq!(backend.buffer()[(1, 5)].symbol(), "▀");
+        assert_eq!(backend.buffer()[(1, 7)].symbol(), "▀");
     }
 
     /// A graphics protocol carries the whole picture in one cell's escape sequence and marks the

@@ -2,4 +2,6 @@
 source: src/ui/widgets/toolbar.rs
 expression: "render(\"https://example.com\", false, true, true, 60)"
 ---
-│[‹] [›] [↻] [⌂]  URL: │https://example.com                │
+│ ┌───┐ ┌───┐ ┌───┐ ┌───┐  ┌─ URL ───────────────────────┐ │
+│ │ ‹ │ │ › │ │ ↻ │ │ ⌂ │  │https://example.com          │ │
+│ └───┘ └───┘ └───┘ └───┘  └─────────────────────────────┘ │

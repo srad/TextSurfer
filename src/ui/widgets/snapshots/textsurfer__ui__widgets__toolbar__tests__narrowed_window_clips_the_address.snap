@@ -2,4 +2,4 @@
 source: src/ui/widgets/toolbar.rs
 expression: "render(\"https://example.com/very/long/path\", false, true, true, 40)"
 ---
-│[‹] [›] [↻] [⌂]  URL: │https://example│
+│ [‹] [›] [↻] [⌂]  URL: │https://exam│ │
