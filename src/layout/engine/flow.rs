@@ -133,6 +133,14 @@ impl Atom for InlineAtomSource {
         }
     }
 
+    fn minimum_width(&self) -> usize {
+        match self {
+            Self::Ready(output) => output.minimum_width(),
+            Self::Image(image) => image.width,
+            Self::Node(_) | Self::Offset(_) => 0,
+        }
+    }
+
     fn baseline(&self) -> usize {
         match self {
             Self::Ready(output) => output.baseline(),
@@ -171,6 +179,15 @@ impl Atom for InlineAtom {
             Self::Table(output) => output.height,
             Self::Layout(output) => output.tree.height,
             Self::Image(image) => image.height,
+            Self::Offset(_) => 0,
+        }
+    }
+
+    fn minimum_width(&self) -> usize {
+        match self {
+            Self::Table(output) => output.minimum_width(),
+            Self::Layout(output) => output.tree.width,
+            Self::Image(image) => image.width,
             Self::Offset(_) => 0,
         }
     }

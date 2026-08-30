@@ -72,6 +72,7 @@ enum ContentEvent {
 #[derive(Clone, Copy)]
 pub(super) struct MetricAtom {
     width: usize,
+    minimum_width: usize,
     height: usize,
 }
 
@@ -82,6 +83,10 @@ impl Atom for MetricAtom {
 
     fn height(&self) -> usize {
         self.height
+    }
+
+    fn minimum_width(&self) -> usize {
+        self.minimum_width
     }
 }
 
@@ -237,15 +242,20 @@ impl TableFormatter<'_> {
         });
         let minimum = min_content_width(&pieces).max(1);
         let maximum = intrinsic_width(&pieces).max(1);
-        let padding = self.padding(style, limits.max_width);
-        let horizontal = padding.left
-            + padding.right
+        let minimum_padding = self.padding(style, 0);
+        let maximum_padding = self.padding(style, limits.max_width);
+        let minimum_horizontal = minimum_padding.left
+            + minimum_padding.right
+            + style.border.left.layout_width()
+            + style.border.right.layout_width();
+        let maximum_horizontal = maximum_padding.left
+            + maximum_padding.right
             + style.border.left.layout_width()
             + style.border.right.layout_width();
         CellMetrics {
             items,
-            minimum: minimum + horizontal,
-            maximum: maximum + horizontal,
+            minimum: minimum + minimum_horizontal,
+            maximum: maximum + maximum_horizontal,
         }
     }
 
@@ -260,12 +270,14 @@ impl TableFormatter<'_> {
             let lines = format_inline(&pieces, limits.max_width.max(1));
             MetricAtom {
                 width: intrinsic_width(&pieces).max(1),
+                minimum_width: min_content_width(&pieces).max(1),
                 height: formatted_height(&lines, &pieces),
             }
         } else {
             let output = self.format_inline_atom(table, limits.max_width, limits, nesting);
             MetricAtom {
                 width: output.width,
+                minimum_width: output.minimum_width(),
                 height: output.height,
             }
         };
@@ -424,6 +436,7 @@ impl TableFormatter<'_> {
         let mut output = TableOutput {
             width: width.max(1),
             height: formatted_height(&lines, &pieces),
+            minimum_width: min_content_width(&pieces).max(1).min(width.max(1)),
             #[cfg(test)]
             degraded: true,
             ..Default::default()

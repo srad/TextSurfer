@@ -297,6 +297,23 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
         assert!(text.contains("FLOAT-L"));
         assert!(text.contains("FLOAT-R"));
         assert!(text.contains("clear after floats"));
+        for marker in [
+            "MODEMARK",
+            "ALPHAONE",
+            "BETATWO",
+            "GAMMATHREE",
+            "WRAPMARK",
+            "ALSAMARK",
+            "DRIMARK",
+            "EVDEVMARK",
+            "KLIBCMARK",
+            "LVMMARK",
+        ] {
+            assert!(
+                text.contains(marker),
+                "missing nested table marker {marker} at {cols} columns"
+            );
+        }
         for (case, start, end) in panel_ranges(&decoded.painted) {
             assert!(
                 end - start <= usize::from(rows),

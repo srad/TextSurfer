@@ -129,6 +129,7 @@ pub(super) fn place_table(
     let mut output = TableOutput {
         width: columns.table_width,
         height: top_height + grid_height + bottom_height,
+        minimum_width: columns.minimum_width,
         model,
         ..Default::default()
     };
@@ -483,6 +484,7 @@ impl TableFormatter<'_> {
         TableOutput {
             width: 1,
             height: 1,
+            minimum_width: 1,
             boxes: root
                 .owner
                 .map(|node| LayoutBox {

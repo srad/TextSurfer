@@ -2,23 +2,23 @@
 source: tests/render_atlas.rs
 expression: "structure(&page, cols)"
 ---
-width=40 rows=125 parse_errors=0 css_warnings=0 limits=LayoutLimits { truncated_depth: false, engine_failed: false }
+width=40 rows=130 parse_errors=0 css_warnings=0 limits=LayoutLimits { truncated_depth: false, engine_failed: false }
 case ua-flow rows=0..19
 case inline-state rows=19..23
 case lists rows=23..37
-case tables rows=37..54
-case controls rows=54..59
-case search-flex rows=59..60
-case box-layout rows=60..74
-case flex-grid rows=74..85
-case floats rows=85..92
-case images rows=92..114
-case presentational rows=114..125
-link href=/atlas-link rects=[LayoutRect { col: 0, row: 20, width: 4, height: 1 }] paint=115
-link href=/image-link rects=[LayoutRect { col: 11, row: 93, width: 4, height: 2 }] paint=160
-hits=190
-image asset=ImageAssetId(1) rect=LayoutRect { col: 11, row: 93, width: 4, height: 2 } clip=LayoutRect { col: 11, row: 93, width: 4, height: 2 } depth=5
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 97, width: 8, height: 4 } clip=LayoutRect { col: 1, row: 97, width: 8, height: 4 } depth=3
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 102, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 102, width: 4, height: 2 } depth=9
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 106, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 106, width: 4, height: 2 } depth=4
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 110, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 110, width: 4, height: 2 } depth=4
+case tables rows=37..59
+case controls rows=59..64
+case search-flex rows=64..65
+case box-layout rows=65..79
+case flex-grid rows=79..90
+case floats rows=90..97
+case images rows=97..119
+case presentational rows=119..130
+link href=/atlas-link rects=[LayoutRect { col: 0, row: 20, width: 4, height: 1 }] paint=122
+link href=/image-link rects=[LayoutRect { col: 11, row: 98, width: 4, height: 2 }] paint=167
+hits=203
+image asset=ImageAssetId(1) rect=LayoutRect { col: 11, row: 98, width: 4, height: 2 } clip=LayoutRect { col: 11, row: 98, width: 4, height: 2 } depth=5
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 102, width: 8, height: 4 } clip=LayoutRect { col: 1, row: 102, width: 8, height: 4 } depth=3
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 107, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 107, width: 4, height: 2 } depth=9
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 111, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 111, width: 4, height: 2 } depth=4
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 115, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 115, width: 4, height: 2 } depth=4

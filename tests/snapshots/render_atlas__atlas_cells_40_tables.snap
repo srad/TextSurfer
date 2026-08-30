@@ -7,96 +7,121 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   1..13 fg=Rgb(255, 255, 0) bg=Rgb(0, 0, 64) mod=BOLD
   13..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│    Table caption                       │
+│              Table caption             │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..5 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  5..18 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  18..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..15 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  15..28 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  28..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│┌─────────┬────────┐                    │
+│┌───────────────────┬──────────────────┐│
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-││  Head A │ Head B │                    │
+││       Head A      │      Head B      ││
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
-  2..4 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  4..10 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
-  10..11 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  11..12 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
-  12..13 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  13..19 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
-  19..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..9 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  9..15 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
+  15..21 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  21..22 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
+  22..28 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  28..34 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
+  34..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│├─────────┼────────┤                    │
+│├───────────────────┼──────────────────┤│
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-││         │cell    │                    │
+││                   │cell              ││
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  2..11 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  11..12 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  12..16 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  16..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..21 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  21..22 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  22..26 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  26..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-││rowspan  ├────────┤                    │
+││rowspan            ├──────────────────┤│
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   2..9 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  9..11 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  11..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  9..21 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  21..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-││         │nested  │                    │
+││                   │nested            ││
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  2..11 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  11..12 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  12..18 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  18..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..21 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  21..22 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  22..28 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  28..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│├─────────┴────────┤                    │
+│├───────────────────┴──────────────────┤│
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-││colspan           │                    │
+││colspan                               ││
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   2..9 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  9..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  9..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│├─────────┬────────┤                    │
+│├──────────────────────────────────────┤│
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-││foot     │end     │                    │
+││        ALPHAONE BETATWO GAMMATHREE   ││
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  2..10 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  10..18 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  18..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..26 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  26..27 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  27..37 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  37..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││MODEMARKWRAPMARK ALSAMARK DRIMARK     ││
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  2..10 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
+  10..35 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  35..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││        EVDEVMARK KLIBCMARK LVMMARK   ││
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  2..10 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  10..37 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  37..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│├───────────────────┬──────────────────┤│
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││foot               │end               ││
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   2..6 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  6..11 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  11..12 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  12..15 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
-  15..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  6..21 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  21..22 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  22..25 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  25..40 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  40..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│└─────────┴────────┘                    │
+│└───────────────────┴──────────────────┘│
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..21 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
-  21..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..41 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                        │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                                        │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

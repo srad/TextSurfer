@@ -10,6 +10,10 @@ pub(super) trait Atom {
     fn width(&self) -> usize;
     fn height(&self) -> usize;
 
+    fn minimum_width(&self) -> usize {
+        self.width()
+    }
+
     fn baseline(&self) -> usize {
         self.height().saturating_sub(1)
     }
@@ -520,9 +524,14 @@ pub(super) fn min_content_width<A: Atom>(pieces: &[Piece<A>]) -> usize {
     let mut current = 0usize;
     let mut pending_collapsed_space = false;
     for glyph in &glyphs {
-        if glyph.atom.is_some() {
+        if let Some(index) = glyph.atom {
             finish_min_segment(&mut widest, &mut current);
-            widest = widest.max(glyph.width);
+            widest = widest.max(
+                pieces[index]
+                    .atom
+                    .as_ref()
+                    .map_or(glyph.width, Atom::minimum_width),
+            );
             pending_collapsed_space = false;
             continue;
         }

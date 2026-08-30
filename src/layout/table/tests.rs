@@ -127,6 +127,94 @@ fn constrained_auto_tables_shrink_min_content_columns_inside_their_target_width(
 }
 
 #[test]
+fn nested_tables_use_their_minimum_width_without_losing_spanning_content() {
+    for (inner_style, caption) in [
+        ("", ""),
+        ("style='width:100%'", ""),
+        (
+            "",
+            "<caption>alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu</caption>",
+        ),
+    ] {
+        let source = format!(
+            "<div><table id=table><tr><td><table {inner_style}>{caption}
+             <tr><th rowspan=3>User mode</th><td>alpha one</td><td>beta two</td><td>gamma three</td></tr>
+             <tr><td colspan=3>MARKER-A: components ALSA, DRI, evdev, klibc, LVM</td></tr>
+             </table></td></tr></table></div>"
+        );
+        for width in [40, 60] {
+            let output = formatted(&source, width);
+            assert!(
+                output.width <= width,
+                "{inner_style:?} at {width} columns produced width {}",
+                output.width
+            );
+            let text = output.plain_text();
+            for token in [
+                "gamma",
+                "three",
+                "MARKER-A:",
+                "ALSA,",
+                "DRI,",
+                "evdev,",
+                "klibc,",
+                "LVM",
+            ] {
+                assert!(
+                    text.split_whitespace().any(|word| word == token),
+                    "missing {token:?} from {inner_style:?} at {width} columns: {text:?}"
+                );
+            }
+            if width == 40 {
+                let marker_row = output
+                    .fragments
+                    .iter()
+                    .find(|fragment| fragment.text.contains("MARKER-A"))
+                    .map(|fragment| fragment.row)
+                    .unwrap();
+                let end_row = output
+                    .fragments
+                    .iter()
+                    .find(|fragment| fragment.text.contains("LVM"))
+                    .map(|fragment| fragment.row)
+                    .unwrap();
+                assert!(end_row > marker_row);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_definite_nested_table_width_remains_non_compressible() {
+    let output = formatted(
+        "<table id=table><tr><td><table style='width:80ch'><tr><td>wide</td></tr></table></td></tr></table>",
+        40,
+    );
+    assert!(output.width >= 80);
+}
+
+#[test]
+fn percentage_columns_are_clamped_before_final_width_distribution() {
+    let output = formatted(
+        "<style id=css>#table { width:100ch; border-collapse:collapse }</style>
+         <table id=table>
+         <tr><td style='width:10%'>top-a</td><td style='width:10%'>top-b</td><td colspan=5 style='width:80%'>span</td></tr>
+         <tr><td style='width:10%'>A</td><td style='width:10%'>B</td><td style='width:15%'>C</td><td style='width:15%'>D</td><td style='width:15%'>E</td><td style='width:15%'>F</td><td style='width:30%'>G</td></tr>
+         </table>",
+        100,
+    );
+    let width = |marker: &str| {
+        let fragment = output
+            .fragments
+            .iter()
+            .find(|fragment| fragment.text == marker)
+            .unwrap();
+        fragment.clip_right - fragment.col
+    };
+    assert!(width("G") <= width("A") * 2 + 1);
+}
+
+#[test]
 fn fixed_layout_clips_wide_graphemes_at_the_cell_inner_edge() {
     let output = formatted(
         "<style id=css>#table { table-layout: fixed; width: 5ch } td { border: solid }</style>

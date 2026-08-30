@@ -1,4 +1,4 @@
-use super::captions::{layout_captions, natural_width};
+use super::captions::{intrinsic_widths, layout_captions};
 use super::geometry::{TableGeometry, TablePlacement, place_table};
 use super::model::TableModel;
 use super::sizing::size_columns;
@@ -16,7 +16,7 @@ impl TableFormatter<'_> {
         let table_style = root.style;
         let metrics = self.measure_cells(&model, limits, nesting);
         let geometry = TableGeometry::new(self, table_style, &model, available_width);
-        let caption_natural = natural_width(self, &model, limits, nesting);
+        let caption_widths = intrinsic_widths(self, &model, limits, nesting);
         let columns = size_columns(
             self,
             &model,
@@ -24,7 +24,7 @@ impl TableFormatter<'_> {
             table_style,
             available_width,
             &geometry,
-            caption_natural,
+            caption_widths,
         );
         let cells = self.layout_cells(
             &model,

@@ -68,6 +68,7 @@ pub(super) struct TableOutput {
     pub fills: Vec<BackgroundFill>,
     pub strokes: Vec<BorderStroke>,
     pub fragments: Vec<TableFragment>,
+    minimum_width: usize,
     baseline: Option<usize>,
     model: TableModel,
     #[cfg(test)]
@@ -75,6 +76,10 @@ pub(super) struct TableOutput {
 }
 
 impl TableOutput {
+    pub(super) fn minimum_width(&self) -> usize {
+        self.minimum_width.max(1).min(self.width.max(1))
+    }
+
     #[cfg(test)]
     pub fn plain_text(&self) -> String {
         let mut fragments = self.fragments.clone();
@@ -97,6 +102,10 @@ impl Atom for TableOutput {
 
     fn height(&self) -> usize {
         self.height
+    }
+
+    fn minimum_width(&self) -> usize {
+        self.minimum_width()
     }
 
     fn baseline(&self) -> usize {

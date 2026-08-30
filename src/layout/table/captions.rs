@@ -21,6 +21,11 @@ pub(super) struct CaptionBands {
     pub(super) bottom: Vec<CaptionLayout>,
 }
 
+pub(super) struct CaptionWidths {
+    pub(super) minimum: usize,
+    pub(super) maximum: usize,
+}
+
 impl CaptionBands {
     pub(super) fn top_height(&self) -> usize {
         self.top
@@ -37,22 +42,30 @@ impl CaptionBands {
     }
 }
 
-pub(super) fn natural_width(
+pub(super) fn intrinsic_widths(
     formatter: &TableFormatter<'_>,
     model: &TableModel,
     limits: TableLimits,
     nesting: usize,
-) -> usize {
-    model
-        .captions
-        .iter()
-        .map(|caption| {
-            formatter
-                .cell_metrics(&[*caption], formatter.styles.get(*caption), limits, nesting)
-                .maximum
-        })
-        .max()
-        .unwrap_or(0)
+) -> CaptionWidths {
+    model.captions.iter().fold(
+        CaptionWidths {
+            minimum: 0,
+            maximum: 0,
+        },
+        |widths, caption| {
+            let metrics = formatter.cell_metrics(
+                &[*caption],
+                formatter.styles.get(*caption),
+                limits,
+                nesting,
+            );
+            CaptionWidths {
+                minimum: widths.minimum.max(metrics.minimum),
+                maximum: widths.maximum.max(metrics.maximum),
+            }
+        },
+    )
 }
 
 pub(super) fn layout_captions(

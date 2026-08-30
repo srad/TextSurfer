@@ -94,8 +94,8 @@ with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green run (2026-08-30): **925 total** (922 passing, 3 ignored) with the
-default VGA frontend and **818** (815 passing, 3 ignored) with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
+Test counts at the last green run (2026-08-30): **929 total** (926 passing, 3 ignored) with the
+default VGA frontend and **821** (819 passing, 2 ignored) with `--no-default-features`. The WPT target contributes 7 tests (6 passing and 1 ignored;
 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -483,10 +483,11 @@ content belongs to M4/M5.
   capture, and disabling the `contain` fix below makes it fire at exactly the two widths that were
   broken, which is what validates the oracle. **Ratcheted, not yet classified:** A1 distinct runs
   the browser paints and we do not, and A2 the preserved fraction of reading order. Today's
-  Wikipedia numbers are 366/207/196 missing and 728/793/799 permille order at 40/100/160 columns;
+  Wikipedia numbers are 340/95/90 missing and 953/967/963 permille order at 40/100/160 columns;
   `example.com` is exact at every width. Those A1/A2 totals mix real defects with known-legitimate
   divergence (narrow-line clipping, windowed form values, fixed-advance line breaking) and are
-  ceilings that may only fall, not targets.
+  guarded by A1 ceilings that may only fall and A2 floors that may only rise; neither is a target.
+  A2 uses an exact Hunt-Szymanski LCS so repeated words cannot manufacture an order regression.
   A band number locates a finding in the *browser's* coordinates only: the two documents drift
   apart vertically as line breaking differs, so never compare them at the same band index.
   `TEXTSURFER_CORPUS_TRIAGE=1` clusters the findings by band and prints the browser's own text
@@ -510,16 +511,12 @@ content belongs to M4/M5.
   and replaced-element interactions across block, float, table, flex and grid layout before
   advancing to paint-order work.
   *Classified from the browser corpus, in priority order:*
-  1. **A spanning table cell truncates instead of wrapping.** A `colspan` cell renders one line and
-     silently drops the rest — no wrap, no ellipsis, and nothing on `LayoutLimits`; at 40 columns a
-     whole non-spanning column disappears as well. Reproduces in ten lines with no CSS: an outer
-     table whose cell holds a table with a `rowspan` header and a `colspan` row. This is what erased
-     Wikipedia's "Linux kernel architecture" table — `evdev` occurs once in that document and never
-     reached our output, while the same table rendered completely in isolation — and it accounts for
-     51 of the 207 findings at 100 columns. Narrow widths are where it bites, which is this
-     browser's whole domain.
+  1. **Nested spanning-table intrinsic width (done).** Table atoms propagate min-content separately
+     from used width, captions enforce their min-content contribution, and percentage tracks remain
+     intrinsic percentage constraints clamped to 100% until final distribution. Nested `rowspan` +
+     `colspan` content wraps without disappearing at 40, 100 and 160 columns.
   2. **Footer navboxes at 40 columns.** 75 clusters over bands 4288–4579 of the same page, and the
-     reason 40 columns reports 366 findings against 100 columns' 207. Unreduced.
+     reason narrow rendering still reports substantially more findings. Unreduced.
 - [ ] **Stacking and positioned content.** Implement `z-index` and bounded stacking contexts,
   relative positioning for inline boxes, positioned table descendants, and true fixed/sticky
   behavior. Paint order and hit testing must agree on the topmost box.
@@ -884,7 +881,8 @@ manual mouse walkthrough remain pending.
             2,070.6 ms to settled first paint, 85 ms cascade, 1,160 ms layout and 98 ms paint on the
             live Linux URL; settled resize is one publication in 1,172.5 ms with 84 ms cascade,
             876 ms layout and 82 ms paint. The
-            pinned fixture likewise publishes once, with 1,204 ms initial and 896 ms resize layout.
+            pinned fixture likewise publishes once, with 1,797.4 ms settled and 807 ms initial
+            layout; resize settles in 896.4 ms with 593 ms layout.
             Layout remains the dominant cold-worker cost. The committed fixture is revision
             `1371530035`, SHA-256
             `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.

@@ -312,34 +312,42 @@ fn counts(texts: impl Iterator<Item = String>) -> HashMap<String, usize> {
 
 /// How much of the browser's reading order we preserve.
 ///
-/// Each browser run is matched to its next unused occurrence in our stream; the longest increasing
-/// run of those positions is the part we got in the right order. A full LCS would say the same
-/// thing at 15,000 x 15,000 cells per page per width, which is not worth it for a number that only
-/// has to rank findings.
+/// Hunt-Szymanski reduces the LCS to increasing subsequences of matching positions, avoiding the
+/// 15,000 x 15,000 matrix while still handling repeated words exactly.
 fn order_agreement(browser: &[String], ours: &[String]) -> usize {
-    let mut positions: HashMap<&str, std::collections::VecDeque<usize>> = HashMap::new();
+    let mut positions: HashMap<&str, Vec<usize>> = HashMap::new();
     for (index, text) in ours.iter().enumerate() {
-        positions.entry(text.as_str()).or_default().push_back(index);
+        positions.entry(text.as_str()).or_default().push(index);
     }
-    let matched = browser
-        .iter()
-        .filter_map(|text| {
-            positions
-                .get_mut(text.as_str())
-                .and_then(std::collections::VecDeque::pop_front)
-        })
-        .collect::<Vec<_>>();
 
-    // Longest increasing subsequence, patience-sorting style.
     let mut tails: Vec<usize> = Vec::new();
-    for position in matched {
-        match tails.binary_search(&position) {
-            Ok(_) => {}
-            Err(index) if index == tails.len() => tails.push(position),
-            Err(index) => tails[index] = position,
+    for text in browser {
+        let Some(matches) = positions.get(text.as_str()) else {
+            continue;
+        };
+        for &position in matches.iter().rev() {
+            match tails.binary_search(&position) {
+                Ok(_) => {}
+                Err(index) if index == tails.len() => tails.push(position),
+                Err(index) => tails[index] = position,
+            }
         }
     }
     tails.len()
+}
+
+#[test]
+fn order_agreement_handles_reordered_duplicates() {
+    let sequence = |items: &[&str]| {
+        items
+            .iter()
+            .map(|item| (*item).to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        order_agreement(&sequence(&["A", "B", "A"]), &sequence(&["B", "A", "B"])),
+        2
+    );
 }
 
 struct Findings {
@@ -454,9 +462,9 @@ const EXPECTED: &[(&str, u16, usize, u32)] = &[
     ("example", 40, 0, 1000),
     ("example", 100, 0, 1000),
     ("example", 160, 0, 1000),
-    ("wikipedia-linux", 40, 366, 720),
-    ("wikipedia-linux", 100, 207, 790),
-    ("wikipedia-linux", 160, 196, 795),
+    ("wikipedia-linux", 40, 340, 720),
+    ("wikipedia-linux", 100, 95, 790),
+    ("wikipedia-linux", 160, 90, 795),
 ];
 
 fn expectation(slug: &str, cols: u16) -> Option<(usize, u32)> {
