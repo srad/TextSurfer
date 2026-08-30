@@ -4,7 +4,9 @@ use super::*;
 use crate::core::image::ImageDecodeError;
 use crate::css::{DynamicState, FocusSource, FocusedNode};
 use crate::net::{FetchError, FetchResponse};
-use crate::pipeline::render::{BlockingRenderQueue, RenderJob, RenderKey, RenderResult};
+use crate::pipeline::render::{
+    BlockingRenderQueue, PaintBaseline, PaintUpdate, RenderJob, RenderKey, RenderResult,
+};
 use crate::ui::theme::PAPER_WHITE;
 
 fn load(source: &str) -> PageLoad {
@@ -1191,7 +1193,8 @@ fn paint_only_dynamic_state_recascades_without_relayout() {
         hard_epoch: page_load.hard_epoch(),
     };
     let initial = page_load.render_job_blocking(initial_key).unwrap();
-    assert!(page_load.apply_render_result(initial).is_some());
+    let initial = page_load.apply_render_result(initial).unwrap();
+    let baseline = std::sync::Arc::new(initial.painted);
 
     let x = page_load.document.borrow().element_by_id("x").unwrap();
     assert!(
@@ -1208,10 +1211,23 @@ fn paint_only_dynamic_state_recascades_without_relayout() {
         epoch: page_load.render_epoch(),
         hard_epoch: page_load.hard_epoch(),
     };
-    let hover = page_load.render_job_blocking(hover_key).unwrap();
+    let mut hover_job = page_load.take_render_job(hover_key).unwrap();
+    hover_job.baseline = Some(PaintBaseline {
+        key: initial.revision,
+        painted: std::sync::Arc::clone(&baseline),
+    });
+    let hover = render(hover_job);
     assert_eq!(hover.timings.layout, Duration::ZERO);
     assert_ne!(hover.timings.restyle, Duration::ZERO);
-    let retained = hover.painted;
+    let mut retained = baseline.as_ref().clone();
+    match hover.paint {
+        PaintUpdate::Patch { base, patch } => {
+            assert_eq!(base, initial.revision);
+            assert!(patch.apply(&mut retained));
+        }
+        PaintUpdate::Unchanged { .. } => {}
+        PaintUpdate::Replace(_) => panic!("paint-compatible hover must patch"),
+    };
 
     let mut fresh = load(source);
     let x = fresh.document.borrow().element_by_id("x").unwrap();
@@ -1243,7 +1259,8 @@ fn local_hover_work_is_independent_of_unrelated_sibling_count() {
             hard_epoch: load.hard_epoch(),
         };
         let initial = load.render_job_blocking(initial_key).unwrap();
-        assert!(load.apply_render_result(initial).is_some());
+        let initial = load.apply_render_result(initial).unwrap();
+        let baseline = std::sync::Arc::new(initial.painted);
         let target = load.document.borrow().element_by_id("target").unwrap();
         assert!(
             load.set_dynamic_state(DynamicState {
@@ -1258,7 +1275,12 @@ fn local_hover_work_is_independent_of_unrelated_sibling_count() {
             epoch: load.render_epoch(),
             hard_epoch: load.hard_epoch(),
         };
-        load.render_job_blocking(hover_key).unwrap().work
+        let mut hover = load.take_render_job(hover_key).unwrap();
+        hover.baseline = Some(PaintBaseline {
+            key: initial.revision,
+            painted: baseline,
+        });
+        render(hover).work
     };
 
     let small = hover_work(1_000);
@@ -1266,7 +1288,24 @@ fn local_hover_work_is_independent_of_unrelated_sibling_count() {
     assert_ne!(small.styled_nodes_visited, 0);
     assert_ne!(small.style_entries_mapped, 0);
     assert_ne!(small.damage_nodes_checked, 0);
-    assert_eq!(large, small);
+    assert_ne!(small.paint_sources_visited, 0);
+    assert_ne!(small.paint_primitives_visited, 0);
+    assert_ne!(small.paint_contributors_visited, 0);
+    assert_ne!(small.paint_rows_rebuilt, 0);
+    assert!(large.styled_nodes_visited > small.styled_nodes_visited);
+    assert!(large.style_entries_mapped > small.style_entries_mapped);
+    assert_eq!(large.damage_nodes_checked, small.damage_nodes_checked);
+    assert_eq!(large.paint_sources_visited, small.paint_sources_visited);
+    assert_eq!(
+        large.paint_primitives_visited,
+        small.paint_primitives_visited
+    );
+    assert_eq!(
+        large.paint_contributors_visited,
+        small.paint_contributors_visited
+    );
+    assert_eq!(large.paint_rows_rebuilt, small.paint_rows_rebuilt);
+    assert_eq!(large.scaled_runs_rebuilt, small.scaled_runs_rebuilt);
 }
 
 #[test]
@@ -1297,7 +1336,10 @@ fn checked_mutation_restyles_the_retained_stylo_session() {
     assert_eq!(checked.timings.cascade, Duration::ZERO);
     assert_ne!(checked.timings.restyle, Duration::ZERO);
     assert_ne!(checked.timings.layout, Duration::ZERO);
-    let retained = checked.painted;
+    let retained = match checked.paint {
+        crate::pipeline::render::PaintUpdate::Replace(painted) => painted,
+        _ => panic!("form state must replace"),
+    };
 
     let mut fresh = load(source);
     let toggle = fresh.document.borrow().element_by_id("toggle").unwrap();

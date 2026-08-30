@@ -54,7 +54,8 @@ impl App {
         let palette = self.theme().palette();
         for (index, tab) in self.tabs.tabs_mut().iter_mut().enumerate() {
             if tab.url.is_empty() || tab.url == "about:blank" {
-                tab.painted = start_page_for(viewport);
+                tab.painted = std::sync::Arc::new(start_page_for(viewport));
+                tab.display_revision = None;
             } else if let Some(load) = tab.load.as_mut() {
                 if index == active {
                     if let Some(page) = load.resize(viewport) {
@@ -67,7 +68,13 @@ impl App {
             } else if tab.layout_width != width
                 && let (Some(document), Some(styles)) = (&tab.document, &tab.styles)
             {
-                tab.painted = paint_document(&document.borrow(), styles, viewport, palette);
+                tab.painted = std::sync::Arc::new(paint_document(
+                    &document.borrow(),
+                    styles,
+                    viewport,
+                    palette,
+                ));
+                tab.display_revision = None;
             }
             tab.layout_width = width;
             tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));

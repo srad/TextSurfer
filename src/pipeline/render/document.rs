@@ -120,6 +120,13 @@ pub(crate) fn render_document_with_images(
         styles,
         painted,
         painted_changed: true,
+        paint_update: None,
+        revision: super::RenderKey {
+            tab_id: 0,
+            generation: 0,
+            epoch: 0,
+            hard_epoch: 0,
+        },
         parse_errors,
         css_warnings,
     }

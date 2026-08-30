@@ -181,15 +181,17 @@ impl FrameComposer {
     ) -> Result<(), B::Error> {
         let area = Rect::new(0, 0, view.geometry.size.cols, view.geometry.size.rows);
         self.resize(area);
+        let image_worker_ready = self
+            .image_worker
+            .as_ref()
+            .is_some_and(|worker| worker.signal.ready());
+        let image_rows_changed = repaint_intersects_image(view, &damage.content.repaint);
         let image_state_changed = !self.initialized
             || damage.full()
             || damage.content.full
             || damage.content.scroll_rows != 0
-            || damage.content.repaint != RowDamage::None
-            || self
-                .image_worker
-                .as_ref()
-                .is_some_and(|worker| worker.signal.ready());
+            || image_rows_changed
+            || image_worker_ready;
         let mut regions = Vec::new();
         let cursor = if !self.initialized || damage.full() {
             self.current.reset();
@@ -261,12 +263,19 @@ impl FrameComposer {
             }
             cursor_position(view, area)
         };
-        if image_state_changed
-            && self.compose_protocol_images(view)
-            && let Some(content) = content_rect(view, area)
-            && !regions.contains(&content)
-        {
-            regions.push(content);
+        if image_state_changed && self.compose_protocol_images(view) {
+            let partial = image_rows_changed
+                && !damage.full()
+                && !damage.content.full
+                && damage.content.scroll_rows == 0
+                && !image_worker_ready;
+            if partial {
+                regions.extend(protocol_image_damage(view, area, &damage.content.repaint));
+            } else if let Some(content) = content_rect(view, area)
+                && !regions.contains(&content)
+            {
+                regions.push(content);
+            }
         }
         // A graphics protocol puts its whole escape sequence in one cell and marks every other
         // cell of the picture `Skip`. Those cells still hold the halfblock fallback the content
@@ -447,6 +456,58 @@ impl FrameComposer {
             Ok(0..amount)
         }
     }
+}
+
+fn repaint_intersects_image(view: &ChromeView<'_>, damage: &RowDamage) -> bool {
+    let RowDamage::Ranges(ranges) = damage else {
+        return *damage == RowDamage::Full && !view.content.painted.images.is_empty();
+    };
+    view.content.painted.images.iter().any(|image| {
+        let image_rows = image.rect.row_range(usize::MAX);
+        ranges
+            .iter()
+            .any(|range| range.start < image_rows.end && image_rows.start < range.end)
+    })
+}
+
+fn protocol_image_damage(view: &ChromeView<'_>, area: Rect, damage: &RowDamage) -> Vec<Rect> {
+    let (Some(content), RowDamage::Ranges(ranges)) = (content_rect(view, area), damage) else {
+        return Vec::new();
+    };
+    view.content
+        .painted
+        .images
+        .iter()
+        .filter(|image| {
+            let image_rows = image.rect.row_range(usize::MAX);
+            ranges
+                .iter()
+                .any(|range| range.start < image_rows.end && image_rows.start < range.end)
+        })
+        .filter_map(|image| {
+            let visible_row = image.rect.row.max(view.content.scroll);
+            let visible_end = image.rect.row.saturating_add(image.rect.height).min(
+                view.content
+                    .scroll
+                    .saturating_add(usize::from(content.height)),
+            );
+            if visible_row >= visible_end {
+                return None;
+            }
+            let col = u16::try_from(image.rect.col).ok()?;
+            let row = u16::try_from(visible_row - view.content.scroll).ok()?;
+            Some(
+                Rect::new(
+                    content.x.saturating_add(col),
+                    content.y.saturating_add(row),
+                    u16::try_from(image.rect.width).unwrap_or(u16::MAX),
+                    u16::try_from(visible_end - visible_row).unwrap_or(u16::MAX),
+                )
+                .intersection(content),
+            )
+        })
+        .filter(|rect| !rect.is_empty())
+        .collect()
 }
 
 fn later_overlay_overlaps(painted: &crate::paint::DisplayList, image_index: usize) -> bool {
@@ -734,6 +795,21 @@ mod tests {
             .present(&mut backend, &view, &FrameDamage::full())
             .unwrap();
         assert_eq!(composer.image_protocols.len(), 1);
+        let mut unrelated = FrameDamage::default();
+        unrelated.repaint_rows(3..4);
+        composer.present(&mut backend, &view, &unrelated).unwrap();
+        assert!(
+            composer.last_drawn_cells()
+                < usize::from(view.geometry.size.cols) * usize::from(view.geometry.size.rows)
+        );
+        let mut overlap = FrameDamage::default();
+        overlap.repaint_rows(1..2);
+        composer.present(&mut backend, &view, &overlap).unwrap();
+        assert!(composer.last_drawn_cells() > 0);
+        assert!(
+            composer.last_drawn_cells()
+                < usize::from(view.geometry.size.cols) * usize::from(view.geometry.size.rows)
+        );
         view.content.scroll = 1;
         let mut damage = FrameDamage::default();
         damage.scroll(1);

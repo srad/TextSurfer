@@ -194,7 +194,8 @@ impl App {
         let tab = &mut self.tabs.tabs_mut()[index];
         tab.url = url.to_string();
         tab.title = url.to_string();
-        tab.painted = painted;
+        tab.painted = std::sync::Arc::new(painted);
+        tab.display_revision = None;
         tab.scroll = 0;
         tab.layout_width = self.geometry.content_cols();
         tab.generation = generation;

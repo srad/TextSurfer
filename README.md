@@ -261,9 +261,9 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: static SVG images and the human image smoke in VGA and terminal, then keymap unification,
-keyboard link hints and the help overlay. In-page search and the remaining M6 performance gate
-follow that path.
+Next up: static SVG images and the human image, styling and retained-paint smoke in VGA and terminal,
+then keymap unification, keyboard link hints and the help overlay. In-page search and the remaining
+cold-render M6 performance gate follow that path.
 
 ## Built on great libraries
 

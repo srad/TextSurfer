@@ -1,5 +1,6 @@
 mod flow;
 mod links;
+mod paint_index;
 mod tables;
 mod taffy_style;
 mod tree;
@@ -32,6 +33,7 @@ use flow::{
     shape_inline_around_floats,
 };
 use links::{assign_link_rects, collect_links};
+use paint_index::{PaintIndex, PaintPrimitives};
 use tables::append_table_output;
 use taffy_style::{TaffyStyleInput, layout_rect, taffy_style};
 use tree::LayoutTree;
@@ -54,6 +56,7 @@ pub struct BoxTree {
     pub paint_order: HashMap<NodeId, usize>,
     pub limits: LayoutLimits,
     pub(crate) paint_sources: PaintSources,
+    pub(crate) paint_index: PaintIndex,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -64,12 +67,57 @@ pub(crate) struct PaintSources {
     pub(crate) strokes: Vec<PaintStyleSource>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PaintStyleSource {
     Missing,
     Element(NodeId),
     Pseudo(NodeId, crate::core::style::PseudoElement),
     Marker(NodeId),
+}
+
+impl BoxTree {
+    pub(crate) fn rebuild_paint_index(&mut self) {
+        self.paint_index = PaintIndex::build(self);
+    }
+
+    pub(in crate::layout) fn paint_source_primitives(
+        &self,
+        source: PaintStyleSource,
+    ) -> Option<&PaintPrimitives> {
+        self.paint_index.source(source)
+    }
+
+    pub(in crate::layout) fn unresolved_paint_primitives(&self) -> &PaintPrimitives {
+        self.paint_index.unresolved()
+    }
+
+    pub(crate) fn paint_fills_at(&self, row: usize, output: &mut Vec<usize>) {
+        self.paint_index.fills_at(row, output);
+    }
+
+    pub(crate) fn paint_strokes_at(&self, row: usize, output: &mut Vec<usize>) {
+        self.paint_index.strokes_at(row, output);
+    }
+
+    pub(crate) fn paint_fragments_at(&self, row: usize, output: &mut Vec<usize>) {
+        self.paint_index.fragments_at(row, output);
+    }
+
+    pub(crate) fn scaled_run_for_fragment(&self, fragment: usize) -> Option<usize> {
+        self.paint_index.scaled_run(fragment)
+    }
+
+    pub(crate) fn paint_fill_is_float(&self, fill: usize) -> bool {
+        self.paint_index.fill_is_float(fill)
+    }
+
+    pub(crate) fn paint_stroke_is_float(&self, stroke: usize) -> bool {
+        self.paint_index.stroke_is_float(stroke)
+    }
+
+    pub(crate) fn paint_fragment_is_float(&self, fragment: usize) -> bool {
+        self.paint_index.fragment_is_float(fragment)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +201,12 @@ impl TextFragment {
                 .saturating_mul(usize::from(self.style.scale)),
             height: usize::from(self.style.scale),
         }
+    }
+}
+
+impl LayoutRect {
+    pub(crate) fn row_range(self, height: usize) -> std::ops::Range<usize> {
+        self.row.min(height)..self.row.saturating_add(self.height).min(height)
     }
 }
 

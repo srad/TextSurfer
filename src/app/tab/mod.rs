@@ -8,6 +8,7 @@ use crate::core::style::StyleTree;
 use crate::css::FocusedNode;
 use crate::paint::DisplayList;
 use crate::pipeline::page_load::{PageLoad, PendingPageLoad};
+use crate::pipeline::render::RenderKey;
 use crate::ui::widgets::text_field::TextFieldState;
 
 #[cfg(test)]
@@ -24,7 +25,8 @@ pub struct Tab {
     pub scroll: usize,
     pub layout_width: usize,
     pub generation: u64,
-    pub painted: DisplayList,
+    pub painted: Arc<DisplayList>,
+    pub display_revision: Option<RenderKey>,
     pub message: String,
     pub document: Option<SharedDocument>,
     pub styles: Option<Arc<StyleTree>>,
@@ -69,7 +71,8 @@ impl Tab {
             scroll: 0,
             layout_width: 0,
             generation,
-            painted,
+            painted: Arc::new(painted),
+            display_revision: None,
             message,
             document: None,
             styles: None,

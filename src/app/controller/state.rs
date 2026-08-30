@@ -83,8 +83,11 @@ impl App {
             .as_mut()
             .and_then(|load| load.set_dynamic_state(state));
         if let Some(page) = page {
-            let painted_changed = apply_rendered_page(tab, page, width, rows);
-            return (true, painted_changed);
+            let applied = apply_rendered_page(tab, page, width, rows);
+            for range in applied.rows {
+                self.damage.repaint_rows(range);
+            }
+            return (true, applied.full);
         }
         let advance = self.advance_render_queue_result();
         (advance.published, advance.painted_changed)

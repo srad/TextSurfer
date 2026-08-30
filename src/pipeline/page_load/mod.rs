@@ -229,6 +229,10 @@ pub struct PageLoad {
 }
 
 impl PageLoad {
+    pub(crate) fn reject_paint_result(&mut self) {
+        self.invalidate(RenderInvalidation::STYLE, RenderCause::Forced);
+    }
+
     fn invalidate(&mut self, level: RenderInvalidation, cause: RenderCause) {
         self.hard_epoch = self.hard_epoch.wrapping_add(1);
         self.invalidate_soft(level, cause);

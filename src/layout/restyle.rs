@@ -1,5 +1,7 @@
 use crate::core::dom::{Document, Node, NodeId};
 use crate::core::style::{CellStyle, PseudoElement, StyleTree};
+use std::collections::HashSet;
+use std::ops::Range;
 
 use super::engine::{
     BackgroundFill, BorderStroke, BoxTree, PaintSources, PaintStyleSource, TextFragment,
@@ -9,10 +11,14 @@ use super::engine::{
 pub(crate) enum RestyleFailure {
     LayoutChanged,
     SourceCount,
-    AmbiguousBox(NodeId),
-    AmbiguousFragment,
-    AmbiguousFill,
-    AmbiguousStroke,
+    UnresolvedSource,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RestyleDamage {
+    pub(crate) rows: Vec<Range<usize>>,
+    pub(crate) sources_visited: usize,
+    pub(crate) primitives_visited: usize,
 }
 
 pub(crate) fn capture_sources(tree: &mut BoxTree, document: &Document, styles: &StyleTree) {
@@ -35,13 +41,14 @@ pub(crate) fn capture_sources(tree: &mut BoxTree, document: &Document, styles: &
             .map(|stroke| box_source_for_stroke(tree, stroke))
             .collect(),
     };
+    tree.rebuild_paint_index();
 }
 
 pub(crate) fn restyle(
     tree: &mut BoxTree,
     previous: &StyleTree,
     next: &StyleTree,
-) -> Result<(), RestyleFailure> {
+) -> Result<RestyleDamage, RestyleFailure> {
     restyle_impl(tree, previous, next, None)
 }
 
@@ -50,7 +57,7 @@ pub(crate) fn restyle_nodes(
     previous: &StyleTree,
     next: &StyleTree,
     nodes: &[NodeId],
-) -> Result<(), RestyleFailure> {
+) -> Result<RestyleDamage, RestyleFailure> {
     restyle_impl(tree, previous, next, Some(nodes))
 }
 
@@ -59,7 +66,7 @@ fn restyle_impl(
     previous: &StyleTree,
     next: &StyleTree,
     nodes: Option<&[NodeId]>,
-) -> Result<(), RestyleFailure> {
+) -> Result<RestyleDamage, RestyleFailure> {
     let layout_compatible = nodes.map_or_else(
         || previous.layout_compatible_with(next),
         |nodes| previous.layout_compatible_for(next, nodes),
@@ -78,85 +85,117 @@ fn restyle_impl(
         || previous.paint_changes(next),
         |nodes| previous.paint_changes_for(next, nodes),
     );
-    if let Some(node) =
-        tree.boxes
-            .iter()
-            .zip(&tree.paint_sources.boxes)
-            .find_map(|(box_, source)| {
-                (*source == PaintStyleSource::Missing
-                    && changes.iter().any(|(old, new)| {
-                        project_style(box_.style, *old) == box_.style
-                            && project_style(box_.style, *new) != box_.style
-                    }))
-                .then_some(box_.node)
+    let unresolved = tree.unresolved_paint_primitives();
+    let unresolved_checked = if changes.is_empty() {
+        0
+    } else {
+        unresolved.boxes.len()
+            + unresolved.fragments.len()
+            + unresolved.fills.len()
+            + unresolved.strokes.len()
+    };
+    if !changes.is_empty()
+        && (unresolved.boxes.iter().any(|index| {
+            changes.iter().any(|(old, new)| {
+                project_style(tree.boxes[*index].style, *old) == tree.boxes[*index].style
+                    && project_style(tree.boxes[*index].style, *new) != tree.boxes[*index].style
             })
+        }) || unresolved.fragments.iter().any(|index| {
+            changes.iter().any(|(old, new)| {
+                project_style(tree.fragments[*index].style, *old) == tree.fragments[*index].style
+                    && project_style(tree.fragments[*index].style, *new)
+                        != tree.fragments[*index].style
+            })
+        }) || unresolved.fills.iter().any(|index| {
+            changes.iter().any(|(old, new)| {
+                old.background == tree.fills[*index].color && old.background != new.background
+            })
+        }) || unresolved.strokes.iter().any(|index| {
+            changes.iter().any(|(old, new)| {
+                old.border == tree.strokes[*index].edges
+                    && (old.border != new.border || old.cell_style().fg != new.cell_style().fg)
+            })
+        }))
     {
-        return Err(RestyleFailure::AmbiguousBox(node));
+        return Err(RestyleFailure::UnresolvedSource);
     }
-    if tree
-        .fragments
-        .iter()
-        .zip(&tree.paint_sources.fragments)
-        .any(|(fragment, source)| {
-            *source == PaintStyleSource::Missing
-                && changes.iter().any(|(old, new)| {
-                    project_style(fragment.style, *old) == fragment.style
-                        && project_style(fragment.style, *new) != fragment.style
-                })
-        })
-    {
-        return Err(RestyleFailure::AmbiguousFragment);
-    }
-    if tree
-        .fills
-        .iter()
-        .zip(&tree.paint_sources.fills)
-        .any(|(fill, source)| {
-            *source == PaintStyleSource::Missing
-                && changes.iter().any(|(old, new)| {
-                    old.background == fill.color && old.background != new.background
-                })
-        })
-    {
-        return Err(RestyleFailure::AmbiguousFill);
-    }
-    if tree
-        .strokes
-        .iter()
-        .zip(&tree.paint_sources.strokes)
-        .any(|(stroke, source)| {
-            *source == PaintStyleSource::Missing
-                && changes.iter().any(|(old, new)| {
-                    old.border == stroke.edges
-                        && (old.border != new.border || old.cell_style().fg != new.cell_style().fg)
-                })
-        })
-    {
-        return Err(RestyleFailure::AmbiguousStroke);
-    }
-    for (box_, source) in tree.boxes.iter_mut().zip(&tree.paint_sources.boxes) {
-        if *source != PaintStyleSource::Missing {
-            box_.style = project_style(box_.style, source_style(next, *source));
+    let mut sources = HashSet::new();
+    if let Some(nodes) = nodes {
+        for node in nodes {
+            sources.insert(PaintStyleSource::Element(*node));
+            sources.insert(PaintStyleSource::Pseudo(*node, PseudoElement::Before));
+            sources.insert(PaintStyleSource::Pseudo(*node, PseudoElement::After));
+            sources.insert(PaintStyleSource::Marker(*node));
         }
+    } else {
+        sources.extend(tree.paint_sources.boxes.iter().copied());
+        sources.extend(tree.paint_sources.fragments.iter().copied());
+        sources.extend(tree.paint_sources.fills.iter().copied());
+        sources.extend(tree.paint_sources.strokes.iter().copied());
+        sources.remove(&PaintStyleSource::Missing);
     }
-    for (fragment, source) in tree.fragments.iter_mut().zip(&tree.paint_sources.fragments) {
-        if *source != PaintStyleSource::Missing {
-            fragment.style = project_style(fragment.style, source_style(next, *source));
+    let mut damage = RestyleDamage {
+        primitives_visited: unresolved_checked,
+        ..RestyleDamage::default()
+    };
+    for source in sources {
+        let Some(primitives) = tree.paint_source_primitives(source).cloned() else {
+            continue;
+        };
+        damage.sources_visited += 1;
+        let style = source_style(next, source);
+        for index in primitives.boxes {
+            damage.primitives_visited += 1;
+            let painted = &mut tree.boxes[index].style;
+            *painted = project_style(*painted, style);
         }
-    }
-    for (fill, source) in tree.fills.iter_mut().zip(&tree.paint_sources.fills) {
-        if *source != PaintStyleSource::Missing {
-            fill.color = source_style(next, *source).background;
+        for index in primitives.fragments {
+            damage.primitives_visited += 1;
+            let fragment = &mut tree.fragments[index];
+            let before = fragment.style;
+            fragment.style = project_style(fragment.style, style);
+            if fragment.style != before {
+                damage.rows.push(fragment.rect().row_range(tree.height));
+            }
         }
-    }
-    for (stroke, source) in tree.strokes.iter_mut().zip(&tree.paint_sources.strokes) {
-        if *source != PaintStyleSource::Missing {
-            let style = source_style(next, *source);
+        for index in primitives.fills {
+            damage.primitives_visited += 1;
+            let fill = &mut tree.fills[index];
+            let before = fill.color;
+            fill.color = style.background;
+            if fill.color != before {
+                damage.rows.push(fill.rect.row_range(tree.height));
+            }
+        }
+        for index in primitives.strokes {
+            damage.primitives_visited += 1;
+            let stroke = &mut tree.strokes[index];
+            let before = (stroke.edges, stroke.style);
             stroke.edges = style.border;
             stroke.style = project_style(stroke.style, style);
+            if (stroke.edges, stroke.style) != before {
+                damage.rows.push(stroke.rect.row_range(tree.height));
+            }
         }
     }
-    Ok(())
+    merge_ranges(&mut damage.rows);
+    Ok(damage)
+}
+
+fn merge_ranges(ranges: &mut Vec<Range<usize>>) {
+    ranges.retain(|range| !range.is_empty());
+    ranges.sort_unstable_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges.drain(..) {
+        if let Some(previous) = merged.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+        } else {
+            merged.push(range);
+        }
+    }
+    *ranges = merged;
 }
 
 fn add_dormant_paint(tree: &mut BoxTree, styles: &StyleTree) {

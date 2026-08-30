@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use crate::core::event::{InputBatch, InputEvent};
 use crate::core::focus::Focus;
-use crate::core::frame::FrameDamage;
+use crate::core::frame::{FRAME_INTERVAL, FrameDamage};
 use crate::core::geom::{Point, Size};
 use crate::core::style::{RenderMetrics, TextRendering};
 use crate::pipeline::image::{ImageDecodePool, ImageDecodeQueue, RasterImageDecoder};
@@ -235,7 +235,9 @@ impl App {
         self.input_transaction = false;
         if self.dynamic_pending {
             if defer_dynamic {
-                self.dynamic_settle = Some(self.now.saturating_add(Duration::from_millis(50)));
+                if self.dynamic_settle.is_none() {
+                    self.dynamic_settle = Some(self.now.saturating_add(FRAME_INTERVAL));
+                }
             } else {
                 self.dynamic_pending = false;
                 self.dynamic_settle = None;

@@ -12,7 +12,7 @@ use crate::core::image::ImageResources;
 use crate::core::style::{Palette, StyleTree};
 use crate::css::MediaContext;
 use crate::layout::{BoxTree, TaffyLayoutEngine};
-use crate::paint::{BasicPainter, DisplayList, Painter};
+use crate::paint::{BasicPainter, DisplayList, DisplayPatch, Painter};
 
 use super::StyleInput;
 
@@ -38,6 +38,39 @@ pub struct RenderJob {
     pub layout: Option<BoxTree>,
     pub layout_styles: Option<Arc<StyleTree>>,
     pub css_warnings: usize,
+    pub baseline: Option<PaintBaseline>,
+}
+
+pub struct PaintBaseline {
+    pub key: RenderKey,
+    pub painted: Arc<DisplayList>,
+}
+
+pub enum PaintUpdate {
+    Replace(DisplayList),
+    Unchanged {
+        base: RenderKey,
+    },
+    Patch {
+        base: RenderKey,
+        patch: DisplayPatch,
+    },
+}
+
+impl PaintUpdate {
+    pub fn base(&self) -> Option<RenderKey> {
+        match self {
+            Self::Replace(_) => None,
+            Self::Unchanged { base } | Self::Patch { base, .. } => Some(*base),
+        }
+    }
+
+    pub fn applies_to(&self, display: &DisplayList) -> bool {
+        match self {
+            Self::Replace(_) | Self::Unchanged { .. } => true,
+            Self::Patch { patch, .. } => patch.fits(display),
+        }
+    }
 }
 
 pub struct RenderTree {
@@ -57,7 +90,7 @@ pub struct RenderResult {
     pub causes: RenderCauses,
     pub layout: BoxTree,
     pub styles: Arc<StyleTree>,
-    pub painted: DisplayList,
+    pub paint: PaintUpdate,
     pub painted_changed: bool,
     #[cfg_attr(
         not(test),
@@ -117,6 +150,11 @@ pub struct RenderWork {
     pub styled_nodes_visited: usize,
     pub style_entries_mapped: usize,
     pub damage_nodes_checked: usize,
+    pub paint_sources_visited: usize,
+    pub paint_primitives_visited: usize,
+    pub paint_contributors_visited: usize,
+    pub paint_rows_rebuilt: usize,
+    pub scaled_runs_rebuilt: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +187,10 @@ impl RenderCauses {
 
     pub(crate) fn contains(self, cause: RenderCause) -> bool {
         self.0 & (1 << cause as u8) != 0
+    }
+
+    pub(crate) fn is_only(self, cause: RenderCause) -> bool {
+        self == Self::one(cause)
     }
 
     pub fn bits(self) -> u16 {
@@ -243,6 +285,7 @@ fn execute_inner(
         layout,
         layout_styles,
         css_warnings,
+        baseline,
     } = job;
     let cascade_required = styles.is_none() || prepared.is_some();
     let render_span = tracing::trace_span!(
@@ -277,6 +320,7 @@ fn execute_inner(
     let mut layout = layout;
     let mut restyle_time = incremental_style_time;
     let mut painted_changed = true;
+    let mut restyle_damage = None;
     let mut restyle_failure = None;
     if cascade_required
         && let (Some(tree), Some(previous)) = (layout.as_mut(), layout_styles.as_ref())
@@ -290,12 +334,15 @@ fn execute_inner(
             None => crate::layout::restyle(tree, previous, &styles),
         };
         match result {
-            Ok(()) => {
+            Ok(damage) => {
                 restyle_time = restyle_time.saturating_add(started.elapsed());
                 painted_changed = !touched.as_deref().map_or_else(
                     || previous.paint_compatible_with(&styles),
                     |nodes| previous.paint_compatible_for(&styles, nodes),
                 );
+                work.paint_sources_visited = damage.sources_visited;
+                work.paint_primitives_visited = damage.primitives_visited;
+                restyle_damage = Some(damage);
             }
             Err(failure) => {
                 tracing::trace!(target: "textsurfer::perf", ?failure, "restyle rejected");
@@ -329,14 +376,46 @@ fn execute_inner(
     };
     set_activity(activity, key, RenderStage::Paint);
     let started = Instant::now();
-    let painted = {
+    let retained = causes.is_only(RenderCause::DynamicState)
+        && layout_time == Duration::ZERO
+        && restyle_failure.is_none();
+    let paint_update = {
         let span = tracing::trace_span!(target: "textsurfer::perf", "paint");
         let _guard = span.enter();
-        let mut painted = BasicPainter.paint(&layout, palette);
-        for (_, image) in images.iter() {
-            painted.image_assets.insert(image.asset_id, image.clone());
+        if retained
+            && let Some(baseline) = baseline
+            && let Some(damage) = restyle_damage
+        {
+            if !painted_changed {
+                PaintUpdate::Unchanged { base: baseline.key }
+            } else if let Some(retained) =
+                BasicPainter.paint_retained(&layout, palette, &baseline.painted, &damage.rows)
+            {
+                work.paint_contributors_visited = retained.contributors_visited;
+                work.paint_rows_rebuilt = retained.rows_rebuilt;
+                work.scaled_runs_rebuilt = retained.scaled_runs_rebuilt;
+                if retained.patch.rows.is_empty() && retained.patch.scaled_text.is_empty() {
+                    PaintUpdate::Unchanged { base: baseline.key }
+                } else {
+                    PaintUpdate::Patch {
+                        base: baseline.key,
+                        patch: retained.patch,
+                    }
+                }
+            } else {
+                let mut painted = BasicPainter.paint(&layout, palette);
+                for (_, image) in images.iter() {
+                    painted.image_assets.insert(image.asset_id, image.clone());
+                }
+                PaintUpdate::Replace(painted)
+            }
+        } else {
+            let mut painted = BasicPainter.paint(&layout, palette);
+            for (_, image) in images.iter() {
+                painted.image_assets.insert(image.asset_id, image.clone());
+            }
+            PaintUpdate::Replace(painted)
         }
-        painted
     };
     let paint = started.elapsed();
     tracing::trace!(
@@ -349,16 +428,26 @@ fn execute_inner(
         restyle_ms = restyle_time.as_millis(),
         layout_ms = layout_time.as_millis(),
         paint_ms = paint.as_millis(),
-        rows = painted.len(),
-        image_placements = painted.images.len(),
+        rows = layout.height,
+        image_placements = layout.images.len(),
+        paint_sources_visited = work.paint_sources_visited,
+        paint_primitives_visited = work.paint_primitives_visited,
+        paint_contributors_visited = work.paint_contributors_visited,
+        paint_rows_rebuilt = work.paint_rows_rebuilt,
+        scaled_runs_rebuilt = work.scaled_runs_rebuilt,
         "render worker completed"
     );
+    let painted_changed = match &paint_update {
+        PaintUpdate::Replace(_) => painted_changed,
+        PaintUpdate::Unchanged { .. } => false,
+        PaintUpdate::Patch { patch, .. } => !patch.rows.is_empty() || !patch.scaled_text.is_empty(),
+    };
     let result = RenderResult {
         key,
         causes,
         layout,
         styles,
-        painted,
+        paint: paint_update,
         painted_changed,
         restyle_failure,
         css_warnings,
@@ -553,14 +642,20 @@ fn execute_with_stylo_session(
             &job.forms,
         );
         let elapsed = started.elapsed();
+        let previous = job.previous_styles.as_deref().expect("checked above");
+        let touched = restyled
+            .touched
+            .into_iter()
+            .filter(|node| style_entry_changed(previous, &restyled.styles, *node))
+            .collect::<Vec<_>>();
         tracing::trace!(
             target: "textsurfer::perf",
             visited = restyled.visited,
-            touched = restyled.touched.len(),
+            touched = touched.len(),
             mapped = restyled.mapped,
             "stylo restyle completed"
         );
-        let damage_nodes_checked = restyled.touched.len();
+        let damage_nodes_checked = touched.len();
         return execute_inner(
             job,
             activity,
@@ -568,11 +663,12 @@ fn execute_with_stylo_session(
                 styles: Arc::new(restyled.styles),
                 cascade: Duration::ZERO,
                 restyle: elapsed,
-                touched: Some(restyled.touched),
+                touched: Some(touched),
                 work: RenderWork {
                     styled_nodes_visited: restyled.visited,
                     style_entries_mapped: restyled.mapped,
                     damage_nodes_checked,
+                    ..RenderWork::default()
                 },
                 css_warnings: Some(session.css_warnings()),
             }),
@@ -593,6 +689,21 @@ fn execute_with_stylo_session(
             css_warnings: Some(session.css_warnings()),
         }),
     )
+}
+
+fn style_entry_changed(
+    previous: &StyleTree,
+    next: &StyleTree,
+    node: crate::core::dom::NodeId,
+) -> bool {
+    previous.get(node) != next.get(node)
+        || [
+            crate::core::style::PseudoElement::Before,
+            crate::core::style::PseudoElement::After,
+        ]
+        .into_iter()
+        .any(|which| previous.pseudo(node, which) != next.pseudo(node, which))
+        || previous.marker(node) != next.marker(node)
 }
 
 impl Default for ThreadedRenderQueue {

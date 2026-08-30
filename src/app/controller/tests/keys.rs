@@ -25,7 +25,7 @@ proptest! {
         app.on_resize(Size { cols: 80, rows: terminal_rows });
         app.tabs.active_mut().url = "https://example.com".to_string();
         app.tabs.active_mut().painted =
-            DisplayList::from_lines(&vec![String::new(); document_rows]);
+            DisplayList::from_lines(&vec![String::new(); document_rows]).into();
         for step in steps {
             app.handle_key(press(step));
             let max = app
@@ -84,7 +84,7 @@ fn scroll_clamps_to_the_content_window() {
     app.handle_key(press(Key::Esc));
     app.on_resize(Size { cols: 80, rows: 9 });
     assert_eq!(app.geometry.content_rows(), 3);
-    app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 10]);
+    app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 10]).into();
     let max = app.tabs.active().painted.len().saturating_sub(3);
     for _ in 0..10 {
         app.handle_key(press(Key::Char('j')));
@@ -141,7 +141,7 @@ fn paging_keys_move_a_screen_at_a_time_not_a_line() {
     let mut app = App::new();
     app.handle_key(press(Key::Esc));
     app.on_resize(Size { cols: 80, rows: 26 });
-    app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 200]);
+    app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 200]).into();
     let page = app.geometry.content_rows() - 1;
     app.handle_key(press(Key::PageDown));
     assert_eq!(app.tabs.active().scroll, page);
@@ -185,7 +185,7 @@ fn resize_refits_the_start_page_to_the_content_viewport() {
 #[test]
 fn long_documents_scroll_past_u16_max_without_wrapping() {
     let mut app = App::new();
-    app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 70_000]);
+    app.tabs.active_mut().painted = DisplayList::from_lines(&vec![String::new(); 70_000]).into();
     app.handle_key(press(Key::Esc));
     app.handle_key(press(Key::End));
     assert_eq!(app.tabs.active().scroll, 69_982);

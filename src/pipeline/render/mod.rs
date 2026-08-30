@@ -21,9 +21,9 @@ pub use document::{
 pub use embedded::embedded_style_sheets;
 pub(crate) use queue::RenderCause;
 pub use queue::{
-    BlockingRenderQueue, RenderActivity, RenderCauses, RenderJob, RenderKey, RenderPoll,
-    RenderQueue, RenderResult, RenderStage, RenderSubmitted, RenderTimings, RenderTree, RenderWork,
-    ThreadedRenderQueue,
+    BlockingRenderQueue, PaintBaseline, PaintUpdate, RenderActivity, RenderCauses, RenderJob,
+    RenderKey, RenderPoll, RenderQueue, RenderResult, RenderStage, RenderSubmitted, RenderTimings,
+    RenderTree, RenderWork, ThreadedRenderQueue,
 };
 pub use response::response_kind;
 pub use source::{StyleInput, StyleSessionId, StyleSource};
@@ -39,6 +39,8 @@ pub struct RenderedPage {
     pub styles: Arc<StyleTree>,
     pub painted: DisplayList,
     pub painted_changed: bool,
+    pub paint_update: Option<PaintUpdate>,
+    pub revision: RenderKey,
     pub parse_errors: usize,
     pub css_warnings: usize,
 }

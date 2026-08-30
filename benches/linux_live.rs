@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use encoding_rs::UTF_8;
@@ -5,8 +6,11 @@ use textsurfer::core::geom::Size;
 use textsurfer::core::style::{Palette, RenderContext};
 use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::net::FetchResponse;
+use textsurfer::paint::DisplayList;
 use textsurfer::pipeline::page_load::{PageLoadOptions, PendingPageLoad};
-use textsurfer::pipeline::render::{BlockingRenderQueue, RenderKey};
+use textsurfer::pipeline::render::{
+    BlockingRenderQueue, PaintBaseline, PaintUpdate, RenderKey, RenderedPage,
+};
 use url::Url;
 
 const PAGE: &str = include_str!("../tests/fixtures/linux-live/page.html");
@@ -29,6 +33,19 @@ fn stylesheet_for(url: &Url) -> Option<&'static str> {
     } else {
         Some(MODULES_CSS)
     }
+}
+
+fn apply_page(page: RenderedPage, display: &mut Arc<DisplayList>, revision: &mut RenderKey) {
+    match page.paint_update {
+        Some(PaintUpdate::Unchanged { base }) => assert_eq!(base, *revision),
+        Some(PaintUpdate::Patch { base, patch }) => {
+            assert_eq!(base, *revision);
+            assert!(patch.apply(Arc::make_mut(display)));
+        }
+        Some(PaintUpdate::Replace(_)) => unreachable!(),
+        None => *display = Arc::new(page.painted),
+    }
+    *revision = page.revision;
 }
 
 fn main() {
@@ -166,6 +183,8 @@ fn main() {
         .first()
         .expect("the page has at least one link")
         .node;
+    let mut revision = page.revision;
+    let mut display = Arc::new(page.painted);
     assert!(
         load.set_dynamic_state(DynamicState {
             hover: Some(hovered),
@@ -173,25 +192,33 @@ fn main() {
         })
         .is_none()
     );
+    let mut hover_job = load
+        .take_render_job(RenderKey {
+            tab_id: 0,
+            generation: 0,
+            epoch: load.render_epoch(),
+            hard_epoch: load.hard_epoch(),
+        })
+        .expect("the hover queues a render");
+    hover_job.baseline = Some(PaintBaseline {
+        key: revision,
+        painted: Arc::clone(&display),
+    });
     let hover = renders
-        .render(
-            load.take_render_job(RenderKey {
-                tab_id: 0,
-                generation: 0,
-                epoch: load.render_epoch(),
-                hard_epoch: load.hard_epoch(),
-            })
-            .expect("the hover queues a render"),
-        )
+        .render(hover_job)
         .expect("the render worker returns the hover");
     let hover_timings = hover.timings;
     let hover_worker =
         hover_timings.cascade + hover_timings.restyle + hover_timings.layout + hover_timings.paint;
-    load.apply_render_result(hover)
+    let page = load
+        .apply_render_result(hover)
         .expect("the warm-up hover publishes");
+    apply_page(page, &mut display, &mut revision);
 
     let mut retained_samples = Vec::with_capacity(100);
     let mut worker_samples = Vec::with_capacity(100);
+    let mut apply_samples = Vec::with_capacity(100);
+    let mut complete_samples = Vec::with_capacity(100);
     for index in 0..100 {
         let state = if index % 2 == 0 {
             DynamicState::default()
@@ -202,16 +229,21 @@ fn main() {
             }
         };
         assert!(load.set_dynamic_state(state).is_none());
+        let mut job = load
+            .take_render_job(RenderKey {
+                tab_id: 0,
+                generation: 0,
+                epoch: load.render_epoch(),
+                hard_epoch: load.hard_epoch(),
+            })
+            .expect("the state change queues a render");
+        job.baseline = Some(PaintBaseline {
+            key: revision,
+            painted: Arc::clone(&display),
+        });
+        let complete_started = Instant::now();
         let sample = renders
-            .render(
-                load.take_render_job(RenderKey {
-                    tab_id: 0,
-                    generation: 0,
-                    epoch: load.render_epoch(),
-                    hard_epoch: load.hard_epoch(),
-                })
-                .expect("the state change queues a render"),
-            )
+            .render(job)
             .expect("the render worker returns the state change");
         retained_samples.push(sample.timings.restyle);
         worker_samples.push(
@@ -220,13 +252,22 @@ fn main() {
                 + sample.timings.layout
                 + sample.timings.paint,
         );
-        load.apply_render_result(sample)
+        let apply_started = Instant::now();
+        let page = load
+            .apply_render_result(sample)
             .expect("the state change publishes");
+        apply_page(page, &mut display, &mut revision);
+        apply_samples.push(apply_started.elapsed());
+        complete_samples.push(complete_started.elapsed());
     }
     retained_samples.sort_unstable();
     worker_samples.sort_unstable();
+    apply_samples.sort_unstable();
+    complete_samples.sort_unstable();
     let retained_p95 = retained_samples[94];
     let worker_p95 = worker_samples[94];
+    let apply_p95 = apply_samples[94];
+    let complete_p95 = complete_samples[94];
 
     println!();
     println!(
@@ -254,9 +295,18 @@ fn main() {
         retained_p95.as_secs_f64() * 1000.0
     );
     println!(
-        "  full worker p95   : {:>7.1} ms",
+        "  retained worker p95: {:>6.1} ms",
         worker_p95.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  owner apply p95   : {:>7.1} ms",
+        apply_p95.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  retained total p95: {:>7.1} ms",
+        complete_p95.as_secs_f64() * 1000.0
     );
     println!("  painted rows      : {painted_rows}");
     assert!(retained_p95 < FRAME_BUDGET);
+    assert!(complete_p95 < FRAME_BUDGET);
 }

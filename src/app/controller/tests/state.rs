@@ -233,6 +233,23 @@ fn a_dynamic_cursor_restyle_does_not_dirty_the_canvas() {
 }
 
 #[test]
+fn a_paint_only_hover_damages_document_rows_without_full_content() {
+    let mut app = loaded(
+        "<!doctype html><style>a:hover { color: red; background: blue }</style><a href=#x>target</a>",
+    );
+    let cell = link_cell(&app);
+    let row = app.tabs.active().painted.links[0].rects[0].row;
+    let _ = app.take_damage();
+    app.handle_mouse(event(MouseKind::Move, cell));
+    let damage = app.take_damage();
+    assert!(!damage.content.full);
+    assert_eq!(
+        damage.content.repaint,
+        crate::core::frame::RowDamage::Ranges(std::iter::once(row..row + 1).collect())
+    );
+}
+
+#[test]
 fn chrome_focus_hides_and_restores_retained_dom_focus() {
     let mut app = loaded(
         "<!doctype html><style>a:focus { font-weight: bold }</style><a id=target href=#x>target</a>",
@@ -523,7 +540,12 @@ fn continuous_hover_restyle_runs_once_after_input_becomes_quiet() {
         app.tabs.active().styles.as_ref().unwrap().get(target).color,
         Some(Rgb::new(255, 0, 0).into())
     );
-    app.advance(&InputBatch::new(), Duration::from_millis(51));
+    app.advance(&batch, Duration::from_millis(10));
+    assert_ne!(
+        app.tabs.active().styles.as_ref().unwrap().get(target).color,
+        Some(Rgb::new(255, 0, 0).into())
+    );
+    app.advance(&InputBatch::new(), Duration::from_millis(18));
     assert_eq!(
         app.tabs.active().styles.as_ref().unwrap().get(target).color,
         Some(Rgb::new(255, 0, 0).into())

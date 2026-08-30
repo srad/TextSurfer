@@ -7,7 +7,8 @@ use crate::paint::DisplayList;
 use crate::pipeline::image::{ImageDecodeJob, ImageDecodePayload, ImageDecodePoll, ImageSubmitted};
 use crate::pipeline::page_load::{PageLoad, PageLoadOptions, PendingPageLoad};
 use crate::pipeline::render::{
-    RenderCause, RenderKey, RenderPoll, RenderSubmitted, RenderedPage, ResponseKind, response_kind,
+    PaintBaseline, PaintUpdate, RenderCause, RenderKey, RenderPoll, RenderSubmitted, RenderedPage,
+    ResponseKind, response_kind,
 };
 
 use super::super::tab::Tab;
@@ -249,12 +250,20 @@ impl App {
     pub(super) fn advance_render_queue_result(&mut self) -> RenderAdvance {
         let mut advance = self.poll_render_result();
         if self.render_inflight.is_none() {
-            let active = self.tabs.active();
-            let key = RenderKey {
-                tab_id: active.id,
-                generation: active.generation,
-                epoch: active.load.as_ref().map_or(0, PageLoad::render_epoch),
-                hard_epoch: active.load.as_ref().map_or(0, PageLoad::hard_epoch),
+            let (key, baseline) = {
+                let active = self.tabs.active();
+                (
+                    RenderKey {
+                        tab_id: active.id,
+                        generation: active.generation,
+                        epoch: active.load.as_ref().map_or(0, PageLoad::render_epoch),
+                        hard_epoch: active.load.as_ref().map_or(0, PageLoad::hard_epoch),
+                    },
+                    active.display_revision.map(|revision| PaintBaseline {
+                        key: revision,
+                        painted: std::sync::Arc::clone(&active.painted),
+                    }),
+                )
             };
             let retry = self.render_retry.take();
             let retrying = retry.is_some();
@@ -265,7 +274,10 @@ impl App {
                     .as_mut()
                     .and_then(|load| load.take_render_job(key))
             });
-            if let Some(job) = job {
+            if let Some(mut job) = job {
+                if job.baseline.is_none() {
+                    job.baseline = baseline;
+                }
                 let job_key = job.key;
                 let causes = job.causes;
                 match self.renders.submit(job) {
@@ -349,6 +361,17 @@ impl App {
             return RenderAdvance::default();
         };
         let dynamic_state = result.causes.contains(RenderCause::DynamicState);
+        if result
+            .paint
+            .base()
+            .is_some_and(|base| tab.display_revision != Some(base))
+            || !result.paint.applies_to(&tab.painted)
+        {
+            if let Some(load) = tab.load.as_mut() {
+                load.reject_paint_result();
+            }
+            return RenderAdvance::default();
+        }
         let Some(page) = tab
             .load
             .as_mut()
@@ -356,14 +379,19 @@ impl App {
         else {
             return RenderAdvance::default();
         };
-        let painted_changed = apply_rendered_page(tab, page, width, rows);
+        let applied = apply_rendered_page(tab, page, width, rows);
         if !dynamic_state {
             update_load_message(tab);
         }
         let published = index == active_index;
+        if published {
+            for range in applied.rows {
+                self.damage.repaint_rows(range);
+            }
+        }
         RenderAdvance {
             published,
-            painted_changed: published && painted_changed,
+            painted_changed: published && applied.full,
         }
     }
 
@@ -501,11 +529,12 @@ impl App {
                             tab.base = None;
                             tab.document = None;
                             tab.styles = None;
-                            tab.painted = DisplayList::from_lines(&[
+                            tab.painted = std::sync::Arc::new(DisplayList::from_lines(&[
                                 format!("failed to load {}", tab.url),
                                 String::new(),
                                 format!("  {reason}"),
-                            ]);
+                            ]));
+                            tab.display_revision = None;
                             tab.message = format!("{reason} - {}", tab.url);
                             active_display_changed = index == active_index;
                         } else {
@@ -537,13 +566,14 @@ impl App {
                                     tab.base = None;
                                     tab.document = None;
                                     tab.styles = None;
-                                    tab.painted = DisplayList::from_lines(
+                                    tab.painted = std::sync::Arc::new(DisplayList::from_lines(
                                         &decoded
                                             .text
                                             .lines()
                                             .map(str::to_string)
                                             .collect::<Vec<_>>(),
-                                    );
+                                    ));
+                                    tab.display_revision = None;
                                     tab.message = format!("loaded {} (plain text)", tab.url);
                                     active_display_changed = index == active_index;
                                 }
@@ -552,11 +582,12 @@ impl App {
                                     tab.base = None;
                                     tab.document = None;
                                     tab.styles = None;
-                                    tab.painted = DisplayList::from_lines(&[
+                                    tab.painted = std::sync::Arc::new(DisplayList::from_lines(&[
                                         format!("cannot display {}", tab.url),
                                         String::new(),
                                         format!("  unsupported content type: {content_type}"),
-                                    ]);
+                                    ]));
+                                    tab.display_revision = None;
                                     tab.message =
                                         format!("unsupported content type: {content_type}");
                                     active_display_changed = index == active_index;
@@ -569,11 +600,12 @@ impl App {
                         tab.base = None;
                         tab.document = None;
                         tab.styles = None;
-                        tab.painted = DisplayList::from_lines(&[
+                        tab.painted = std::sync::Arc::new(DisplayList::from_lines(&[
                             format!("failed to load {}", tab.url),
                             String::new(),
                             format!("  {error}"),
-                        ]);
+                        ]));
+                        tab.display_revision = None;
                         tab.message = format!("load failed: {error}");
                         active_display_changed = index == active_index;
                     }
@@ -711,20 +743,42 @@ impl App {
     }
 }
 
+pub(super) struct PageApply {
+    pub(super) full: bool,
+    pub(super) rows: Vec<std::ops::Range<usize>>,
+}
+
 pub(super) fn apply_rendered_page(
     tab: &mut Tab,
     page: RenderedPage,
     width: usize,
     rows: usize,
-) -> bool {
-    let painted_changed = page.painted_changed;
-    tab.painted = page.painted;
+) -> PageApply {
+    let mut applied = PageApply {
+        full: false,
+        rows: Vec::new(),
+    };
+    match page.paint_update {
+        Some(PaintUpdate::Unchanged { .. }) => {}
+        Some(PaintUpdate::Patch { patch, .. }) => {
+            applied.rows = patch.changed_rows();
+            if !patch.apply(std::sync::Arc::make_mut(&mut tab.painted)) {
+                applied.full = true;
+            }
+        }
+        Some(PaintUpdate::Replace(_)) => unreachable!(),
+        None => {
+            tab.painted = std::sync::Arc::new(page.painted);
+            applied.full = page.painted_changed;
+        }
+    }
+    tab.display_revision = Some(page.revision);
     tab.layout_width = width;
     tab.document = Some(page.document);
     tab.styles = Some(page.styles);
     tab.render_dirty = false;
     tab.scroll = tab.scroll.min(tab.painted.len().saturating_sub(rows));
-    painted_changed
+    applied
 }
 
 /// What layout could not do for this page.

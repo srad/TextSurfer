@@ -120,12 +120,14 @@ before any item is marked `(done)`.
 1. Read this status board, then recent `git log` entries for historical context.
 2. M7 is code-complete with Stylo as the only cascade; its three-page native smoke remains.
 3. Add bounded static SVG rasterization, then smoke M6 images and M7 styling in both frontends.
-4. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
+4. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
+   release state-change-through-apply gate is 2.6 ms p95.
+5. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
    editing and submission are done.
-5. Run the gates before and after; never mark `(done)` with red gates.
-6. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+6. Run the gates before and after; never mark `(done)` with red gates.
+7. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-7. Live repo: no commits without explicit user confirmation.
+8. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -566,10 +568,10 @@ fluency: the native window still feels loaded and laggy.
       injected-clock scheduler gives both adapters an immediate idle frame and a 16.667 ms sustained
       cadence, carries discrete backlog losslessly, and never wakes while idle. *(synthetic cadence
       contract is green; native smoke still fails)*
-- [ ] Retain the presented Ratatui buffer and page scene. Pure scrolling moves the content-row
-      region and paints only exposed rows. Continuous hover and resize previews defer their
-      conservative full render/reflow fallback until 50 ms quiet, so wheel, pointer and resize
-      streams cannot repeatedly enter cascade or layout.
+- [x] Retain the presented Ratatui buffer and page scene. Pure scrolling moves the content-row
+      region and paints only exposed rows. Continuous dynamic state coalesces to the next 16.667 ms
+      presentation deadline without sliding under later input; resize previews retain their 50 ms
+      settle because they can require full layout.
 - [ ] Bound VGA raster and presentation work with batched cell invalidation, retained scaled-text
       overlays, pixel damage, buffer-age-correct partial copies, and softbuffer resize only on
       physical size change. Damage is at most 32 merged regions with a 50% full-damage threshold.
@@ -729,36 +731,40 @@ manual mouse walkthrough remain pending.
       and links. *Limits:* horizontal LTR rectangular margin boxes only; no `shape-outside`, logical
       directions/writing modes, `z-index`, deliberate negative-margin overlap, or positioned
       descendants whose containing block crosses the atomic float boundary.
-- [ ] **Perf gate (in progress):** the pinned Linux Wikipedia revision commits in <250 ms debug,
-      worker layout+paint is <200 ms, and no owner-sequence work slice exceeds 8 ms on the reference
-      Windows machine. Input, DOM and future JavaScript remain on one priority-ordered owner
-      sequence; every interactive HTML response uses incremental encoding_rs decoding and html5ever
-      parsing. Moving inline and external CSS parsing into a bounded owned-value processor remains
-      open. One bounded render worker cascades, lays out and paints before publishing revision-tagged
-      artifacts atomically. Hard revisions cover navigation, DOM/JavaScript, viewport, theme and
-      user state and reject stale output; network stylesheet/image arrivals are soft revisions whose
-      coherent intermediate output may paint before one coalesced latest render. Current benchmark-
-      profile fixture measurements are 29 ms parse/discovery across 13 slices, 4 ms maximum owner
-      slice, 6 ms snapshot and 222 ms worker render (46 ms cascade, 122 ms layout, 53 ms paint).
-      The 222 ms worker and roughly 257 ms total keep this item open. Retained invalidation tracks
-      cascade and layout independently and pairs retained geometry with the style tree that produced
-      it.
-      `format_inline` measurement/emission reuse, allocation-free blank cells and indexed hit
-      resolution are part of the same gate. VGA presentation borrows the display list and both
-      frontends keep status-only damage independent of page image/overlay traversal. Dynamic-state
-      result publication carries paint-change metadata instead of cloning the display list on the
-      owner sequence. Dense painted rows stay unless the fixture disproves it. Opt-in correlated
-      timeline diagnostics are done.
-      Active dynamic rules gate inert transitions from supported restyle candidates. Every supported
-      transition recascades against retained geometry; the actual old and new computed styles decide
-      whether paint sources can be restyled in place or the full-layout fixed point is required.
-      Layout boxes retain exact element or pseudo-element paint-source identity, including dormant
-      transparent fills and borders. A captured full Linux page with both external stylesheets takes
-      the retained path for link hover (566 ms cascade, 7 ms restyle, 0 ms layout, 94 ms paint); the
-      pinned HTML-only fixture measures 102 ms (42 ms cascade, 4 ms restyle, 0 ms layout, 55 ms
-      paint). Native VGA confirmation remains pending.
-      The fixture is revision `1371530035`, SHA-256
-      `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
+- [ ] **Perf gate (in progress).** Standing budgets on the reference Windows machine: the pinned
+      Linux Wikipedia revision commits in <250 ms debug, worker layout+paint is <200 ms, no
+      owner-sequence work slice exceeds 8 ms, and a warmed paint-only interaction completes through
+      owner application in <16.667 ms p95. Input, DOM and future JavaScript remain on one
+      priority-ordered owner sequence; responses use incremental `encoding_rs` decoding and
+      html5ever parsing. One bounded render worker publishes revision-tagged artifacts atomically;
+      hard revisions reject stale output, while stylesheet/image arrivals may publish one coherent
+      intermediate soft revision before the coalesced latest render.
+      - [ ] **Retained paint for dynamic state (implemented; native smoke pending).** Layout caches
+            source-to-primitive and row-interval indices. A paint-compatible state change updates
+            only primitives whose computed style changed, reconstructs each dirty row from every
+            overlapping fill, stroke and fragment in original order, and patches changed rows and
+            scaled-text runs against an immutable base display. Revision-tagged
+            `Unchanged`/`Patch`/`Replace` publication rejects a mismatched base before PageLoad caches
+            are committed; form/resource/theme/geometry/generated-content changes and ambiguous
+            source identity retain the full replacement path. Hits, links, images, overlays and
+            image assets remain untouched on the layout-compatible path. Owner damage carries at
+            most 32 merged document-row ranges; terminal protocol images are recomposed only when
+            intersected. Exact fresh-paint equivalence and 1,000 → 10,000 sibling locality cover
+            layout primitives, painter contributors, rebuilt rows and owner damage. Stylo may still
+            traverse unrelated descendants when an ancestor's `:hover` state changes, but only
+            genuinely changed style entries reach layout and paint. The 1,355-row live fixture's
+            100-transition release gate measures **0.2 ms restyle p95**, **0.2 ms retained-worker
+            p95** and **2.6 ms state-change-through-owner-apply p95**. Native VGA and terminal smoke
+            must confirm responsive stationary-pointer scrolling and hover before this slice is done.
+      - [ ] **Remaining cold/owner work.** Move inline and external CSS parsing into a bounded
+            owned-value processor; reuse `format_inline` measurement/emission; keep blank-cell
+            generation allocation-free; and finish indexed hit resolution. Dense painted rows stay
+            only if the fixture proves them cheaper than a sparse representation. Correlated timeline
+            diagnostics are already available. The current release fixture measures 36.0 ms
+            parse/discovery, a 6.9 ms maximum owner slice, 61.1 ms cascade, 1,666.7 ms layout,
+            78.6 ms paint and 1,806.5 ms total worker render; layout therefore owns the cold-worker
+            budget failure. The committed fixture is revision `1371530035`,
+            SHA-256 `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
 - [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
       config file · `data:` URL scheme · optional Readability-style reader view.
 
@@ -969,15 +975,16 @@ Adoption additionally requires: the cascade contract suite green on `StyloCascad
 static-WPT output equivalent or re-baselined with written justification; incremental styling equal to
 a fresh full Stylo cascade across hover enter/leave, active, focus, focus-visible, focus-within,
 `:checked` sibling selectors, inherited and custom-property changes, descendant selectors and
-`::before`/`::after`; paint-only hover returning `Paint` with zero layout; the restyled-node count for
-a local hover unchanged when unrelated siblings grow 1,000 → 10,000; and warmed release-mode
-retained restyle plus mapping under one 16.667 ms frame at p95. The timing and node-count gates are
-paired deliberately — timing alone can be passed by a hidden full-tree traversal. No `style::`
+`::before`/`::after`; paint-only hover returning `Paint` with zero layout; the changed style entries
+delivered to layout unchanged when unrelated siblings grow 1,000 → 10,000; and warmed release-mode
+retained restyle plus mapping under one 16.667 ms frame at p95. Raw Stylo traversal and mapped-entry
+counts remain visible separately so timing cannot hide conservative descendant work. No `style::`
 type may appear in `core`, `layout`, `paint`, `app` or any render job/result message.
 
 `benches/linux_live.rs` measures 100 warmed enter/leave transitions. The current reference run is
-2.2 ms p95 for retained Stylo work. Full worker p95 is 89.8 ms because paint still rebuilds the
-1,355-row display list; that visible debt remains owned by M6 performance rather than M7 styling.
+0.2 ms p95 for retained Stylo work and the retained worker, and 2.6 ms p95 through owner application.
+Stylo can conservatively visit unrelated descendants when an ancestor's `:hover` state changes;
+publication filters that traversal to genuinely changed style entries before layout and paint.
 
 **Pre-adoption baseline retained for comparison:**
 

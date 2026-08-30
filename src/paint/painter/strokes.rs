@@ -32,6 +32,69 @@ pub(super) fn draw_strokes(
     }
 }
 
+fn add_stroke_row(
+    cells: &mut BTreeMap<(usize, usize), StrokeCell>,
+    stroke: BorderStroke,
+    viewport_width: usize,
+    document_height: usize,
+    row: usize,
+) {
+    let rect = stroke.rect;
+    if rect.width == 0
+        || rect.height == 0
+        || rect.col >= viewport_width
+        || rect.row >= document_height
+    {
+        return;
+    }
+    let right = rect
+        .col
+        .saturating_add(rect.width - 1)
+        .min(viewport_width - 1);
+    let bottom = rect
+        .row
+        .saturating_add(rect.height - 1)
+        .min(document_height - 1);
+    if row < rect.row || row > bottom {
+        return;
+    }
+    if row == rect.row && stroke.edges.top.is_visible() {
+        add_horizontal(cells, row, rect.col, right, stroke, stroke.edges.top);
+    }
+    if row == bottom && stroke.edges.bottom.is_visible() {
+        add_horizontal(cells, row, rect.col, right, stroke, stroke.edges.bottom);
+    }
+    let mask = if rect.row == bottom {
+        5
+    } else {
+        u8::from(row > rect.row) | (u8::from(row < bottom) << 2)
+    };
+    if stroke.edges.left.is_visible() {
+        place_stroke(cells, row, rect.col, mask, stroke, stroke.edges.left);
+    }
+    if stroke.edges.right.is_visible() {
+        place_stroke(cells, row, right, mask, stroke, stroke.edges.right);
+    }
+}
+
+pub(super) fn draw_strokes_row(
+    row_buffer: &mut RowBuffer,
+    viewport_width: usize,
+    document_height: usize,
+    strokes: &[BorderStroke],
+    row: usize,
+) {
+    let mut cells = BTreeMap::<(usize, usize), StrokeCell>::new();
+    for stroke in strokes {
+        add_stroke_row(&mut cells, *stroke, viewport_width, document_height, row);
+    }
+    for ((cell_row, col), cell) in cells {
+        if cell_row == row {
+            row_buffer.write(col, border_glyph(cell.mask), cell.style);
+        }
+    }
+}
+
 fn add_stroke(
     cells: &mut BTreeMap<(usize, usize), StrokeCell>,
     stroke: BorderStroke,

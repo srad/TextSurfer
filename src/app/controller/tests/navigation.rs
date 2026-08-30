@@ -35,7 +35,7 @@ fn about_blank_opens_the_start_page_without_fetching() {
     app.submit_url("about:blank");
     assert_eq!(app.tab_count(), 1);
     assert_eq!(app.active_url(), "about:blank");
-    assert_eq!(app.tabs.active().painted, start_page());
+    assert_eq!(app.tabs.active().painted.as_ref(), &start_page());
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn home_navigates_the_current_tab_to_the_start_page() {
     app.handle_key(alt(press(Key::Home)));
     assert_eq!(app.tab_count(), 1);
     assert_eq!(app.active_url(), "about:blank");
-    assert_eq!(app.tabs.active().painted, start_page());
+    assert_eq!(app.tabs.active().painted.as_ref(), &start_page());
     assert_eq!(app.tabs.active().scroll, 0);
 }
 

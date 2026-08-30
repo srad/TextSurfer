@@ -49,7 +49,7 @@ impl RowBuffer {
         }
     }
 
-    fn fill_background(&mut self, from: usize, to: usize, background: Rgb) {
+    pub(super) fn fill_background(&mut self, from: usize, to: usize, background: Rgb) {
         for index in from..to.min(self.styles.len()) {
             if self.owners[index].is_none() {
                 self.cells[index] = Some(" ".to_string());

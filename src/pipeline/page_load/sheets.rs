@@ -91,6 +91,7 @@ impl PageLoad {
             layout,
             layout_styles,
             css_warnings,
+            baseline: None,
         })
     }
 
@@ -166,11 +167,18 @@ impl PageLoad {
             pending_invalidation = ?self.invalidation,
             "render result published"
         );
+        let painted_changed = result.painted_changed;
+        let (painted, paint_update) = match result.paint {
+            super::super::render::PaintUpdate::Replace(painted) => (painted, None),
+            update => (crate::paint::DisplayList::default(), Some(update)),
+        };
         Some(RenderedPage {
             document: self.document.clone(),
             styles: result.styles,
-            painted: result.painted,
-            painted_changed: result.painted_changed,
+            painted,
+            painted_changed,
+            paint_update,
+            revision: result.key,
             parse_errors: self.parse_errors,
             css_warnings: self.cached_css_warnings,
         })

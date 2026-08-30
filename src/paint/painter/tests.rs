@@ -603,3 +603,37 @@ fn plain_text_becomes_an_unstyled_display_list() {
     assert_eq!(display.text_lines(), lines);
     assert!(display.hits.is_empty() && display.links.is_empty());
 }
+
+#[test]
+fn an_invalid_display_patch_is_atomic() {
+    let mut display = DisplayList::from_lines(&["before".to_string()]);
+    let baseline = display.clone();
+    let patch = DisplayPatch {
+        rows: vec![
+            (
+                0,
+                DisplayList::from_lines(&["after".to_string()])
+                    .rows
+                    .remove(0),
+            ),
+            (1, PaintedRow::default()),
+        ],
+        scaled_text: Vec::new(),
+    };
+    assert!(!patch.fits(&display));
+    assert!(!patch.apply(&mut display));
+    assert_eq!(display, baseline);
+}
+
+#[test]
+fn display_patch_damage_is_sorted_and_disjoint() {
+    let patch = DisplayPatch {
+        rows: vec![
+            (4, PaintedRow::default()),
+            (1, PaintedRow::default()),
+            (2, PaintedRow::default()),
+        ],
+        scaled_text: Vec::new(),
+    };
+    assert_eq!(patch.changed_rows(), vec![1..3, 4..5]);
+}

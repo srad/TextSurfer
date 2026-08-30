@@ -1,4 +1,5 @@
 mod contrast;
+mod retained;
 mod row;
 mod strokes;
 
@@ -18,6 +19,7 @@ use row::{RowBuffer, fill_background};
 use strokes::draw_strokes;
 
 pub use contrast::{legible_foreground, resolve_cell_style};
+pub use retained::DisplayPatch;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DisplayList {
