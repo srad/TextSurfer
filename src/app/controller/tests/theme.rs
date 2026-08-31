@@ -116,6 +116,7 @@ fn keyboard_selection_and_reopening_view_follow_the_current_theme() {
         app.handle_key(press(key));
     }
     assert_eq!(app.theme_index(), 3);
+    app.handle_key(press(Key::Esc));
     app.handle_key(alt(press(Key::Char('v'))));
     assert_eq!(app.chrome_view().main_menu.active, THEME_MENU);
     assert_eq!(app.chrome_view().main_menu.selected, Some(3));

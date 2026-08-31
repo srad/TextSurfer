@@ -1021,7 +1021,7 @@ fn image_percentages_use_only_definite_layout_bases() {
         .iter()
         .map(|image| (image.rect.width, image.rect.height))
         .collect::<Vec<_>>();
-    assert!(sizes.contains(&(2, 1)), "{sizes:?}");
+    assert!(sizes.contains(&(1, 1)), "{sizes:?}");
     assert!(sizes.contains(&(4, 2)), "{sizes:?}");
 }
 

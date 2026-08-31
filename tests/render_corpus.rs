@@ -298,7 +298,7 @@ fn comparison_layout(page: &RenderedPage, viewport: Size) -> BoxTree {
         &page.document.borrow(),
         &page.styles,
         viewport,
-        &FormState::empty(),
+        FormState::empty(),
         &images,
         CellMetric::DEFAULT,
     )

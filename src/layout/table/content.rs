@@ -37,7 +37,7 @@ pub(super) enum CellItem {
 #[derive(Clone)]
 pub(super) enum CellAtomSource {
     Table(NodeId),
-    Image(TableImageSource),
+    Image(Box<TableImageSource>),
 }
 
 impl CellAtomSource {
@@ -518,12 +518,14 @@ impl TableFormatter<'_> {
                         if replaced.image
                             && let Some(image) = self.images.and_then(|images| images.get(node))
                         {
-                            items.push(CellItem::Atom(CellAtomSource::Image(TableImageSource {
-                                node,
-                                image: image.clone(),
-                                style,
-                                hidden: style.visibility.is_hidden(),
-                            })));
+                            items.push(CellItem::Atom(CellAtomSource::Image(Box::new(
+                                TableImageSource {
+                                    node,
+                                    image: image.clone(),
+                                    style,
+                                    hidden: style.visibility.is_hidden(),
+                                },
+                            ))));
                         } else {
                             items.push(CellItem::Text(TextRun {
                                 node,

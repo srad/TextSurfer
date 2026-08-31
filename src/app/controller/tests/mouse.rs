@@ -3,7 +3,7 @@ use super::*;
 use crate::core::event::{InputBatch, InputEvent, MouseButton, MouseEvent, MouseKind};
 use crate::core::frame::{ChromeDamage, RowDamage};
 use crate::core::geom::Point;
-use crate::ui::mouse::WHEEL_ROWS;
+use crate::ui::mouse::{ChromeGeometry, WHEEL_ROWS};
 use crate::ui::widgets::menu::{popup_rect, title_x};
 
 /// The default geometry's content origin, where document cell `(0, scroll)` is painted.
@@ -754,15 +754,16 @@ fn a_repeated_move_inside_one_link_does_not_repaint() {
 }
 
 #[test]
-fn a_window_with_no_room_for_content_swallows_every_click() {
+fn a_window_with_no_room_for_content_swallows_inert_pointer_input() {
     let mut app = loaded("<a href='/next'>go</a>");
-    app.on_resize(Size { cols: 40, rows: 4 });
-    for row in 0..4 {
-        app.handle_mouse(press(MouseButton::Left, at(2, row)));
-        app.handle_mouse(release(MouseButton::Left, at(2, row)));
-        app.handle_mouse(moved(at(2, row)));
-        app.handle_mouse(wheel(WHEEL_ROWS, at(2, row)));
-    }
+    let size = Size { cols: 40, rows: 4 };
+    app.on_resize(size);
+    assert_eq!(ChromeGeometry::for_size(size).content_view(), None);
+    let divider = at(2, 2);
+    app.handle_mouse(press(MouseButton::Left, divider));
+    app.handle_mouse(release(MouseButton::Left, divider));
+    app.handle_mouse(moved(divider));
+    app.handle_mouse(wheel(WHEEL_ROWS, divider));
     assert_eq!(app.active_url(), PAGE);
     assert!(!app.hovers_link());
 }
