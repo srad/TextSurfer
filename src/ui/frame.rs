@@ -14,8 +14,8 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use crate::core::frame::{ChromeDamage, FrameDamage, RowDamage};
 
 use super::chrome::{
-    ChromeView, compose, compose_content_rows, compose_flash, compose_scrollbar, compose_status,
-    compose_toolbar, content_rect, cursor_position,
+    ChromeView, compose, compose_content_rows, compose_flash, compose_menu_bar, compose_scrollbar,
+    compose_status, compose_toolbar, content_rect, cursor_position,
 };
 
 pub struct FrameComposer {
@@ -254,6 +254,11 @@ impl FrameComposer {
             // The content rows this sits on were just repainted, so the notice has to go
             // back on top of them.
             if content_changed && let Some(rect) = compose_flash(&mut self.current, view, area) {
+                regions.push(rect);
+            }
+            if damage.chrome.contains(ChromeDamage::MENU_BAR)
+                && let Some(rect) = compose_menu_bar(&mut self.current, view, area)
+            {
                 regions.push(rect);
             }
             if damage.chrome.contains(ChromeDamage::TOOLBAR)
@@ -735,6 +740,25 @@ mod tests {
             .unwrap();
         let mut damage = FrameDamage::default();
         damage.damage_chrome(crate::core::frame::ChromeDamage::STATUS);
+        composer.present(&mut backend, &view, &damage).unwrap();
+        assert_eq!(
+            composer.last_drawn_cells(),
+            usize::from(view.geometry.size.cols)
+        );
+    }
+
+    #[test]
+    fn main_menu_title_hover_damage_draws_only_the_menu_bar() {
+        let area = Rect::new(0, 0, 80, 24);
+        let mut view = draft_view();
+        let mut backend = TestBackend::new(area.width, area.height);
+        let mut composer = FrameComposer::new(area);
+        composer
+            .present(&mut backend, &view, &FrameDamage::full())
+            .unwrap();
+        view.main_menu.hovered_title = Some(1);
+        let mut damage = FrameDamage::default();
+        damage.damage_chrome(crate::core::frame::ChromeDamage::MENU_BAR);
         composer.present(&mut backend, &view, &damage).unwrap();
         assert_eq!(
             composer.last_drawn_cells(),

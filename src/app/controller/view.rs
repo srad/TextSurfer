@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use crate::core::focus::Focus;
 use crate::pipeline::render::RenderStage;
 use crate::ui::chrome::ChromeView;
-use crate::ui::chrome::TextFieldMenuView;
+use crate::ui::chrome::{MainMenuView, TextFieldMenuView};
 use crate::ui::widgets::content::ContentLines;
 use crate::ui::widgets::status::{LoadProgress, LoadProgressAmount, StatusView};
 use crate::ui::widgets::tabs::TabChip;
@@ -101,9 +101,13 @@ impl App {
             address,
             address_focused: self.focus == Focus::Address,
             content_cursor: self.content_cursor(),
-            menu_open: self.menu_open,
-            menu_active: self.menu_active,
-            menu_item: self.menu_item,
+            main_menu: MainMenuView {
+                open: self.main_menu.is_open(),
+                active: self.main_menu.active(),
+                selected: self.selected_main_menu_item(),
+                hovered_title: self.hovered_main_menu_title(),
+                enabled: self.enabled_main_menu_items(),
+            },
             tabs: self.tab_chips(),
             active_tab: self.tabs.active_index(),
             content: ContentLines {

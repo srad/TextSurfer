@@ -3,7 +3,7 @@ use ratatui::style::Modifier;
 
 use crate::core::geom::Size;
 use crate::paint::DisplayList;
-use crate::ui::chrome::ChromeView;
+use crate::ui::chrome::{ChromeView, MainMenuView};
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::{DEFAULT, DEFAULT_THEME_INDEX};
 use crate::ui::widgets::content::ContentLines;
@@ -28,9 +28,15 @@ pub fn draft_view() -> ChromeView<'static> {
         address: crate::ui::widgets::text_field::TextFieldView::display("https://example.com"),
         address_focused: false,
         content_cursor: None,
-        menu_open: false,
-        menu_active: 0,
-        menu_item: 0,
+        main_menu: MainMenuView {
+            open: false,
+            active: 0,
+            selected: None,
+            hovered_title: None,
+            enabled: crate::ui::widgets::menu::MenuItemMask::all(
+                crate::ui::widgets::menu::MENUS[0].len(),
+            ),
+        },
         tabs: Vec::new(),
         active_tab: 0,
         content: ContentLines {

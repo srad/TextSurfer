@@ -2,6 +2,7 @@ mod actions;
 mod delivery;
 mod flash;
 mod forms;
+mod menu;
 mod navigation;
 mod pointer;
 mod session;
@@ -34,6 +35,7 @@ use super::startpage::start_page_for;
 use super::tabs::TabManager;
 use delivery::apply_rendered_page;
 use flash::FlashNotice;
+use menu::MainMenuState;
 use pointer::{HoverTarget, PressedTarget, ScrollDrag, TextFieldContext, TextFieldTarget};
 use viewport::content_viewport;
 
@@ -54,9 +56,7 @@ pub struct App {
     renders: Arc<dyn RenderQueue>,
     render_inflight: Option<RenderKey>,
     render_retry: Option<RenderJob>,
-    menu_open: bool,
-    menu_active: usize,
-    menu_item: usize,
+    main_menu: MainMenuState,
     theme_index: usize,
     focus_before_menu: Focus,
     now: Duration,
@@ -160,9 +160,7 @@ impl App {
             renders,
             render_inflight: None,
             render_retry: None,
-            menu_open: false,
-            menu_active: 0,
-            menu_item: 0,
+            main_menu: MainMenuState::default(),
             theme_index: crate::ui::theme::DEFAULT_THEME_INDEX,
             focus_before_menu: Focus::Address,
             now: Duration::ZERO,

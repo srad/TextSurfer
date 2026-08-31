@@ -13,7 +13,8 @@ impl ChromeDamage {
     pub const NONE: Self = Self(0);
     pub const STATUS: Self = Self(1);
     pub const TOOLBAR: Self = Self(2);
-    pub const FULL: Self = Self(4);
+    pub const MENU_BAR: Self = Self(4);
+    pub const FULL: Self = Self(8);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

@@ -4,7 +4,7 @@ use crate::core::event::{InputBatch, InputEvent, MouseButton, MouseEvent, MouseK
 use crate::core::frame::{ChromeDamage, RowDamage};
 use crate::core::geom::Point;
 use crate::ui::mouse::WHEEL_ROWS;
-use crate::ui::widgets::menu::popup_rect;
+use crate::ui::widgets::menu::{popup_rect, title_x};
 
 /// The default geometry's content origin, where document cell `(0, scroll)` is painted.
 const ORIGIN: Point = Point { col: 1, row: 7 };
@@ -592,32 +592,126 @@ fn a_form_context_menu_keeps_and_copies_the_clicked_selection() {
 fn menu_titles_open_and_toggle_and_items_dispatch() {
     let mut app = App::new();
     app.handle_mouse(press(MouseButton::Left, at(2, 0)));
-    assert!(app.menu_open);
-    assert_eq!(app.menu_active, 0);
+    app.handle_mouse(release(MouseButton::Left, at(2, 0)));
+    assert!(app.chrome_view().main_menu.open);
+    assert_eq!(app.chrome_view().main_menu.active, 0);
     app.handle_mouse(press(MouseButton::Left, at(2, 0)));
-    assert!(!app.menu_open, "the same title closes what it opened");
+    app.handle_mouse(release(MouseButton::Left, at(2, 0)));
+    assert!(
+        !app.chrome_view().main_menu.open,
+        "the same title closes what it opened"
+    );
 
     app.handle_mouse(press(MouseButton::Left, at(2, 0)));
+    app.handle_mouse(release(MouseButton::Left, at(2, 0)));
     let popup = popup_rect(
         ratatui::layout::Rect::new(0, 0, 80, 24),
         ratatui::layout::Rect::new(0, 0, 80, 24),
         0,
     );
     // File → New tab is the first row inside the popup border.
-    app.handle_mouse(press(MouseButton::Left, at(popup.x + 2, popup.y + 1)));
-    assert!(!app.menu_open);
+    let item = at(popup.x + 2, popup.y + 1);
+    app.handle_mouse(press(MouseButton::Left, item));
+    app.handle_mouse(release(MouseButton::Left, item));
+    assert!(!app.chrome_view().main_menu.open);
     assert_eq!(app.tab_count(), 2);
+}
+
+#[test]
+fn main_menu_hover_tracks_titles_and_switches_open_dropdowns() {
+    let mut app = App::new();
+    app.take_damage();
+    app.handle_mouse(moved(at(title_x(1), 0)));
+    let view = app.chrome_view();
+    assert!(!view.main_menu.open);
+    assert_eq!(view.main_menu.hovered_title, Some(1));
+    assert_eq!(app.pointer_cursor(), crate::core::style::Cursor::Default);
+    let damage = app.take_damage();
+    assert!(damage.chrome.contains(ChromeDamage::MENU_BAR));
+    assert!(!damage.content.full);
+
+    app.handle_mouse(press(MouseButton::Left, at(title_x(0), 0)));
+    app.handle_mouse(release(MouseButton::Left, at(title_x(0), 0)));
+    assert_eq!(app.chrome_view().main_menu.selected, None);
+    app.take_damage();
+    app.handle_mouse(moved(at(title_x(1), 0)));
+    let view = app.chrome_view();
+    assert_eq!(view.main_menu.active, 1);
+    assert_eq!(view.main_menu.selected, None);
+    assert!(app.take_damage().content.full);
+
+    let popup = popup_rect(
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        1,
+    );
+    app.handle_mouse(moved(at(popup.x + 1, popup.y + 3)));
+    assert_eq!(app.chrome_view().main_menu.selected, Some(2));
+    assert_eq!(app.pointer_cursor(), crate::core::style::Cursor::Default);
+    app.take_damage();
+    app.handle_mouse(moved(at(popup.x + 2, popup.y + 3)));
+    assert!(app.take_damage().is_empty());
+}
+
+#[test]
+fn main_menu_disabled_items_are_dim_and_inert() {
+    let mut app = App::new();
+    let active_url = app.active_url().to_string();
+    app.handle_mouse(press(MouseButton::Left, at(title_x(1), 0)));
+    app.handle_mouse(release(MouseButton::Left, at(title_x(1), 0)));
+    let popup = popup_rect(
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        1,
+    );
+    let back = at(popup.x + 1, popup.y + 1);
+    app.handle_mouse(moved(back));
+    let view = app.chrome_view();
+    assert!(!view.main_menu.enabled.contains(0));
+    assert!(!view.main_menu.enabled.contains(1));
+    assert_eq!(view.main_menu.selected, None);
+    app.handle_mouse(press(MouseButton::Left, back));
+    app.handle_mouse(release(MouseButton::Left, back));
+    assert!(app.chrome_view().main_menu.open);
+    assert_eq!(app.active_url(), active_url);
+}
+
+#[test]
+fn main_menu_press_drag_release_switches_titles_and_dispatches() {
+    let mut app = App::new();
+    app.handle_mouse(press(MouseButton::Left, at(title_x(0), 0)));
+    app.handle_mouse(moved(at(title_x(1), 0)));
+    assert_eq!(app.chrome_view().main_menu.active, 1);
+    app.handle_mouse(moved(at(title_x(0), 0)));
+    let popup = popup_rect(
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        ratatui::layout::Rect::new(0, 0, 80, 24),
+        0,
+    );
+    let new_tab = at(popup.x + 1, popup.y + 1);
+    app.handle_mouse(moved(new_tab));
+    assert_eq!(app.chrome_view().main_menu.selected, Some(0));
+    app.handle_mouse(release(MouseButton::Left, new_tab));
+    assert_eq!(app.tab_count(), 2);
+    assert!(!app.chrome_view().main_menu.open);
 }
 
 #[test]
 fn a_click_outside_an_open_menu_only_closes_it() {
     let mut app = loaded("<a href='/next'>go</a>");
     let cell = first_link_cell(&app);
+    app.handle_mouse(moved(cell));
+    assert!(app.hovers_link());
     app.handle_mouse(press(MouseButton::Left, at(2, 0)));
-    assert!(app.menu_open);
+    app.handle_mouse(release(MouseButton::Left, at(2, 0)));
+    assert!(app.chrome_view().main_menu.open);
+    assert!(!app.hovers_link());
+    app.handle_mouse(moved(cell));
+    assert!(!app.hovers_link());
     app.handle_mouse(press(MouseButton::Left, cell));
+    assert!(app.hovers_link());
     app.handle_mouse(release(MouseButton::Left, cell));
-    assert!(!app.menu_open);
+    assert!(!app.chrome_view().main_menu.open);
     assert_eq!(app.active_url(), PAGE);
 }
 

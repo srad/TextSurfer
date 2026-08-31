@@ -11,7 +11,7 @@ use crate::ui::mouse::ChromeGeometry;
 use crate::ui::theme::Theme;
 use crate::ui::widgets::content::{Content, ContentLines};
 use crate::ui::widgets::flash::{Flash, flash_rect};
-use crate::ui::widgets::menu::{MenuBar, MenuPopup, popup_rect};
+use crate::ui::widgets::menu::{MenuBar, MenuItemMask, MenuPopup, popup_rect};
 use crate::ui::widgets::scrollbar::{ScrollExtent, Scrollbar};
 use crate::ui::widgets::status::{StatusBar, StatusView};
 use crate::ui::widgets::tabs::{TabBar, TabChip, active_span};
@@ -29,9 +29,7 @@ pub struct ChromeView<'a> {
     pub address: TextFieldView<'a>,
     pub address_focused: bool,
     pub content_cursor: Option<(usize, usize)>,
-    pub menu_open: bool,
-    pub menu_active: usize,
-    pub menu_item: usize,
+    pub main_menu: MainMenuView,
     pub tabs: Vec<TabChip<'a>>,
     pub active_tab: usize,
     pub content: ContentLines<'a>,
@@ -39,6 +37,15 @@ pub struct ChromeView<'a> {
     /// A notice in front of the page, while one is live.
     pub flash: Option<&'a str>,
     pub text_field_menu: Option<TextFieldMenuView>,
+}
+
+#[derive(Clone, Copy)]
+pub struct MainMenuView {
+    pub open: bool,
+    pub active: usize,
+    pub selected: Option<usize>,
+    pub hovered_title: Option<usize>,
+    pub enabled: MenuItemMask,
 }
 
 #[derive(Clone, Copy)]
@@ -94,14 +101,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         }
     };
 
-    if let Some(rect) = layout.menu {
-        MenuBar {
-            active: view.menu_active,
-            open: view.menu_open,
-            theme: &view.theme,
-        }
-        .render(rect, buffer);
-    }
+    compose_menu_bar(buffer, view, area);
     if let Some(rect) = layout.tabs {
         TabBar {
             tabs: &view.tabs,
@@ -167,11 +167,12 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         .render(area, buffer);
     }
 
-    if view.menu_open {
+    if view.main_menu.open {
         MenuPopup {
-            menu: view.menu_active,
-            selected: view.menu_item,
-            marked: (view.menu_active == crate::ui::widgets::menu::THEME_MENU)
+            menu: view.main_menu.active,
+            selected: view.main_menu.selected,
+            enabled: view.main_menu.enabled,
+            marked: (view.main_menu.active == crate::ui::widgets::menu::THEME_MENU)
                 .then_some(view.theme_index),
             theme: &view.theme,
         }
@@ -179,6 +180,18 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
     }
 
     cursor_position(view, area)
+}
+
+pub fn compose_menu_bar(buffer: &mut Buffer, view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
+    let rect = view.geometry.layout(area).menu?;
+    MenuBar {
+        active: view.main_menu.active,
+        open: view.main_menu.open,
+        hovered: view.main_menu.hovered_title,
+        theme: &view.theme,
+    }
+    .render(rect, buffer);
+    Some(rect)
 }
 
 pub fn content_rect(view: &ChromeView<'_>, area: Rect) -> Option<Rect> {
@@ -306,8 +319,8 @@ fn clear_rect(buffer: &mut Buffer, rect: Rect, style: Style) {
 
 pub fn occlusion_rects(view: &ChromeView<'_>, area: Rect) -> Vec<Rect> {
     let mut rects = Vec::new();
-    if view.menu_open {
-        rects.push(popup_rect(area, area, view.menu_active));
+    if view.main_menu.open {
+        rects.push(popup_rect(area, area, view.main_menu.active));
     }
     if let Some(rect) = flash_position(view, area) {
         rects.push(rect);
@@ -473,9 +486,10 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = draft();
-        view.menu_open = true;
-        view.menu_active = 1;
-        view.menu_item = 1;
+        view.main_menu.open = true;
+        view.main_menu.active = 1;
+        view.main_menu.selected = Some(1);
+        view.main_menu.enabled = MenuItemMask::all(crate::ui::widgets::menu::MENUS[1].len());
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         insta::assert_snapshot!(crate::ui::test_util::buffer_string(
             terminal.backend().buffer()

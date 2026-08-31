@@ -117,12 +117,12 @@ fn keyboard_selection_and_reopening_view_follow_the_current_theme() {
     }
     assert_eq!(app.theme_index(), 3);
     app.handle_key(alt(press(Key::Char('v'))));
-    assert_eq!(app.menu_active, THEME_MENU);
-    assert_eq!(app.menu_item, 3);
+    assert_eq!(app.chrome_view().main_menu.active, THEME_MENU);
+    assert_eq!(app.chrome_view().main_menu.selected, Some(3));
 }
 
 #[test]
-fn mouse_selects_a_theme_from_the_view_popup() {
+fn mouse_selects_a_theme_from_the_main_menu_view_popup() {
     let mut app = App::new();
     app.handle_mouse(MouseEvent {
         kind: MouseKind::Press(MouseButton::Left),
@@ -131,13 +131,25 @@ fn mouse_selects_a_theme_from_the_view_popup() {
             row: 0,
         },
     });
+    app.handle_mouse(MouseEvent {
+        kind: MouseKind::Release(MouseButton::Left),
+        at: Point {
+            col: title_x(THEME_MENU),
+            row: 0,
+        },
+    });
     let rect = popup_rect(Rect::new(0, 0, 80, 24), Rect::new(0, 0, 80, 24), THEME_MENU);
+    let item = Point {
+        col: rect.x + 1,
+        row: rect.y + 3,
+    };
     app.handle_mouse(MouseEvent {
         kind: MouseKind::Press(MouseButton::Left),
-        at: Point {
-            col: rect.x + 1,
-            row: rect.y + 3,
-        },
+        at: item,
+    });
+    app.handle_mouse(MouseEvent {
+        kind: MouseKind::Release(MouseButton::Left),
+        at: item,
     });
     assert_eq!(app.theme_index(), 2);
 }

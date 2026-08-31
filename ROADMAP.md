@@ -377,8 +377,11 @@ passes only.
 `ui::theme` with a zero-literal rule and five session-selectable palettes; full-width menu bar with
 `Alt+F/N/V/H` dropdowns; raised NC-style tab strip with an aligned active divider; three-row framed
 navigation buttons wired to per-tab history; a framed `URL:` field; one-cell outer toolbar padding;
-themed enabled-button hover; context bar. The one-row compact layout remains below 47 columns or
-nine rows. Drawing, hit-testing and URL editing share one geometry, and hover repaints only chrome.
+themed enabled-button hover; context bar. Main-menu titles and enabled rows follow pointer hover,
+open dropdowns switch across titles, unavailable navigation commands stay dim, and commands support
+click-release and press-drag-release with the normal arrow cursor. The one-row compact layout
+remains below 47 columns or nine rows. Drawing, hit-testing and URL editing share one geometry, and
+closed menu-bar hover repaints only chrome.
 
 ### M1-B — Style, layout, paint (done — smoke pending)
 cssparser 0.37 + selectors 0.40 adapters with specificity and structural matching; the first

@@ -50,6 +50,7 @@ pub(super) struct TextFieldContext {
 impl App {
     pub fn handle_mouse(&mut self, event: MouseEvent) {
         let previous_toolbar = self.hovered_toolbar_button();
+        let previous_menu_title = self.hovered_main_menu_title();
         if let Some(context) = self.text_context
             && matches!(event.kind, MouseKind::Press(MouseButton::Left))
         {
@@ -95,8 +96,19 @@ impl App {
             return;
         }
         let previous_href = self.hovered_href().map(str::to_string);
+        let previous_menu_active = self.main_menu.active();
+        let previous_menu_selected = self.selected_main_menu_item();
         self.pointer = Some(event.at);
         let target = self.target_at(event.at);
+        if self.main_menu.is_open() {
+            self.handle_open_main_menu_mouse(
+                event.kind,
+                target,
+                previous_menu_active,
+                previous_menu_selected,
+            );
+            return;
+        }
         self.update_hover(target);
         match event.kind {
             MouseKind::Move => {}
@@ -106,6 +118,7 @@ impl App {
         }
         let painted_changed = self.sync_dynamic_state();
         self.damage_toolbar_hover(previous_toolbar);
+        self.damage_main_menu_title_hover(previous_menu_title);
         if painted_changed {
             self.touch();
         } else if previous_href.as_deref() != self.hovered_href() {
@@ -121,7 +134,7 @@ impl App {
     }
 
     pub(super) fn hovered_toolbar_button(&self) -> Option<usize> {
-        if self.menu_open
+        if self.main_menu.is_open()
             || self.text_context.is_some()
             || self.text_drag.is_some()
             || self.scroll_drag.is_some()
@@ -174,16 +187,21 @@ impl App {
     /// outside the window is never reported to us and the drag would otherwise stick.
     pub fn pointer_left(&mut self) {
         let previous_toolbar = self.hovered_toolbar_button();
+        let previous_menu_title = self.hovered_main_menu_title();
         let had_href = self.hovered_href().is_some();
         let had_text_field_selection = self.selected_text_field_menu_action().is_some();
+        let previous_menu_selection = self.selected_main_menu_item();
         self.pointer = None;
         self.pressed = None;
         self.scroll_drag = None;
         self.text_drag = None;
         self.hover = None;
+        self.main_menu.cancel_press();
         self.damage_toolbar_hover(previous_toolbar);
+        self.damage_main_menu_title_hover(previous_menu_title);
         let painted_changed = self.sync_dynamic_state();
-        if painted_changed || had_text_field_selection {
+        let menu_selection_changed = previous_menu_selection != self.selected_main_menu_item();
+        if painted_changed || had_text_field_selection || menu_selection_changed {
             self.touch();
         } else if had_href {
             self.touch_status();
@@ -233,7 +251,7 @@ impl App {
             ChromeState {
                 tabs: &tabs,
                 active_tab: self.tabs.active_index(),
-                open_menu: self.menu_open.then_some(self.menu_active),
+                open_menu: self.main_menu.is_open().then_some(self.main_menu.active()),
             },
         )
     }
@@ -247,22 +265,8 @@ impl App {
             MouseButton::Left | MouseButton::Middle => {}
         }
         self.pressed = None;
-        if self.menu_open {
-            match target {
-                ChromeTarget::MenuItem(item) => {
-                    self.menu_item = item;
-                    self.apply(Action::MenuSelect);
-                }
-                ChromeTarget::MenuTitle(menu) if menu == self.menu_active => {
-                    self.apply(Action::MenuClose);
-                }
-                ChromeTarget::MenuTitle(menu) => self.apply(Action::MenuOpen(menu)),
-                _ => self.apply(Action::MenuClose),
-            }
-            return;
-        }
         match target {
-            ChromeTarget::MenuTitle(menu) => self.apply(Action::MenuOpen(menu)),
+            ChromeTarget::MenuTitle(menu) => self.open_menu_from_pointer(menu),
             ChromeTarget::Tab(index) => self.select_tab(index),
             // No `Action` names a tab, so this goes straight to the session the way
             // `Tab(index)` already does, rather than growing a second command set.
@@ -498,7 +502,7 @@ impl App {
     }
 
     fn wheel(&mut self, target: ChromeTarget, rows: i32) {
-        if self.menu_open
+        if self.main_menu.is_open()
             || !matches!(
                 target,
                 ChromeTarget::Content { .. } | ChromeTarget::Scrollbar { .. }

@@ -1,6 +1,6 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, Widget};
 
@@ -17,6 +17,35 @@ pub const MENUS: [&[&str]; 4] = [
     &THEME_NAMES,
     &["Help"],
 ];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MenuItemMask(u64);
+
+impl MenuItemMask {
+    pub fn all(count: usize) -> Self {
+        Self(if count >= u64::BITS as usize {
+            u64::MAX
+        } else {
+            (1u64 << count).saturating_sub(1)
+        })
+    }
+
+    pub fn set(&mut self, index: usize, enabled: bool) {
+        let Some(bit) = 1u64.checked_shl(index as u32) else {
+            return;
+        };
+        if enabled {
+            self.0 |= bit;
+        } else {
+            self.0 &= !bit;
+        }
+    }
+
+    pub fn contains(self, index: usize) -> bool {
+        1u64.checked_shl(index as u32)
+            .is_some_and(|bit| self.0 & bit != 0)
+    }
+}
 
 pub fn title_x(menu: usize) -> u16 {
     let mut x = 1u16;
@@ -48,12 +77,26 @@ pub fn title_at(col: u16, bar_width: u16) -> Option<usize> {
 /// The item at `row` of the open popup, if the point is inside its interior.
 pub fn popup_item_at(area: Rect, menu: usize, at: Position) -> Option<usize> {
     let rect = popup_rect(area, area, menu);
-    if rect.width < 2 || rect.height < 2 || !rect.contains(at) {
+    if rect.width < 2
+        || rect.height < 2
+        || !rect.contains(at)
+        || at.x == rect.x
+        || at.x.saturating_add(1) == rect.right()
+    {
         return None;
     }
     let index = usize::from(at.y.checked_sub(rect.y + 1)?);
-    let last_row = usize::from(rect.height.saturating_sub(2));
-    (index < MENUS[menu].len().min(last_row)).then_some(index)
+    (index < popup_item_count(area, menu)).then_some(index)
+}
+
+pub fn popup_item_count(area: Rect, menu: usize) -> usize {
+    let rect = popup_rect(area, area, menu);
+    if rect.width < 2 || rect.height < 2 {
+        return 0;
+    }
+    MENUS[menu]
+        .len()
+        .min(usize::from(rect.height.saturating_sub(2)))
 }
 
 pub fn popup_rect(area: Rect, bounds: Rect, menu: usize) -> Rect {
@@ -70,6 +113,7 @@ pub fn popup_rect(area: Rect, bounds: Rect, menu: usize) -> Rect {
 pub struct MenuBar<'a> {
     pub active: usize,
     pub open: bool,
+    pub hovered: Option<usize>,
     pub theme: &'a Theme,
 }
 
@@ -88,7 +132,12 @@ impl Widget for MenuBar<'_> {
             if x + fragment_width > area.width {
                 break;
             }
-            if self.open && index == self.active {
+            let selected = if self.open {
+                index == self.active
+            } else {
+                self.hovered == Some(index)
+            };
+            if selected {
                 buf.set_string(
                     area.x + x,
                     area.y,
@@ -122,7 +171,8 @@ impl Widget for MenuBar<'_> {
 
 pub struct MenuPopup<'a> {
     pub menu: usize,
-    pub selected: usize,
+    pub selected: Option<usize>,
+    pub enabled: MenuItemMask,
     pub marked: Option<usize>,
     pub theme: &'a Theme,
 }
@@ -151,14 +201,21 @@ impl Widget for MenuPopup<'_> {
             .enumerate()
             .map(|(index, item)| {
                 let clipped = clip_width(item, text_width);
-                let style = if index == self.selected {
+                let enabled = self.enabled.contains(index);
+                let selected = enabled && self.selected == Some(index);
+                let style = if selected {
                     self.theme.selected()
+                } else if !enabled {
+                    Style::default()
+                        .bg(self.theme.bar_bg)
+                        .fg(self.theme.bar_text)
+                        .add_modifier(Modifier::DIM)
                 } else {
                     Style::default()
                         .bg(self.theme.bar_bg)
                         .fg(self.theme.bar_text)
                 };
-                if index == self.selected || clipped.is_empty() {
+                if selected || !enabled || clipped.is_empty() {
                     return ListItem::new(clipped).style(style);
                 }
                 let mut chars = clipped.chars();
@@ -177,13 +234,37 @@ impl Widget for MenuPopup<'_> {
             })
             .collect();
         List::new(list_items).block(block).render(rect, buf);
+        let visible = popup_item_count(buf.area, self.menu);
+        for index in 0..visible {
+            let style = if self.enabled.contains(index) {
+                (self.selected == Some(index)).then(|| self.theme.selected())
+            } else {
+                Some(
+                    Style::default()
+                        .bg(self.theme.bar_bg)
+                        .fg(self.theme.bar_text)
+                        .add_modifier(Modifier::DIM),
+                )
+            };
+            if let Some(style) = style {
+                buf.set_style(
+                    Rect::new(rect.x + 1, rect.y + 1 + index as u16, rect.width - 2, 1),
+                    style,
+                );
+            }
+        }
         if let Some(marked) = self.marked
             && marked < items.len()
             && marked < usize::from(rect.height.saturating_sub(2))
             && rect.width >= 3
         {
-            let style = if marked == self.selected {
+            let style = if self.enabled.contains(marked) && self.selected == Some(marked) {
                 self.theme.selected()
+            } else if !self.enabled.contains(marked) {
+                Style::default()
+                    .bg(self.theme.bar_bg)
+                    .fg(self.theme.bar_text)
+                    .add_modifier(Modifier::DIM)
             } else {
                 Style::default()
                     .bg(self.theme.bar_bg)
@@ -211,6 +292,7 @@ mod tests {
                 MenuBar {
                     active,
                     open,
+                    hovered: None,
                     theme: &DEFAULT,
                 }
                 .render(frame.area(), frame.buffer_mut())
@@ -231,6 +313,92 @@ mod tests {
     }
 
     #[test]
+    fn main_menu_closed_title_hover_uses_the_selected_style() {
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                MenuBar {
+                    active: 0,
+                    open: false,
+                    hovered: Some(1),
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
+            .unwrap();
+        let selected = DEFAULT.selected();
+        for col in title_x(1) - 1..title_x(2) - 1 {
+            assert_eq!(
+                terminal.backend().buffer()[(col, 0)].bg,
+                selected.bg.unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn main_menu_disabled_rows_stay_dim_and_enabled_selection_fills_the_row() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut enabled = MenuItemMask::all(MENUS[1].len());
+        enabled.set(0, false);
+        terminal
+            .draw(|frame| {
+                MenuPopup {
+                    menu: 1,
+                    selected: Some(0),
+                    enabled,
+                    marked: None,
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
+            .unwrap();
+        let rect = popup_rect(
+            terminal.backend().buffer().area,
+            terminal.backend().buffer().area,
+            1,
+        );
+        let disabled = &terminal.backend().buffer()[(rect.x + 1, rect.y + 1)];
+        assert!(disabled.modifier.contains(Modifier::DIM));
+        assert_ne!(disabled.bg, DEFAULT.selected().bg.unwrap());
+
+        terminal
+            .draw(|frame| {
+                MenuPopup {
+                    menu: 1,
+                    selected: Some(2),
+                    enabled,
+                    marked: None,
+                    theme: &DEFAULT,
+                }
+                .render(frame.area(), frame.buffer_mut())
+            })
+            .unwrap();
+        for col in rect.x + 1..rect.right() - 1 {
+            assert_eq!(
+                terminal.backend().buffer()[(col, rect.y + 3)].bg,
+                DEFAULT.selected().bg.unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn main_menu_popup_borders_are_not_item_targets() {
+        let area = Rect::new(0, 0, 80, 24);
+        let rect = popup_rect(area, area, 0);
+        assert_eq!(
+            popup_item_at(area, 0, Position::new(rect.x, rect.y + 1)),
+            None
+        );
+        assert_eq!(
+            popup_item_at(area, 0, Position::new(rect.right() - 1, rect.y + 1)),
+            None
+        );
+        assert_eq!(popup_item_count(Rect::new(0, 0, 1, 24), 0), 0);
+    }
+
+    #[test]
     fn popup_shows_items_with_the_selected_one_inverse() {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -238,7 +406,8 @@ mod tests {
             .draw(|frame| {
                 MenuPopup {
                     menu: 0,
-                    selected: 2,
+                    selected: Some(2),
+                    enabled: MenuItemMask::all(MENUS[0].len()),
                     marked: None,
                     theme: &DEFAULT,
                 }
@@ -270,7 +439,8 @@ mod tests {
             .draw(|frame| {
                 MenuPopup {
                     menu: THEME_MENU,
-                    selected: 4,
+                    selected: Some(4),
+                    enabled: MenuItemMask::all(MENUS[THEME_MENU].len()),
                     marked: Some(4),
                     theme: &DEFAULT,
                 }
@@ -290,7 +460,8 @@ mod tests {
             .draw(|frame| {
                 MenuPopup {
                     menu: THEME_MENU,
-                    selected: 4,
+                    selected: Some(4),
+                    enabled: MenuItemMask::all(MENUS[THEME_MENU].len()),
                     marked: Some(4),
                     theme: &DEFAULT,
                 }

@@ -203,20 +203,48 @@ fn f10_opens_the_file_menu_and_arrows_walk_it() {
     app.handle_key(press(Key::Esc));
     app.handle_key(press(Key::F(10)));
     let view = app.chrome_view();
-    assert!(view.menu_open);
-    assert_eq!(view.menu_active, 0);
+    assert!(view.main_menu.open);
+    assert_eq!(view.main_menu.active, 0);
     assert_eq!(app.focus(), Focus::Menu);
     app.handle_key(press(Key::Down));
     app.handle_key(press(Key::Down));
-    assert_eq!(app.chrome_view().menu_item, 2);
+    assert_eq!(app.chrome_view().main_menu.selected, Some(2));
     app.handle_key(press(Key::Left));
-    assert_eq!(app.chrome_view().menu_active, 3);
+    assert_eq!(app.chrome_view().main_menu.active, 3);
     app.handle_key(press(Key::Right));
-    assert_eq!(app.chrome_view().menu_active, 0);
+    assert_eq!(app.chrome_view().main_menu.active, 0);
 }
 
 #[test]
-fn selecting_file_quit_exits_the_app() {
+fn main_menu_keyboard_skips_disabled_and_clipped_items() {
+    let mut app = App::new();
+    app.handle_key(press(Key::Esc));
+    app.handle_key(alt(press(Key::Char('n'))));
+    assert_eq!(app.chrome_view().main_menu.selected, Some(2));
+    app.handle_key(press(Key::Down));
+    assert_eq!(app.chrome_view().main_menu.selected, Some(2));
+    app.handle_key(press(Key::Up));
+    assert_eq!(app.chrome_view().main_menu.selected, Some(2));
+
+    app.handle_key(press(Key::Esc));
+    app.on_resize(Size { cols: 80, rows: 2 });
+    app.handle_key(press(Key::F(10)));
+    assert_eq!(app.chrome_view().main_menu.selected, None);
+    app.handle_key(press(Key::Enter));
+    assert!(app.chrome_view().main_menu.open);
+}
+
+#[test]
+fn every_main_menu_entry_maps_to_an_action() {
+    for (menu, items) in crate::ui::widgets::menu::MENUS.iter().enumerate() {
+        for item in 0..items.len() {
+            assert!(super::super::menu::menu_item_action(menu, item).is_some());
+        }
+    }
+}
+
+#[test]
+fn selecting_file_quit_from_main_menu_exits_the_app() {
     let mut app = App::new();
     app.handle_key(press(Key::Esc));
     app.handle_key(alt(press(Key::Char('f'))));
@@ -235,7 +263,7 @@ fn selecting_file_new_tab_opens_one_and_closes_the_menu() {
     app.handle_key(press(Key::Enter));
     assert_eq!(app.tab_count(), 2);
     assert_eq!(app.focus(), Focus::Address);
-    assert!(!app.chrome_view().menu_open);
+    assert!(!app.chrome_view().main_menu.open);
 }
 
 #[test]
@@ -243,7 +271,7 @@ fn alt_letter_opens_the_matching_menu() {
     let mut app = App::new();
     app.handle_key(press(Key::Esc));
     app.handle_key(alt(press(Key::Char('v'))));
-    assert_eq!(app.chrome_view().menu_active, 2);
+    assert_eq!(app.chrome_view().main_menu.active, 2);
     app.handle_key(press(Key::Enter));
     assert_eq!(app.message(), "theme: Turbo Vision");
 }
@@ -257,7 +285,7 @@ fn menu_keystrokes_never_reach_the_address_buffer() {
     assert_eq!(app.focus(), Focus::Menu);
     app.handle_key(press(Key::Esc));
     assert_eq!(app.focus(), Focus::Address);
-    assert!(!app.chrome_view().menu_open);
+    assert!(!app.chrome_view().main_menu.open);
 }
 
 #[test]
@@ -265,10 +293,10 @@ fn esc_closes_the_menu_and_f10_reopens_it() {
     let mut app = App::new();
     app.handle_key(press(Key::F(10)));
     app.handle_key(press(Key::F(10)));
-    assert!(!app.chrome_view().menu_open);
+    assert!(!app.chrome_view().main_menu.open);
     assert_eq!(app.focus(), Focus::Address);
     app.handle_key(press(Key::F(10)));
-    assert!(app.chrome_view().menu_open);
+    assert!(app.chrome_view().main_menu.open);
 }
 
 #[test]

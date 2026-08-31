@@ -2,7 +2,6 @@ use crate::core::event::{Key, KeyEvent};
 use crate::core::focus::Focus;
 use crate::core::frame::ChromeDamage;
 use crate::ui::keymap::{Action, DefaultKeymap, Keymap};
-use crate::ui::widgets::menu::{MENUS, THEME_MENU};
 
 use super::App;
 
@@ -19,6 +18,9 @@ impl App {
                 self.touch();
             }
             return;
+        }
+        if self.use_main_menu_keyboard() {
+            self.touch();
         }
         match DefaultKeymap.resolve(&event, self.focus) {
             Some(action) => self.apply(action),
@@ -75,82 +77,13 @@ impl App {
             Action::FocusMenu => self.focus_menu(),
             Action::MenuOpen(menu) => self.open_menu(menu),
             Action::MenuClose => self.close_menu(),
-            Action::MenuNext => {
-                let len = MENUS[self.menu_active].len();
-                if len > 0 {
-                    self.menu_item = (self.menu_item + 1).min(len - 1);
-                }
-                self.touch();
-            }
-            Action::MenuPrev => {
-                self.menu_item = self.menu_item.saturating_sub(1);
-                self.touch();
-            }
-            Action::MenuLeft => {
-                self.menu_active = if self.menu_active == 0 {
-                    MENUS.len() - 1
-                } else {
-                    self.menu_active - 1
-                };
-                self.menu_item = self.initial_menu_item(self.menu_active);
-                self.touch();
-            }
-            Action::MenuRight => {
-                self.menu_active = (self.menu_active + 1) % MENUS.len();
-                self.menu_item = self.initial_menu_item(self.menu_active);
-                self.touch();
-            }
+            Action::MenuNext => self.menu_next(),
+            Action::MenuPrev => self.menu_prev(),
+            Action::MenuLeft => self.menu_left(),
+            Action::MenuRight => self.menu_right(),
             Action::MenuSelect => self.menu_select(),
             Action::SetTheme(index) => self.set_theme(index),
             Action::Screenshot => self.screenshot_request = true,
-        }
-    }
-
-    fn focus_menu(&mut self) {
-        if self.menu_open && self.focus == Focus::Menu {
-            self.close_menu();
-        } else {
-            self.focus_before_menu = self.focus;
-            self.menu_active = 0;
-            self.menu_item = self.initial_menu_item(self.menu_active);
-            self.menu_open = true;
-            self.focus = Focus::Menu;
-            self.touch();
-        }
-    }
-
-    fn open_menu(&mut self, menu: usize) {
-        if self.focus != Focus::Menu {
-            self.focus_before_menu = self.focus;
-        }
-        self.focus = Focus::Menu;
-        self.menu_open = true;
-        self.menu_active = menu.min(MENUS.len() - 1);
-        self.menu_item = self.initial_menu_item(self.menu_active);
-        self.touch();
-    }
-
-    fn close_menu(&mut self) {
-        self.menu_open = false;
-        self.focus = self.focus_before_menu;
-        self.touch();
-    }
-
-    fn initial_menu_item(&self, menu: usize) -> usize {
-        if menu == THEME_MENU {
-            self.theme_index
-        } else {
-            0
-        }
-    }
-
-    fn menu_select(&mut self) {
-        let action = menu_item_action(self.menu_active, self.menu_item);
-        self.menu_open = false;
-        self.focus = self.focus_before_menu;
-        self.touch();
-        if let Some(action) = action {
-            self.apply(action);
         }
     }
 
@@ -203,20 +136,5 @@ impl App {
 
     pub(super) fn touch_status(&mut self) {
         self.damage.damage_chrome(ChromeDamage::STATUS);
-    }
-}
-
-fn menu_item_action(menu: usize, item: usize) -> Option<Action> {
-    match (menu, item) {
-        (0, 0) => Some(Action::NewTab),
-        (0, 1) => Some(Action::CloseTab),
-        (0, 2) => Some(Action::Reload),
-        (0, 3) => Some(Action::Quit),
-        (1, 0) => Some(Action::Back),
-        (1, 1) => Some(Action::Forward),
-        (1, 2) => Some(Action::Home),
-        (THEME_MENU, item) if item < MENUS[THEME_MENU].len() => Some(Action::SetTheme(item)),
-        (3, 0) => Some(Action::Help),
-        _ => None,
     }
 }

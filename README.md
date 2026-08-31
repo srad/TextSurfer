@@ -89,7 +89,8 @@ Ready                              https://example.com
 
 **Chrome and interaction**
 
-- DOS/QBasic menu bar, raised tab strip with Turbo Vision `[■]` close boxes, three-row framed
+- DOS/QBasic menu bar with pointer hot tracking, immediate dropdown switching and dim unavailable
+  navigation commands; raised tab strip with Turbo Vision `[■]` close boxes, three-row framed
   navigation buttons with hover feedback, and a framed address field. Narrow or short windows use
   the compact one-row toolbar; the address and page forms share one grapheme-safe text-field widget
 - A page scrollbar whose caps step, trough pages and thumb drags
@@ -215,7 +216,7 @@ and the status line says how many of its rows were captured.
 | Click `[‹] [›] [↻] [⌂]` | Back, forward, reload, start page |
 | Click or drag in the address or a page text field | Places the caret or selects a range |
 | Right-click an address or page text field | Opens the opaque themed cut/copy/paste/select-all menu |
-| Click a menu title or item | Opens, toggles, dispatches; a click elsewhere closes the menu |
+| Hover, click or drag through the menu bar | Titles and enabled rows highlight; open dropdowns follow titles; release activates a command; clicking elsewhere closes the menu |
 | Hover a link | Previews the URL in the status bar, hand cursor in the window |
 
 The terminal frontend enables mouse capture while it runs, so your terminal's own selection needs
