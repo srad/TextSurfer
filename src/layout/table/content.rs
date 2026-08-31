@@ -2,14 +2,15 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::dom::{ElementNs, Node, NodeId};
+use crate::core::image::DecodedImage;
 use crate::core::style::{
     BorderSide, CellStyle, ComputedStyle, Display, PseudoElement, TextAlign, WhiteSpace,
 };
-use crate::layout::LayoutRect;
 use crate::layout::text_flow::{
     Atom, Glyph, Piece, format_inline, formatted_height, intrinsic_width, line_metrics,
     min_content_width, normalize_segment_breaks,
 };
+use crate::layout::{ImagePlacement, LayoutRect};
 
 use super::geometry::{TableGeometry, intersect_rect, offset_table_rect};
 use super::model::TableModel;
@@ -28,9 +29,88 @@ pub(super) struct TextRun {
 #[derive(Clone)]
 pub(super) enum CellItem {
     Text(TextRun),
-    Table(NodeId),
+    Atom(CellAtomSource),
     Boundary(NodeId, CellStyle),
     Break(NodeId, CellStyle),
+}
+
+#[derive(Clone)]
+pub(super) enum CellAtomSource {
+    Table(NodeId),
+    Image(TableImageSource),
+}
+
+impl CellAtomSource {
+    fn node(&self) -> NodeId {
+        match self {
+            Self::Table(node) => *node,
+            Self::Image(image) => image.node,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct TableImageSource {
+    node: NodeId,
+    image: DecodedImage,
+    style: ComputedStyle,
+    hidden: bool,
+}
+
+#[derive(Clone)]
+pub(super) struct TableImage {
+    node: NodeId,
+    asset_id: crate::core::image::ImageAssetId,
+    revision: u64,
+    width: usize,
+    height: usize,
+    hidden: bool,
+}
+
+impl Atom for TableImage {
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum CellAtom {
+    Table(Box<TableOutput>),
+    Image(TableImage),
+}
+
+impl Atom for CellAtom {
+    fn width(&self) -> usize {
+        match self {
+            Self::Table(table) => table.width(),
+            Self::Image(image) => image.width(),
+        }
+    }
+
+    fn height(&self) -> usize {
+        match self {
+            Self::Table(table) => table.height(),
+            Self::Image(image) => image.height(),
+        }
+    }
+
+    fn minimum_width(&self) -> usize {
+        match self {
+            Self::Table(table) => table.minimum_width(),
+            Self::Image(image) => image.minimum_width(),
+        }
+    }
+
+    fn baseline(&self) -> usize {
+        match self {
+            Self::Table(table) => table.baseline(),
+            Self::Image(image) => image.baseline(),
+        }
+    }
 }
 
 pub(super) struct CellMetrics {
@@ -40,7 +120,7 @@ pub(super) struct CellMetrics {
 }
 
 pub(super) struct CellLayout {
-    pub(super) pieces: Vec<Piece<TableOutput>>,
+    pub(super) pieces: Vec<Piece<CellAtom>>,
     pub(super) lines: Vec<Vec<Glyph>>,
     pub(super) text_align: TextAlign,
 }
@@ -142,9 +222,15 @@ impl TableFormatter<'_> {
             let inner = span_width
                 .saturating_sub(edges.left + edges.right + padding.left + padding.right)
                 .max(1);
-            let pieces = resolve_items(&metric.items, |node| {
-                self.format_inline_atom(node, inner, limits, nesting.saturating_add(1))
-            });
+            let pieces =
+                resolve_items(&metric.items, |source| match source {
+                    CellAtomSource::Table(node) => CellAtom::Table(Box::new(
+                        self.format_inline_atom(*node, inner, limits, nesting.saturating_add(1)),
+                    )),
+                    CellAtomSource::Image(image) => {
+                        CellAtom::Image(self.table_image(image, Some(inner)))
+                    }
+                });
             let lines = format_inline(&pieces, inner);
             layouts.push(CellLayout {
                 pieces,
@@ -237,8 +323,18 @@ impl TableFormatter<'_> {
         nesting: usize,
     ) -> CellMetrics {
         let items = self.collect_items(roots, true, true);
-        let pieces = resolve_items(&items, |node| {
-            self.nested_metric(node, limits, nesting.saturating_add(1))
+        let pieces = resolve_items(&items, |source| match source {
+            CellAtomSource::Table(node) => {
+                self.nested_metric(*node, limits, nesting.saturating_add(1))
+            }
+            CellAtomSource::Image(image) => {
+                let image = self.table_image(image, None);
+                MetricAtom {
+                    width: image.width,
+                    minimum_width: image.width,
+                    height: image.height,
+                }
+            }
         });
         let minimum = min_content_width(&pieces).max(1);
         let maximum = intrinsic_width(&pieces).max(1);
@@ -266,7 +362,17 @@ impl TableFormatter<'_> {
         }
         let metric = if nesting >= limits.max_nesting {
             let items = self.collect_items(&[table], false, false);
-            let pieces: Vec<Piece<MetricAtom>> = resolve_items(&items, |_| unreachable!());
+            let pieces: Vec<Piece<MetricAtom>> = resolve_items(&items, |source| match source {
+                CellAtomSource::Table(_) => unreachable!(),
+                CellAtomSource::Image(image) => {
+                    let image = self.table_image(image, None);
+                    MetricAtom {
+                        width: image.width,
+                        minimum_width: image.width,
+                        height: image.height,
+                    }
+                }
+            });
             let lines = format_inline(&pieces, limits.max_width.max(1));
             MetricAtom {
                 width: intrinsic_width(&pieces).max(1),
@@ -283,6 +389,27 @@ impl TableFormatter<'_> {
         };
         self.metric_cache.borrow_mut().insert(key, metric);
         metric
+    }
+
+    pub(super) fn table_image(
+        &self,
+        source: &TableImageSource,
+        width_basis: Option<usize>,
+    ) -> TableImage {
+        let (width, height) = crate::layout::replaced::image_cells(
+            &source.image,
+            source.style,
+            self.cell_metric,
+            width_basis,
+        );
+        TableImage {
+            node: source.node,
+            asset_id: source.image.asset_id,
+            revision: source.image.revision,
+            width,
+            height,
+            hidden: source.hidden,
+        }
     }
 
     fn push_pseudo(&self, items: &mut Vec<CellItem>, node: NodeId, which: PseudoElement) {
@@ -350,7 +477,7 @@ impl TableFormatter<'_> {
                         if style.display == Display::TABLE {
                             items.push(CellItem::Boundary(node, style.cell_style()));
                         }
-                        items.push(CellItem::Table(node));
+                        items.push(CellItem::Atom(CellAtomSource::Table(node)));
                         if style.display == Display::TABLE {
                             items.push(CellItem::Boundary(node, style.cell_style()));
                         }
@@ -388,17 +515,28 @@ impl TableFormatter<'_> {
                             width_basis: None,
                         },
                     ) {
-                        items.push(CellItem::Text(TextRun {
-                            node,
-                            text: replaced.text,
-                            white_space: if replaced.preformatted {
-                                WhiteSpace::Pre
-                            } else {
-                                style.white_space
-                            },
-                            style: style.cell_style(),
-                            hidden: style.visibility.is_hidden(),
-                        }));
+                        if replaced.image
+                            && let Some(image) = self.images.and_then(|images| images.get(node))
+                        {
+                            items.push(CellItem::Atom(CellAtomSource::Image(TableImageSource {
+                                node,
+                                image: image.clone(),
+                                style,
+                                hidden: style.visibility.is_hidden(),
+                            })));
+                        } else {
+                            items.push(CellItem::Text(TextRun {
+                                node,
+                                text: replaced.text,
+                                white_space: if replaced.preformatted {
+                                    WhiteSpace::Pre
+                                } else {
+                                    style.white_space
+                                },
+                                style: style.cell_style(),
+                                hidden: style.visibility.is_hidden(),
+                            }));
+                        }
                         continue;
                     }
                     stack.push(ContentEvent::Exit(node, root));
@@ -431,7 +569,12 @@ impl TableFormatter<'_> {
 
     pub(super) fn degraded_roots(&self, roots: &[NodeId], width: usize) -> TableOutput {
         let items = self.collect_items(roots, false, false);
-        let pieces: Vec<Piece<TableOutput>> = resolve_items(&items, |_| unreachable!());
+        let pieces: Vec<Piece<CellAtom>> = resolve_items(&items, |source| match source {
+            CellAtomSource::Table(_) => unreachable!(),
+            CellAtomSource::Image(image) => {
+                CellAtom::Image(self.table_image(image, Some(width.max(1))))
+            }
+        });
         let lines = format_inline(&pieces, width.max(1));
         let mut output = TableOutput {
             width: width.max(1),
@@ -468,7 +611,7 @@ fn is_blockish(display: Display) -> bool {
 
 pub(super) fn resolve_items<A: Atom>(
     items: &[CellItem],
-    mut resolve_table: impl FnMut(NodeId) -> A,
+    mut resolve_atom: impl FnMut(&CellAtomSource) -> A,
 ) -> Vec<Piece<A>> {
     let mut pieces = Vec::new();
     let mut has_content = false;
@@ -521,7 +664,7 @@ pub(super) fn resolve_items<A: Atom>(
                 });
                 has_content |= visible;
             }
-            CellItem::Table(node) => {
+            CellItem::Atom(source) => {
                 if let Some((boundary_node, style)) = pending_boundary.take() {
                     pieces.push(Piece {
                         node: boundary_node,
@@ -534,13 +677,13 @@ pub(super) fn resolve_items<A: Atom>(
                     });
                 }
                 pieces.push(Piece {
-                    node: *node,
+                    node: source.node(),
                     text: String::new(),
                     white_space: WhiteSpace::Normal,
                     depth: 0,
                     style: CellStyle::default(),
                     hidden: false,
-                    atom: Some(resolve_table(*node)),
+                    atom: Some(resolve_atom(source)),
                 });
                 has_content = true;
             }
@@ -621,16 +764,39 @@ pub(super) fn append_cell_content(
         let mut col = clip.col.saturating_add(offset);
         for glyph in line {
             if let Some(index) = glyph.atom {
-                if let Some(table) = &layout.pieces[index].atom {
-                    append_nested_output(
-                        output,
-                        table,
-                        col,
-                        row.saturating_add(baseline.saturating_sub(table.baseline())),
-                        clip,
-                        depth.saturating_add(layout.pieces[index].depth),
-                        merge_base.saturating_add(index),
-                    );
+                if let Some(atom) = &layout.pieces[index].atom {
+                    let atom_row = row.saturating_add(baseline.saturating_sub(atom.baseline()));
+                    match atom {
+                        CellAtom::Table(table) => append_nested_output(
+                            output,
+                            table,
+                            col,
+                            atom_row,
+                            clip,
+                            depth.saturating_add(layout.pieces[index].depth),
+                            merge_base.saturating_add(index),
+                        ),
+                        CellAtom::Image(image) => {
+                            let rect = LayoutRect {
+                                col,
+                                row: atom_row,
+                                width: image.width,
+                                height: image.height,
+                            };
+                            if !image.hidden
+                                && let Some(image_clip) = intersect_rect(rect, clip)
+                            {
+                                output.images.push(ImagePlacement {
+                                    node: image.node,
+                                    asset_id: image.asset_id,
+                                    revision: image.revision,
+                                    rect,
+                                    clip: image_clip,
+                                    depth: depth.saturating_add(layout.pieces[index].depth),
+                                });
+                            }
+                        }
+                    }
                 }
             } else {
                 append_line(
@@ -706,6 +872,17 @@ fn append_nested_output(
             .saturating_mul(1_000_000)
             .saturating_add(stroke.merge_group);
         output.strokes.push(stroke);
+    }
+    for image in &nested.images {
+        let mut image = *image;
+        offset_table_rect(&mut image.rect, col, row);
+        offset_table_rect(&mut image.clip, col, row);
+        let Some(image_clip) = intersect_rect(image.clip, clip) else {
+            continue;
+        };
+        image.clip = image_clip;
+        image.depth += depth;
+        output.images.push(image);
     }
     for fragment in &nested.fragments {
         let fragment_col = col.saturating_add(fragment.col);

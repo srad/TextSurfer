@@ -3,7 +3,7 @@ use crate::core::style::{CaptionSide, ComputedStyle};
 use crate::layout::text_flow::{format_inline, formatted_height};
 use crate::layout::{BorderStroke, LayoutBox, LayoutRect};
 
-use super::content::{CellLayout, append_cell_content, resolve_items};
+use super::content::{CellAtom, CellAtomSource, CellLayout, append_cell_content, resolve_items};
 use super::geometry::{EdgeInsets, add_fill};
 use super::model::TableModel;
 use super::{TableFormatter, TableLimits, TableOutput};
@@ -19,11 +19,6 @@ pub(super) struct CaptionLayout {
 pub(super) struct CaptionBands {
     pub(super) top: Vec<CaptionLayout>,
     pub(super) bottom: Vec<CaptionLayout>,
-}
-
-pub(super) struct CaptionWidths {
-    pub(super) minimum: usize,
-    pub(super) maximum: usize,
 }
 
 impl CaptionBands {
@@ -42,30 +37,17 @@ impl CaptionBands {
     }
 }
 
-pub(super) fn intrinsic_widths(
+pub(super) fn minimum_width(
     formatter: &TableFormatter<'_>,
     model: &TableModel,
     limits: TableLimits,
     nesting: usize,
-) -> CaptionWidths {
-    model.captions.iter().fold(
-        CaptionWidths {
-            minimum: 0,
-            maximum: 0,
-        },
-        |widths, caption| {
-            let metrics = formatter.cell_metrics(
-                &[*caption],
-                formatter.styles.get(*caption),
-                limits,
-                nesting,
-            );
-            CaptionWidths {
-                minimum: widths.minimum.max(metrics.minimum),
-                maximum: widths.maximum.max(metrics.maximum),
-            }
-        },
-    )
+) -> usize {
+    model.captions.iter().fold(0, |minimum, caption| {
+        let metrics =
+            formatter.cell_metrics(&[*caption], formatter.styles.get(*caption), limits, nesting);
+        minimum.max(metrics.minimum)
+    })
 }
 
 pub(super) fn layout_captions(
@@ -85,8 +67,16 @@ pub(super) fn layout_captions(
             .saturating_sub(edges.left + edges.right + padding.left + padding.right)
             .max(1);
         let metrics = formatter.cell_metrics(&[*caption], style, limits, nesting);
-        let pieces = resolve_items(&metrics.items, |node| {
-            formatter.format(node, content_width, limits, nesting.saturating_add(1))
+        let pieces = resolve_items(&metrics.items, |source| match source {
+            CellAtomSource::Table(node) => CellAtom::Table(Box::new(formatter.format(
+                *node,
+                content_width,
+                limits,
+                nesting.saturating_add(1),
+            ))),
+            CellAtomSource::Image(image) => {
+                CellAtom::Image(formatter.table_image(image, Some(content_width)))
+            }
         });
         let lines = format_inline(&pieces, content_width);
         let content_height = formatted_height(&lines, &pieces);

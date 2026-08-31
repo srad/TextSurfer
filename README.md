@@ -64,7 +64,7 @@ Ready                              https://example.com
 - Taffy-backed block, flex, grid and physical float layout — wrapping, gaps, alignment, ordering,
   growth, named grid lines and areas, auto-placement, atomic inline-flex and inline-grid, and text
   shaping around left/right floats — beside an in-house table formatter with anonymous boxes,
-  spans, captions and nesting
+  spans, captions, nesting and decoded images
 - CSS lengths resolve through a frontend-injected cell metric; `calc()`/`min()`/`max()`/`clamp()`
   reach sizing, margins, padding, insets, gaps, flex basis, font size and grid tracks
 - Custom properties with stable Level 1 `var()` semantics: inherited variables, nested and empty
@@ -282,11 +282,11 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: close general flow correctness against the browser-reference corpus, starting with spanning
-table cells that truncate instead of wrapping, then stacking and inline-layout correctness alongside
-CSS-pixel replaced sizing and static SVG. Run the representative-page image and styling smoke in VGA
-and terminal before resuming cold-render optimization; retained-paint smoke, keymap unification,
-keyboard link hints, the help overlay and in-page search follow that work.
+Next up: finish classifying the browser-reference corpus, then close stacking and positioned content,
+inline geometry and horizontal RTL alongside CSS-pixel replaced sizing and static SVG. Run the
+representative-page image and styling smoke in VGA and terminal before resuming cold-render
+optimization; retained-paint smoke, keymap unification, keyboard link hints, the help overlay and
+in-page search follow that work.
 
 ## Built on great libraries
 

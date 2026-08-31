@@ -2,23 +2,29 @@
 source: tests/render_atlas.rs
 expression: "structure(&page, cols)"
 ---
-width=100 rows=127 parse_errors=0 css_warnings=0 limits=LayoutLimits { truncated_depth: false, engine_failed: false }
+width=100 rows=141 parse_errors=0 css_warnings=0 limits=LayoutLimits { truncated_depth: false, engine_failed: false }
 case ua-flow rows=0..19
 case inline-state rows=19..22
-case lists rows=22..36
-case tables rows=36..56
-case controls rows=56..61
-case search-flex rows=61..62
-case box-layout rows=62..76
-case flex-grid rows=76..87
-case floats rows=87..94
-case images rows=94..116
-case presentational rows=116..127
-link href=/atlas-link rects=[LayoutRect { col: 0, row: 20, width: 4, height: 1 }] paint=123
-link href=/image-link rects=[LayoutRect { col: 11, row: 95, width: 4, height: 2 }] paint=173
-hits=208
-image asset=ImageAssetId(1) rect=LayoutRect { col: 11, row: 95, width: 4, height: 2 } clip=LayoutRect { col: 11, row: 95, width: 4, height: 2 } depth=5
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 99, width: 8, height: 4 } clip=LayoutRect { col: 1, row: 99, width: 8, height: 4 } depth=3
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 104, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 104, width: 4, height: 2 } depth=9
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 108, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 108, width: 4, height: 2 } depth=4
-image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 112, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 112, width: 4, height: 2 } depth=4
+case lists rows=22..34
+case tables rows=34..53
+case controls rows=53..58
+case search-flex rows=58..59
+case box-layout rows=59..73
+case flex-grid rows=73..84
+case floats rows=84..107
+case images rows=107..131
+case presentational rows=131..141
+link href=/atlas-link rects=[LayoutRect { col: 0, row: 20, width: 4, height: 1 }] paint=134
+link href=/image-link rects=[LayoutRect { col: 11, row: 108, width: 4, height: 2 }] paint=195
+hits=244
+image asset=ImageAssetId(1) rect=LayoutRect { col: 17, row: 91, width: 4, height: 2 } clip=LayoutRect { col: 17, row: 91, width: 4, height: 2 } depth=4
+image asset=ImageAssetId(1) rect=LayoutRect { col: 19, row: 98, width: 8, height: 2 } clip=LayoutRect { col: 19, row: 98, width: 8, height: 2 } depth=9
+image asset=ImageAssetId(1) rect=LayoutRect { col: 11, row: 108, width: 4, height: 2 } clip=LayoutRect { col: 11, row: 108, width: 4, height: 2 } depth=5
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 112, width: 8, height: 4 } clip=LayoutRect { col: 1, row: 112, width: 8, height: 4 } depth=3
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 117, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 117, width: 4, height: 2 } depth=9
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 121, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 121, width: 4, height: 2 } depth=4
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 125, width: 4, height: 2 } clip=LayoutRect { col: 1, row: 125, width: 4, height: 2 } depth=4
+image asset=ImageAssetId(1) rect=LayoutRect { col: 1, row: 128, width: 2, height: 1 } clip=LayoutRect { col: 1, row: 128, width: 2, height: 1 } depth=9
+image asset=ImageAssetId(1) rect=LayoutRect { col: 9, row: 128, width: 2, height: 1 } clip=LayoutRect { col: 9, row: 128, width: 2, height: 1 } depth=9
+image asset=ImageAssetId(1) rect=LayoutRect { col: 23, row: 128, width: 2, height: 1 } clip=LayoutRect { col: 23, row: 128, width: 2, height: 1 } depth=9
+image asset=ImageAssetId(1) rect=LayoutRect { col: 14, row: 129, width: 2, height: 1 } clip=LayoutRect { col: 14, row: 129, width: 2, height: 1 } depth=9

@@ -17,7 +17,7 @@ use crate::core::form::FormState;
 use crate::core::style::{CellStyle, StyleTree};
 use crate::layout::LayoutInput;
 use crate::layout::text_flow::Atom;
-use crate::layout::{BackgroundFill, BorderStroke, LayoutBox};
+use crate::layout::{BackgroundFill, BorderStroke, ImagePlacement, LayoutBox};
 
 use content::MetricAtom;
 use model::TableModel;
@@ -68,6 +68,7 @@ pub(super) struct TableOutput {
     pub fills: Vec<BackgroundFill>,
     pub strokes: Vec<BorderStroke>,
     pub fragments: Vec<TableFragment>,
+    pub images: Vec<ImagePlacement>,
     minimum_width: usize,
     baseline: Option<usize>,
     model: TableModel,

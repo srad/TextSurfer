@@ -56,9 +56,5 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                                                                                                                                                                │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-│                                                                                                                                                                │
-  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  1..161 fg=Reset bg=Reset mod=NONE
   161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

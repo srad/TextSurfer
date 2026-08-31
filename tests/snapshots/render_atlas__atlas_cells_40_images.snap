@@ -145,6 +145,28 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   1..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
   31..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│ ▀▀ List ▀▀ Comparison ▀▀               │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..3 fg=Rgb(255, 0, 0) bg=Rgb(0, 0, 192) mod=NONE
+  3..4 fg=Rgb(0, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  4..10 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  10..11 fg=Rgb(255, 0, 0) bg=Rgb(0, 0, 192) mod=NONE
+  11..12 fg=Rgb(0, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  12..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  24..25 fg=Rgb(255, 0, 0) bg=Rgb(0, 0, 192) mod=NONE
+  25..26 fg=Rgb(0, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  26..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│ Linux portal ▀▀ Category               │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  2..15 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  15..16 fg=Rgb(255, 0, 0) bg=Rgb(0, 0, 192) mod=NONE
+  16..17 fg=Rgb(0, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  17..26 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  26..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  41..42 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                                        │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..41 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE

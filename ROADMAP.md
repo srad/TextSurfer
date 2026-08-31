@@ -78,7 +78,7 @@ signed off.
 | M1-C — External styles | Ordered `<link>`/`@import` loading, selector bucketing, `@media` | (done — smoke pending) |
 | M1-D — Layout completeness | Tables, generated content + markers, length units, presentational attrs, VGA typography | (done — VGA smoke pending) |
 | M1-E — Overflow and positioning | Element overflow clipping, inherited visibility, CSS positioning | (done — smoke pending) |
-| M1-F — Practical rendering fidelity | Cross-context correctness, stacking, inline geometry, horizontal RTL | (open — next) |
+| M1-F — Practical rendering fidelity | Cross-context correctness, stacking, inline geometry, horizontal RTL | (in progress) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, in-page search, forms | (in progress) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
 | M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
@@ -457,12 +457,14 @@ repaint layer. `clip: rect()` remains deferred until a concrete readability case
 
 ## Open milestones
 
-### M1-F — Practical web rendering fidelity (open — next)
+### M1-F — Practical web rendering fidelity (in progress)
 
 M1-B through M1-E remain completed component contracts; this milestone owns their interaction on
-real static pages. Completion means broadly readable, structurally correct horizontal documents
-within TextSurfer's text-mode constraints, not browser pixel parity. Script-dependent missing
-content belongs to M4/M5.
+real static pages. CSS specifications and applicable Web Platform Tests define correctness;
+resource-closed browser captures are integration evidence rather than a substitute oracle.
+TextSurfer projects that behavior onto its fixed cell grid without accepting structural divergence
+as quantization. Script-dependent missing content belongs to M4/M5 and later site-compatibility
+work when their host bindings are insufficient.
 
 - [ ] **Defect intake and offline corpus** *(in progress — the probe reports, the manifest and the
   supervised worker are open).* Reduce every reported defect to a resource-closed page
@@ -471,7 +473,7 @@ content belongs to M4/M5.
   Exercise applicable cases at 40, 100 and 160 columns in terminal and VGA. Every visible fix needs
   a focused regression plus rendering-atlas or static-WPT coverage where applicable; production
   behavior may not depend on URLs, site names, classes or known markup.
-  *Landed — a browser is the oracle, not hand-written invariants.* `tools/capture-browser-reference.mjs`
+  *Landed — browser-reference integration checks.* `tools/capture-browser-reference.mjs`
   drives the Chromium that Playwright leaves on disk over CDP, with page script disabled to match
   `scripting: false` and the viewport set to `cols*8 x rows*16` — the exact canvas
   `CellMetric::viewport_css_pixels` lays out in. One human-run capture writes both halves of a
@@ -487,10 +489,13 @@ content belongs to M4/M5.
   capture, and disabling the `contain` fix below makes it fire at exactly the two widths that were
   broken, which is what validates the oracle. **Ratcheted, not yet classified:** A1 distinct runs
   the browser paints and we do not, and A2 the preserved fraction of reading order. Today's
-  Wikipedia numbers are 340/95/90 missing and 953/967/963 permille order at 40/100/160 columns;
-  `example.com` is exact at every width. Those A1/A2 totals mix real defects with known-legitimate
-  divergence (narrow-line clipping, windowed form values, fixed-advance line breaking) and are
-  guarded by A1 ceilings that may only fall and A2 floors that may only rise; neither is a target.
+  Wikipedia numbers are 351/53/47 missing and 952/972/970 permille order at 40/100/160 columns;
+  `example.com` is exact at every width. The comparison reconstructs decoded resources from the
+  rendered page rather than measuring a second broken-image tree, so these numbers are the baseline
+  for the image-aware oracle and are not comparable to the earlier alt-text counts. Those A1/A2
+  totals mix real defects with known-legitimate divergence (narrow-line clipping, windowed form
+  values, fixed-advance line breaking) and are guarded by A1 ceilings that may only fall and A2
+  floors that may only rise; neither is a target.
   A2 uses an exact Hunt-Szymanski LCS so repeated words cannot manufacture an order regression.
   A band number locates a finding in the *browser's* coordinates only: the two documents drift
   apart vertically as line breaking differs, so never compare them at the same band index.
@@ -499,19 +504,13 @@ content belongs to M4/M5.
   *Still open:* finish reducing A1/A2 findings to owned causes with an xfail table, move the page
   list and expectations into `tools/browser-reference.json`, make the sort direction-aware before an
   RTL page is admitted (band-then-x is LTR visual order), and add the remaining corpus shapes.
-- [x] **`contain` paint containment.** `contain` now reaches `ComputedStyle` from Stylo, which
-  already parses it because `src/css/stylo/prefs.rs` enables `layout.unimplemented`; the value was
-  being computed and discarded. Paint containment clips a box's overflow exactly as
-  `overflow: hidden` does, through the same `ClipRegion`. This was the whole of the reported
-  Wikipedia breakage: `.vector-column-start` carries `contain: paint`, and without it the sticky
-  table of contents painted over the `<h1>` — `LinuUser interface` at 100 columns, one lost glyph.
-  Disabling the clip makes the browser-reference A3 assertion fire at exactly 40 and 100 columns and
-  stay silent at 160, which is both the regression net for this fix and what validates the oracle.
-  *Limits a future reader must honour:* size, layout and style containment are mapped and carried on
-  `ComputedStyle` but nothing reads them, and paint containment does not yet make the box a
-  containing block for absolutely positioned descendants or establish a stacking context — M1-F's
-  stacking bullet owns that.
-- [ ] **General flow correctness.** Close block-formatting-context, margin-collapse, anonymous-box
+- [x] **Formatting contexts and containment** *(done).* Paint containment clips overflow through
+  `ClipRegion`; layout passes only authored `contain: layout` and `contain: paint` to Taffy and maps
+  `flow-root` directly. Ordinary blocks remain in their
+  parent's formatting context so line boxes can widen below floats. Size and style containment stay
+  explicit open limits; paint containment's positioned-containing-block and stacking effects remain
+  owned by the stacking item below.
+- [ ] **General flow correctness** *(in progress).* Close block-formatting-context, margin-collapse, anonymous-box
   and replaced-element interactions across block, float, table, flex and grid layout before
   advancing to paint-order work.
   *Classified from the browser corpus, in priority order:*
@@ -519,8 +518,13 @@ content belongs to M4/M5.
      from used width, captions enforce their min-content contribution, and percentage tracks remain
      intrinsic percentage constraints clamped to 100% until final distribution. Nested `rowspan` +
      `colspan` content wraps without disappearing at 40, 100 and 160 columns.
-  2. **Footer navboxes at 40 columns.** 75 clusters over bands 4288–4579 of the same page, and the
-     reason narrow rendering still reports substantially more findings. Unreduced.
+  2. **Float/image cross-context correctness (done).** Shrink-wrap right-floated table and
+     flex image containers, let authored paragraphs reclaim the full measure below a float, and
+     carry decoded image atoms through table cells, captions, anonymous fixup, nested/degraded
+     output and link geometry. A table caption's max-content width must not widen an image-backed
+     figure beyond its grid; only the caption's min-content contribution may do so. The Linux
+     article's figures and footer navboxes are integration fixtures; the implementation remains
+     markup-agnostic.
 - [ ] **Stacking and positioned content.** Implement `z-index` and bounded stacking contexts,
   relative positioning for inline boxes, positioned table descendants, and true fixed/sticky
   behavior. Paint order and hit testing must agree on the topmost box.

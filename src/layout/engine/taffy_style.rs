@@ -19,11 +19,11 @@ use taffy::style::{
 };
 
 use crate::core::style::{
-    Alignment, AlignmentSafety, BoxSizing, Clear, ContentAlignment, CssCalc, CssFloat, CssGap,
-    CssInset, CssMargin, CssMaxSize, CssPadding, CssSize, DisplayInside, FlexBasis, FlexDirection,
-    FlexWrap, GridAreas, GridAutoFlow, GridLength, GridLines, GridPlacement, GridTemplate,
-    GridTemplateComponent, GridTracks, ItemAlignment, LegacyAlign, Overflow, Position, RepeatCount,
-    StyleTree, TrackBreadthMax, TrackBreadthMin, TrackSize,
+    Alignment, AlignmentSafety, BoxSizing, Clear, Contain, ContentAlignment, CssCalc, CssFloat,
+    CssGap, CssInset, CssMargin, CssMaxSize, CssPadding, CssSize, DisplayInside, FlexBasis,
+    FlexDirection, FlexWrap, GridAreas, GridAutoFlow, GridLength, GridLines, GridPlacement,
+    GridTemplate, GridTemplateComponent, GridTracks, ItemAlignment, LegacyAlign, Overflow,
+    Position, RepeatCount, StyleTree, TrackBreadthMax, TrackBreadthMin, TrackSize,
 };
 
 use super::LayoutRect;
@@ -117,10 +117,18 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
         )
     });
     let inside = flow.style.display.inside();
+    let is_flex = matches!(inside, Some(DisplayInside::Flex));
     let is_grid = matches!(inside, Some(DisplayInside::Grid));
-    let is_block = !matches!(inside, Some(DisplayInside::Flex | DisplayInside::Grid));
+    let mut contain = TaffyContain::NONE;
+    if flow.style.contain.contains(Contain::LAYOUT) {
+        contain = contain.union(TaffyContain::LAYOUT);
+    }
+    if flow.style.contain.contains(Contain::PAINT) {
+        contain = contain.union(TaffyContain::PAINT);
+    }
     TaffyStyle {
         display: match inside {
+            Some(DisplayInside::FlowRoot) => TaffyDisplay::FlowRoot,
             Some(DisplayInside::Flex) => TaffyDisplay::Flex,
             Some(DisplayInside::Grid) => TaffyDisplay::Grid,
             _ => TaffyDisplay::Block,
@@ -156,11 +164,7 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
             Clear::Right => TaffyClear::Right,
             Clear::Both => TaffyClear::Both,
         },
-        contain: if is_block {
-            TaffyContain::PAINT
-        } else {
-            TaffyContain::NONE
-        },
+        contain,
         inset: TaffyRect {
             left: inset(flow.style.inset.left, styles, calc_values),
             right: inset(flow.style.inset.right, styles, calc_values),
@@ -252,12 +256,17 @@ pub(super) fn taffy_style(input: TaffyStyleInput<'_>) -> TaffyStyle {
         align_self: flow.style.alignment.align_self.map(item_alignment),
         justify_items: Some(item_alignment(flow.style.alignment.justify_items)),
         justify_self: flow.style.alignment.justify_self.map(item_alignment),
-        align_content: Some(content_alignment(
-            flow.style.alignment.align_content,
-            false,
-            flow.style.flex.direction,
-            is_grid,
-        )),
+        align_content: (is_flex
+            || is_grid
+            || flow.style.alignment.align_content.keyword != ContentAlignment::Normal)
+            .then(|| {
+                content_alignment(
+                    flow.style.alignment.align_content,
+                    false,
+                    flow.style.flex.direction,
+                    is_grid,
+                )
+            }),
         justify_content: Some(content_alignment(
             flow.style.alignment.justify_content,
             true,

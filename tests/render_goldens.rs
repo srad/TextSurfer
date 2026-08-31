@@ -314,6 +314,100 @@ fn a_floated_image_reserves_every_cell_its_pixels_cover() {
 }
 
 #[test]
+fn a_floated_table_figure_wraps_its_caption_at_the_image_width() {
+    let page = render_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}figure{display:table;float:right;border:1px solid}img{width:8ch;height:32px}figcaption{display:table-caption;caption-side:bottom}</style><main><figure><a href=/image><img src=image.png alt=image></a><figcaption>a long caption that wraps below</figcaption></figure><p>text beside the figure</p></main>",
+        40,
+    );
+    let lines = page.painted.text_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.trim_end().ends_with("┌────────┐")),
+        "caption max-content widened the floated figure beyond its eight-cell image: {lines:?}"
+    );
+}
+
+#[test]
+fn a_table_caption_min_content_can_widen_its_figure() {
+    let page = render_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}figure{display:table;float:right;border:1px solid}img{width:8ch;height:32px}figcaption{display:table-caption;caption-side:bottom}</style><main><figure><img src=image.png alt=image><figcaption>unbreakable</figcaption></figure></main>",
+        40,
+    );
+    let lines = page.painted.text_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.trim_end().ends_with("┌─────────┐")),
+        "caption min-content did not widen the figure: {lines:?}"
+    );
+}
+
+#[test]
+fn authored_paragraph_lines_reclaim_the_measure_below_a_float() {
+    let page = render_source(
+        "<!doctype html><style>*{margin:0;padding:0}aside{float:right;width:6ch;height:32px}p{margin:0}</style><main><aside>FLOAT<br>FLOAT</aside><p>one two three four five six seven eight nine ten eleven twelve</p></main>",
+        16,
+    );
+    let lines = page.painted.text_lines();
+    assert!(lines.iter().take(2).all(|line| line.len() <= 16));
+    assert!(
+        lines
+            .iter()
+            .skip(2)
+            .any(|line| line.trim_end().chars().count() > 10),
+        "paragraph stayed constrained to the float-side slot: {lines:?}"
+    );
+}
+
+#[test]
+fn decoded_table_cell_images_keep_their_geometry_and_labels() {
+    let page = render_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}table{border-spacing:0}td{padding:0}ul{list-style:none}li{display:inline}img{width:16px;height:16px}</style><table><tr><td><ul><li><a href=/list><img src=icon.png alt=icon>List</a></li><li><a href=/comparison><img src=icon.png alt=icon>Comparison</a></li><li><a href=/portal><img src=icon.png alt=icon>Portal</a></li><li><a href=/category><img src=icon.png alt=icon>Category</a></li></ul></td></tr></table>",
+        40,
+    );
+    assert_eq!(page.painted.images.len(), 4);
+    assert!(
+        page.painted
+            .images
+            .iter()
+            .all(|image| (image.rect.width, image.rect.height) == (2, 1))
+    );
+    let text = page.painted.text_lines().join("\n");
+    assert!(!text.contains('\u{fffc}'));
+    let labels = ["List", "Comparison", "Portal", "Category"];
+    let positions = labels.map(|label| text.find(label).unwrap());
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    for href in ["/list", "/comparison", "/portal", "/category"] {
+        let link = page
+            .painted
+            .links
+            .iter()
+            .find(|link| link.href == href)
+            .unwrap();
+        assert!(link.rects.iter().any(|rect| rect.width >= 2));
+    }
+}
+
+#[test]
+fn clipped_table_image_keeps_its_full_rect_and_separate_clip() {
+    let page = render_source_with_image(
+        "<!doctype html><style>*{margin:0;padding:0}table{border-spacing:0;table-layout:fixed;width:2ch}td{padding:0;overflow:hidden}img{width:32px;height:32px}</style><table><tr><td><a href=/image><img src=image.png alt=image></a></td></tr></table>",
+        20,
+    );
+    let image = page.painted.images.first().unwrap();
+    assert_eq!((image.rect.width, image.rect.height), (4, 2));
+    assert_eq!((image.clip.width, image.clip.height), (2, 2));
+    let link = page
+        .painted
+        .links
+        .iter()
+        .find(|link| link.href == "/image")
+        .unwrap();
+    assert!(link.rects.contains(&image.clip));
+}
+
+#[test]
 fn responsive_css_pixel_breakpoint_uses_the_terminal_cell_metric() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

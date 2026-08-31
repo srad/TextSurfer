@@ -11,11 +11,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
+use textsurfer::core::form::FormState;
 use textsurfer::core::geom::Size;
-use textsurfer::core::image::ImageDecoder;
-use textsurfer::core::style::RenderContext;
+use textsurfer::core::image::{ImageDecoder, ImageResources};
+use textsurfer::core::style::{CellMetric, RenderContext};
 use textsurfer::css::ColorScheme;
-use textsurfer::layout::{BoxTree, LayoutEngine, TaffyLayoutEngine};
+use textsurfer::layout::{BoxTree, TaffyLayoutEngine};
 use textsurfer::net::FetchResponse;
 use textsurfer::pipeline::image::RasterImageDecoder;
 use textsurfer::pipeline::page_load::{PageLoad, PageLoadOptions};
@@ -286,6 +287,23 @@ fn our_tokens(tree: &BoxTree) -> Vec<Token> {
     in_reading_order(tokens)
 }
 
+fn comparison_layout(page: &RenderedPage, viewport: Size) -> BoxTree {
+    let mut images = ImageResources::default();
+    for placement in &page.painted.images {
+        if let Some(image) = page.painted.image_assets.get(&placement.asset_id) {
+            images.insert(placement.node, image.clone());
+        }
+    }
+    TaffyLayoutEngine.layout_with_images(
+        &page.document.borrow(),
+        &page.styles,
+        viewport,
+        &FormState::empty(),
+        &images,
+        CellMetric::DEFAULT,
+    )
+}
+
 fn browser_tokens(reference: &Reference) -> Vec<Token> {
     in_reading_order(
         reference
@@ -462,9 +480,9 @@ const EXPECTED: &[(&str, u16, usize, u32)] = &[
     ("example", 40, 0, 1000),
     ("example", 100, 0, 1000),
     ("example", 160, 0, 1000),
-    ("wikipedia-linux", 40, 340, 720),
-    ("wikipedia-linux", 100, 95, 790),
-    ("wikipedia-linux", 160, 90, 795),
+    ("wikipedia-linux", 40, 351, 952),
+    ("wikipedia-linux", 100, 53, 972),
+    ("wikipedia-linux", 160, 47, 970),
 ];
 
 fn expectation(slug: &str, cols: u16) -> Option<(usize, u32)> {
@@ -562,11 +580,7 @@ fn browser_reference_comparison() {
                 continue;
             };
             let page = render(slug, &bundle, cols, rows);
-            let tree = TaffyLayoutEngine.layout(
-                &page.document.borrow(),
-                &page.styles,
-                Size { cols, rows },
-            );
+            let tree = comparison_layout(&page, Size { cols, rows });
             let ours = our_tokens(&tree);
             let browser = browser_tokens(&reference);
             let findings = compare(&reference, &browser, &ours);

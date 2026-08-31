@@ -1,7 +1,6 @@
 use crate::core::style::{ComputedStyle, CssPercentage, CssWidth, TableLayoutMode};
 
 use super::TableFormatter;
-use super::captions::CaptionWidths;
 use super::content::CellMetrics;
 use super::geometry::TableGeometry;
 use super::model::TableModel;
@@ -19,7 +18,7 @@ pub(super) fn size_columns(
     table_style: ComputedStyle,
     available_width: usize,
     geometry: &TableGeometry,
-    caption_widths: CaptionWidths,
+    caption_minimum_width: usize,
 ) -> ColumnLayout {
     let mut minimum = vec![1usize; model.columns];
     let mut maximum = vec![1usize; model.columns];
@@ -91,7 +90,7 @@ pub(super) fn size_columns(
         .iter()
         .sum::<usize>()
         .saturating_add(geometry.fixed_overhead)
-        .max(caption_widths.minimum);
+        .max(caption_minimum_width);
     let mut widths = if table_style.table_layout == TableLayoutMode::Fixed && specified.is_some() {
         let mut fixed = vec![0usize; model.columns];
         for (col, track) in model.column_nodes.iter().enumerate() {
@@ -159,10 +158,7 @@ pub(super) fn size_columns(
         .iter()
         .sum::<usize>()
         .saturating_add(geometry.fixed_overhead);
-    let caption_target = caption_widths
-        .maximum
-        .min(specified.unwrap_or(available_width))
-        .max(caption_widths.minimum);
+    let caption_target = caption_minimum_width;
     if caption_target > table_width {
         distribute_remainder(
             &mut widths,

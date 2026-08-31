@@ -232,20 +232,11 @@ impl Display {
 
     pub const fn blockify(self) -> Self {
         match self {
-            Self::OutsideInside(mode) => {
-                let inside = if matches!(mode.inside, DisplayInside::FlowRoot)
-                    && matches!(mode.outside, DisplayOutside::Inline)
-                {
-                    DisplayInside::Flow
-                } else {
-                    mode.inside
-                };
-                Self::OutsideInside(DisplayMode {
-                    outside: DisplayOutside::Block,
-                    inside,
-                    list_item: mode.list_item,
-                })
-            }
+            Self::OutsideInside(mode) => Self::OutsideInside(DisplayMode {
+                outside: DisplayOutside::Block,
+                inside: mode.inside,
+                list_item: mode.list_item,
+            }),
             Self::Internal(_) => Self::BLOCK,
             Self::Box(_) => self,
         }

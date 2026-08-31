@@ -45,6 +45,18 @@ pub(super) fn append_table_output(
             .saturating_add(stroke.merge_group);
         tree.strokes.push(stroke);
     }
+    for mut image in output.images {
+        let Some(rect) = ClipRegion::translate_rect(image.rect, col, row) else {
+            continue;
+        };
+        let Some(clip) = ClipRegion::translate_rect(image.clip, col, row) else {
+            continue;
+        };
+        image.rect = rect;
+        image.clip = clip;
+        image.depth += depth;
+        tree.images.push(image);
+    }
     for fragment in output.fragments {
         let fragment = TextFragment {
             node: fragment.node,

@@ -258,7 +258,7 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
         assert_eq!(first.parse_errors, 0);
         assert_eq!(decoded.parse_errors, 0);
         assert_eq!(decoded.css_warnings, 0);
-        assert_eq!(decoded.painted.images.len(), 5);
+        assert_eq!(decoded.painted.images.len(), 11);
         assert_image_rects_are_text_free(&decoded.painted);
         assert!(first.painted.text_lines().join("\n").contains("[linked]"));
         let text = decoded.painted.text_lines().join("\n");
@@ -297,6 +297,17 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
         assert!(text.contains("FLOAT-L"));
         assert!(text.contains("FLOAT-R"));
         assert!(text.contains("clear after floats"));
+        assert!(text.contains("FLOAT-IMG"));
+        assert!(text.contains("underneath it."));
+        assert!(
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .windows(4)
+                .any(|words| words == ["caption", "words", "wrap", "below"])
+        );
+        for label in ["List", "Comparison", "Linux portal", "Category"] {
+            assert!(text.contains(label), "missing table image label {label}");
+        }
         for marker in [
             "MODEMARK",
             "ALPHAONE",

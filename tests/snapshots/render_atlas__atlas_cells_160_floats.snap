@@ -41,3 +41,102 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│Authored         ▀▀▀▀FLOAT-IMG                                                                                                                                  │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..9 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  9..18 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  18..20 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  20..22 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  22..31 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  31..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│paragraph text   ▀▀▀▀                                                                                                                                           │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..15 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  15..18 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  18..20 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  20..22 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  22..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│starts beside the image and                                                                                                                                     │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..28 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  28..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│reclaims the complete measure                                                                                                                                   │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..30 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  30..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│underneath it.                                                                                                                                                  │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..15 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  15..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                                                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│A table-backed    ┌────────┐                                                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..15 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  15..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..29 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  29..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│image figure stays│▀▀▀▀▀▀▀▀│                                                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..20 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  20..24 fg=Rgb(255, 0, 0) bg=Rgb(255, 0, 0) mod=NONE
+  24..28 fg=Rgb(0, 255, 0) bg=Rgb(0, 255, 0) mod=NONE
+  28..29 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  29..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│narrow while its  │▀▀▀▀▀▀▀▀│                                                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..17 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  17..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..20 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  20..24 fg=Rgb(0, 0, 192) bg=Rgb(0, 0, 192) mod=NONE
+  24..28 fg=Rgb(255, 255, 0) bg=Rgb(255, 255, 0) mod=NONE
+  28..29 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  29..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│caption wraps     └────────┘                                                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..14 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  14..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..29 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  29..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│below.            caption                                                                                                                                       │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..7 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  7..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..26 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  26..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                  words wrap                                                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..29 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  29..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                  below                                                                                                                                         │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..19 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  19..24 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=NONE
+  24..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                                                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                                                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                                                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..161 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  161..162 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

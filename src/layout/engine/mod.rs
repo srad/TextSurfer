@@ -598,7 +598,6 @@ fn try_layout_flow(
                 flow[index].depth,
                 index.saturating_add(1),
             );
-            extract_inline_images(&mut tree, input);
             clip_since(&mut tree, starts, child_clip);
         } else if let Some(owner) = flow[index].owner {
             let left = layout.border.left + layout.padding.left;
@@ -766,7 +765,6 @@ fn try_layout_flow(
                     index.saturating_add(1),
                 );
             }
-            extract_inline_images(&mut tree, input);
             clip_since(&mut tree, starts, child_clip);
             if !fixed_subtree && let Some(rect) = child_clip.rect(rect) {
                 layout_height = layout_height.max(rect.row.saturating_add(rect.height));
@@ -871,69 +869,6 @@ fn clip_since(tree: &mut BoxTree, starts: OutputStarts, clip: ClipRegion) {
         })
         .collect();
     tree.images.extend(images);
-}
-
-fn extract_inline_images(tree: &mut BoxTree, input: LayoutInput<'_>) {
-    let Some(resources) = input.images else {
-        return;
-    };
-    for (node, image) in resources.iter() {
-        let fragments = tree
-            .fragments
-            .iter()
-            .filter(|fragment| fragment.node == node && fragment.text.contains('\u{fffc}'))
-            .collect::<Vec<_>>();
-        if fragments.is_empty() {
-            continue;
-        }
-        let left = fragments
-            .iter()
-            .map(|fragment| fragment.col)
-            .min()
-            .unwrap_or(0);
-        let top = fragments
-            .iter()
-            .map(|fragment| fragment.row)
-            .min()
-            .unwrap_or(0);
-        let right = fragments
-            .iter()
-            .map(|fragment| fragment.rect().col.saturating_add(fragment.rect().width))
-            .max()
-            .unwrap_or(left);
-        let bottom = fragments
-            .iter()
-            .map(|fragment| fragment.rect().row.saturating_add(fragment.rect().height))
-            .max()
-            .unwrap_or(top);
-        let depth = fragments
-            .iter()
-            .map(|fragment| fragment.depth)
-            .max()
-            .unwrap_or(0);
-        let width = right.saturating_sub(left);
-        let height = bottom.saturating_sub(top);
-        tree.images.push(ImagePlacement {
-            node,
-            asset_id: image.asset_id,
-            revision: image.revision,
-            rect: LayoutRect {
-                col: left,
-                row: top,
-                width,
-                height,
-            },
-            clip: LayoutRect {
-                col: left,
-                row: top,
-                width,
-                height,
-            },
-            depth,
-        });
-    }
-    tree.fragments
-        .retain(|fragment| !fragment.text.contains('\u{fffc}'));
 }
 
 fn propagates_overflow(document: &Document, node: NodeId) -> bool {

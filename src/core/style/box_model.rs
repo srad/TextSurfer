@@ -124,9 +124,8 @@ impl OverflowAxes {
 }
 
 /// The components of `contain`, kept as flags because `content` and `strict` are exactly unions of
-/// them. Only paint containment reaches layout today: it clips a box's overflow the way
-/// `overflow: hidden` does. Size, layout and style containment parse and are carried, but nothing
-/// reads them yet.
+/// them. Layout and paint containment establish formatting contexts, while paint also clips
+/// overflow. Size and style containment are carried but not applied.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Contain(u8);
 
