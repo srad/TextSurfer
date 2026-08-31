@@ -232,11 +232,21 @@ pub(super) fn shape_inline_around_floats(
     while !remaining.is_empty() && attempts <= remaining.len().saturating_mul(2).saturating_add(8) {
         attempts = attempts.saturating_add(1);
         let slot = block.find_content_slot(row as f32, TaffyClear::None, None);
+        if [slot.x, slot.y, slot.width]
+            .into_iter()
+            .any(|value| !value.is_finite() || value.abs() > f32::from(u16::MAX))
+        {
+            return shape_inline_without_floats(pieces, width);
+        }
         let left = slot.x.max(0.0).round() as usize;
         let right = (slot.x + slot.width).max(0.0).round() as usize;
         let available = right.saturating_sub(left).min(width.saturating_sub(left));
         if available == 0 {
-            let next = (slot.y + slot.height).ceil().max(row as f32 + 1.0) as usize;
+            let next = (slot.y + slot.height).ceil().max(row as f32 + 1.0);
+            if !next.is_finite() || next > f32::from(u16::MAX) {
+                return shape_inline_without_floats(pieces, width);
+            }
+            let next = next as usize;
             row = next;
             continue;
         }
@@ -278,6 +288,31 @@ pub(super) fn shape_inline_around_floats(
     let baseline = lines
         .first()
         .map(|line| line_metrics(&line.glyphs, pieces).1);
+    ShapedInline {
+        lines,
+        height: row,
+        baseline,
+    }
+}
+
+fn shape_inline_without_floats(pieces: &[ResolvedInlinePiece], width: usize) -> ShapedInline {
+    let mut row = 0;
+    let mut baseline = None;
+    let lines = format_inline(pieces, width)
+        .into_iter()
+        .map(|glyphs| {
+            let (height, line_baseline) = line_metrics(&glyphs, pieces);
+            baseline.get_or_insert(line_baseline);
+            let line = ShapedLine {
+                glyphs,
+                col: 0,
+                row,
+                width,
+            };
+            row = row.saturating_add(height);
+            line
+        })
+        .collect();
     ShapedInline {
         lines,
         height: row,

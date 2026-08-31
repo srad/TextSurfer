@@ -737,14 +737,32 @@ fn margin(
 }
 
 pub(super) fn layout_rect(col: f32, row: f32, size: TaffySize<f32>) -> LayoutRect {
-    let right = (col + size.width.max(0.0)).max(0.0).round() as usize;
-    let bottom = (row + size.height.max(0.0)).max(0.0).round() as usize;
-    let col = col.max(0.0).round() as usize;
-    let row = row.max(0.0).round() as usize;
+    let right = cell_edge(col + size.width.max(0.0));
+    let bottom = cell_edge(row + size.height.max(0.0));
+    let col = cell_edge(col);
+    let row = cell_edge(row);
     LayoutRect {
         col,
         row,
         width: right.saturating_sub(col),
         height: bottom.saturating_sub(row),
+    }
+}
+
+fn cell_edge(value: f32) -> usize {
+    if value.is_finite() {
+        (value.max(0.0).round() as usize).min(usize::from(u16::MAX))
+    } else {
+        0
+    }
+}
+
+pub(super) fn layout_offset(value: f32) -> isize {
+    if value.is_finite() {
+        value
+            .round()
+            .clamp(-f32::from(u16::MAX), f32::from(u16::MAX)) as isize
+    } else {
+        0
     }
 }

@@ -1,0 +1,268 @@
+{
+  "schema": 1,
+  "slug": "mdn-css-grid",
+  "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout",
+  "requested": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout",
+  "capturedWith": "chromium",
+  "resources": [
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout",
+      "status": 200,
+      "mimeType": "text/html",
+      "file": "document.html",
+      "sha256": "e52182367917f14e9f094fecca1b20dcc6b5fb7600587954001cf03644a806db"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-global.edd46645a22dfb0f.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r000.css",
+      "sha256": "1b0b01587d7d2dd8165c105468a946d2d1d241a6fae67aba6102f22f69aa0e73"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/9228.84e610e6bb0bf33e.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r001.css",
+      "sha256": "0dd606723fea4623b1974aefd6897e855607555f3795d0ec4a4c179e92d77511"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/270.66bae6059a1c23f9.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r002.css",
+      "sha256": "454a4b2814616d769348d4b48190c56e8dc721da4a189aa84e849a4dcd9ad276"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-content-section.1eb240d1720d8ac3.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r003.css",
+      "sha256": "94ce6694b314fa529dc71a7729f3dfe6879a0c710a783cae740911e90925deee"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-reference-layout.632d2f3884f10ca3.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r004.css",
+      "sha256": "4845f6019dd9404ba7b542716532475ae7cfac8feb445071826a8f3738a1de70"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-reference-toc.9b9bd019efd16b86.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r005.css",
+      "sha256": "38fbce35790129128ccb75640b1a88fc29d96664fb7c6394a40fd7f2f12ce691"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-heading-anchor.0eec5185ab9425b7.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r006.css",
+      "sha256": "3c762d65147552462d42061fd72efbd22a7a825eac441b4b280059e28aab2016"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-article-footer.81ae18c89fc527dc.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r007.css",
+      "sha256": "8040c27a0227e8000a86900b7c46a08c86b5075fd3999907b8a180d73e6ce4ce"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-left-sidebar.46e37af4d0b5c883.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r008.css",
+      "sha256": "e370f061ab3394b452187747882fbbca1dc4d2fc1489280eb3a4a71760edddd8"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-page-layout.5a4354f33e894319.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r009.css",
+      "sha256": "863877df9887d71125e35542dd987c01d04ed194d4461021653fdf62fdc562f6"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-a11y-menu.5796ee87cb69f93f.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r010.css",
+      "sha256": "aa489933cb7ae60f291b3d28c721e44fcbdcdb45302d7a7656de29e6f94edd1b"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-navigation.c3ebf384e65df345.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r011.css",
+      "sha256": "25cf6d454d0cf1736025a7922af33f5a5332068082fa019f71c4ad9ec232de25"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-logo.aea5ff6edf1b9cfb.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r012.css",
+      "sha256": "3450cd8649a94e4c4cd8306c096ef931a56dbabbb358522edf8d072d7bbe45af"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-breadcrumbs.87eb742f4e711dc3.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r013.css",
+      "sha256": "ba28c44dd8279ceea810c16e8e1a2c50a54b4c315c2610fb92793edc39ee9162"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-breadcrumbs-bar.9a51a3c76a6231d0.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r014.css",
+      "sha256": "894a61b9aa8e6405d6bc59c75d13b4e7d46a7ffe82ebed68e15faa401b479490"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-menu.e2c5c8a53a8854c2.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r015.css",
+      "sha256": "d463eeda36a4781aab6f9f09798a438a2a8095509f6ed7a22969bce435b06938"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/styles-footer.66072dd619a4ef50.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r016.css",
+      "sha256": "9ceaa41af89c94b91ae383772fc144650fe0d541cb87ac58eb96a7777050d6bf"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/ssr/contrast.d86e85c43de8dee8.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r017.svg",
+      "sha256": "4871981e400dfd5e45ab17e07099d298fdaf898b48128ecb6c77a6068768786a"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/ssr/languages.dcba936080e5be86.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r018.svg",
+      "sha256": "a47332c7160609e674202abf7c363f93d19a019e386d80d2cad2579d87100fe0"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/external-link.4f3a2dc8e402cae5.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r019.svg",
+      "sha256": "e2f4d4151516d2febf5865f607832f043a4da00a463ec3fd3bff5e1f92fea9cb"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/inter-latin.9a3b1bc220d426ef.woff2",
+      "status": 200,
+      "mimeType": "font/woff2",
+      "file": "r020.woff2",
+      "sha256": "2c0a6f55ecf3fe1b20008ab42c9ae78da3243d21f12ec00baf208bba7105f11c"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/jetbrains-mono-latin.119994ed445212c7.woff2",
+      "status": 200,
+      "mimeType": "font/woff2",
+      "file": "r021.woff2",
+      "sha256": "ef10b443983cbd93e78bcae5bb7e8bdd0507976fd84e041f67119d3cfd9b8722"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/menu.74ccd9bb64dbf543.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r022.svg",
+      "sha256": "66c3245836edbdcb8c64ff3b5e4acf319b60ba63c5805d4be754d950ea00fa65"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/chevron-right.a81fc439dd5e4839.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r023.svg",
+      "sha256": "3ca2030ab852bf94cf7ebf3844a6b9e69124ec4ba633abbff6dd94bae4d64b23"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/bluesky.a9421882d093c829.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r024.svg",
+      "sha256": "6c814799f1c167cfa018ff2676b81ab232c9a6b8337a80d47431a682a064557e"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/github.4d94e1bf436aa7ed.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r025.svg",
+      "sha256": "1e47113aa9df52e4b96a84d58cf6974b189e80d3f9236d293249725c6b16af83"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/x.4c7e68bf52af030a.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r026.svg",
+      "sha256": "7d774c3ff82139febd92486ae3c6dc65bbe5055ecdd74d846c052017242885e2"
+    },
+    {
+      "url": "https://developer.mozilla.org/manifest.json",
+      "status": 200,
+      "mimeType": "application/json",
+      "file": "r027.json",
+      "sha256": "0fa91be4b31e1a5c1064e3c0cfef5ac2a89e4cd7b2e34f937240b7cdade1f6d3"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/mastodon.1a5c0fde8353f680.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r028.svg",
+      "sha256": "1ff5aaefbc062d49b3b775bbca65799bc71afd9f98532341c7bee989a3f88c7d"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/rss.37214526d7308d0c.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r029.svg",
+      "sha256": "05bcef0db9c0127303663da7ef5e9d4332a28ddfa3fbd1a9dbb4289ee8ad0ccc"
+    },
+    {
+      "url": "https://developer.mozilla.org/favicon.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r030.svg",
+      "sha256": "77b58351b9f57ca4f663812879efb28988da716038b9cf22ad9c3af7fcdeee39"
+    },
+    {
+      "url": "https://developer.mozilla.org/favicon-192x192.png",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r031.png",
+      "sha256": "b9bbd8ac23a561e1f8fd67038693ac6ea6563f778ec917f0151411b5847b1f5d"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/chevron-down.7c923b7054da305b.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r032.svg",
+      "sha256": "fb7a0e50e9a3a3ec57ce42ded99602203141a166f98e7d6ed9f94a4463f01da4"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/graduation-cap.c7aa0f3430c53718.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r033.svg",
+      "sha256": "4ea4bdcea9acb8482318ea7fdbad0b8b63a263dda27c5698949f9b306452e2e6"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/client/wrench.a3caa7312a364b47.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r034.svg",
+      "sha256": "bc100ee8c1f8860f1e10fd311cdc8d1ddb6a6708e1444530a5a938ad9062b668"
+    },
+    {
+      "url": "https://developer.mozilla.org/static/ssr/filter.b77a4ccbfb57e2ef.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r035.svg",
+      "sha256": "a650d42a1a97bc2fd1ccb2fd84931931809bae596931ec48de59a2da546f6299"
+    }
+  ]
+}

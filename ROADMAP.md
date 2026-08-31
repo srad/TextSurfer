@@ -466,44 +466,13 @@ TextSurfer projects that behavior onto its fixed cell grid without accepting str
 as quantization. Script-dependent missing content belongs to M4/M5 and later site-compatibility
 work when their host bindings are insufficient.
 
-- [ ] **Defect intake and offline corpus** *(in progress — the probe reports, the manifest and the
-  supervised worker are open).* Reduce every reported defect to a resource-closed page
-  capture or minimal standards fixture before changing production code. Cover a long article with
-  media, a dense table/list page, forms/search, flex/grid documentation and horizontal RTL content.
-  Exercise applicable cases at 40, 100 and 160 columns in terminal and VGA. Every visible fix needs
-  a focused regression plus rendering-atlas or static-WPT coverage where applicable; production
-  behavior may not depend on URLs, site names, classes or known markup.
-  *Landed — browser-reference integration checks.* `tools/capture-browser-reference.mjs`
-  drives the Chromium that Playwright leaves on disk over CDP, with page script disabled to match
-  `scripting: false` and the viewport set to `cols*8 x rows*16` — the exact canvas
-  `CellMetric::viewport_css_pixels` lays out in. One human-run capture writes both halves of a
-  corpus entry under `testdata/browser-corpus/<slug>/`: every byte the browser fetched, and the
-  word geometry it laid out. `tests/render_corpus.rs` then renders those bytes offline and compares.
-  Node's global `WebSocket` and `fetch` carry the protocol, so there is no `package.json` and no
-  npm install; Rust tests still never touch the network.
-  **Comparison unit: maximal alphanumeric runs, not words.** Word and contiguity boundaries are
-  width-dependent — the browser reads `Linux (kernel)[9][g]` as one clump where our narrower line
-  breaks it — so any rule built on them manufactures failures on every wrapped paragraph. Two
-  earlier tokenisations were tried and discarded on measurement.
-  **Asserted:** A3, that text the browser keeps apart never shares our cells — zero across every
-  capture, and disabling the `contain` fix below makes it fire at exactly the two widths that were
-  broken, which is what validates the oracle. **Ratcheted, not yet classified:** A1 distinct runs
-  the browser paints and we do not, and A2 the preserved fraction of reading order. Today's
-  Wikipedia numbers are 351/53/47 missing and 952/972/970 permille order at 40/100/160 columns;
-  `example.com` is exact at every width. The comparison reconstructs decoded resources from the
-  rendered page rather than measuring a second broken-image tree, so these numbers are the baseline
-  for the image-aware oracle and are not comparable to the earlier alt-text counts. Those A1/A2
-  totals mix real defects with known-legitimate divergence (narrow-line clipping, windowed form
-  values, fixed-advance line breaking) and are guarded by A1 ceilings that may only fall and A2
-  floors that may only rise; neither is a target.
-  A2 uses an exact Hunt-Szymanski LCS so repeated words cannot manufacture an order regression.
-  A band number locates a finding in the *browser's* coordinates only: the two documents drift
-  apart vertically as line breaking differs, so never compare them at the same band index.
-  `TEXTSURFER_CORPUS_TRIAGE=1` clusters the findings by band and prints the browser's own text
-  around each, which is how the two causes under general flow correctness below were identified.
-  *Still open:* finish reducing A1/A2 findings to owned causes with an xfail table, move the page
-  list and expectations into `tools/browser-reference.json`, make the sort direction-aware before an
-  RTL page is admitted (band-then-x is LTR visual order), and add the remaining corpus shapes.
+- [x] **Defect intake and offline corpus (done).** `tools/browser-reference.json` owns a
+  resource-closed six-page corpus covering the required shapes at 40, 100 and 160 columns in both
+  renderers. The isolated 36-case matrix verifies every byte by SHA-256, uses exact occurrence-aware
+  LCS and direction-aware browser bands, forbids A3 overlap exceptions, and locks each classified
+  A1/A2 finding group by count, digest, owner and reason. Capture is human-run and manifest-driven;
+  replacement is explicit and staged atomically, while Rust tests remain offline. Parent watchdogs
+  report assertion mismatches, harness errors, crashes and timeouts separately.
 - [x] **Formatting contexts and containment** *(done).* Paint containment clips overflow through
   `ClipRegion`; layout passes only authored `contain: layout` and `contain: paint` to Taffy and maps
   `flow-root` directly. Ordinary blocks remain in their
@@ -525,6 +494,9 @@ work when their host bindings are insufficient.
      figure beyond its grid; only the caption's min-content contribution may do so. The Linux
      article's figures and footer navboxes are integration fixtures; the implementation remains
      markup-agnostic.
+  3. **Bounded float exclusion geometry (done).** Invalid or over-budget float slots fall back to
+     ordinary inline shaping; Taffy edges and offsets are bounded before integer conversion, and
+     saturated zero-extent intervals never enter the paint index.
 - [ ] **Stacking and positioned content.** Implement `z-index` and bounded stacking contexts,
   relative positioning for inline boxes, positioned table descendants, and true fixed/sticky
   behavior. Paint order and hit testing must agree on the topmost box.
@@ -1141,7 +1113,8 @@ publication filters that traversal to genuinely changed style entries before lay
   never overlap, and a wider viewport never increases height. Grid adds bounded declaration/layout
   completion and auto-fill height monotonicity. `url_fix` and text-field state laws continue from M0.
 - **Fakes everywhere:** FakeFetch, fake clock, FakeHost; no test touches the network or the real
-  clock. The sole exception is the static-WPT parent supervisor's fixed wall-clock watchdog.
+  clock. The sole exception is a parent conformance-corpus supervisor's fixed wall-clock watchdog;
+  product code and child renderers still use injected time.
 - `tests/support/` holds shared corpus helpers; module-local fakes stay inline under `#[cfg(test)]`.
 - `--dump` is the scriptable end-to-end harness: fixture in, golden text out.
 

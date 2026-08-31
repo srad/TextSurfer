@@ -3,6 +3,8 @@ mod manifest;
 mod render;
 mod supervisor;
 mod tests;
+#[path = "../worker_supervisor.rs"]
+mod worker_supervisor;
 
 pub use dom_construction::assert_deep_dom_construction_completes;
 pub use supervisor::run_worker;

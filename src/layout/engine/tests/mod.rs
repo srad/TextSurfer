@@ -887,6 +887,64 @@ fn zero_width_keeps_zero_geometry_but_text_layout_makes_progress() {
     );
 }
 
+#[test]
+fn saturated_row_geometry_does_not_recurse_forever_in_the_paint_index() {
+    let mut tree = BoxTree {
+        fills: vec![BackgroundFill {
+            rect: LayoutRect {
+                row: usize::MAX,
+                height: 1,
+                ..LayoutRect::default()
+            },
+            color: None,
+            depth: 0,
+        }],
+        paint_sources: PaintSources {
+            fills: vec![PaintStyleSource::Missing],
+            ..PaintSources::default()
+        },
+        ..BoxTree::default()
+    };
+    tree.rebuild_paint_index();
+    let mut fills = Vec::new();
+    tree.paint_fills_at(usize::MAX, &mut fills);
+    assert!(fills.is_empty());
+}
+
+#[test]
+fn non_finite_taffy_geometry_degrades_to_an_empty_rect() {
+    assert_eq!(
+        layout_rect(
+            0.0,
+            0.0,
+            taffy::geometry::Size {
+                width: f32::INFINITY,
+                height: f32::INFINITY,
+            },
+        ),
+        LayoutRect::default()
+    );
+    assert_eq!(
+        layout_rect(
+            0.0,
+            0.0,
+            taffy::geometry::Size {
+                width: 1.0e30,
+                height: 1.0e30,
+            },
+        ),
+        LayoutRect {
+            width: usize::from(u16::MAX),
+            height: usize::from(u16::MAX),
+            ..LayoutRect::default()
+        }
+    );
+    assert_eq!(layout_offset(f32::INFINITY), 0);
+    let maximum = isize::try_from(u16::MAX).expect("u16 fits isize");
+    assert_eq!(layout_offset(1.0e30), maximum);
+    assert_eq!(layout_offset(-1.0e30), -maximum);
+}
+
 fn rendered_rows(source: &str, cols: u16) -> Vec<String> {
     crate::pipeline::render::render_html(source, Size { cols, rows: 24 }, Palette::DEFAULT, false)
         .painted

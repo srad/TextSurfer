@@ -158,7 +158,7 @@ impl IntervalIndex {
         let intervals = rects
             .filter_map(|(rect, value)| {
                 let end = rect.row.saturating_add(rect.height);
-                (rect.height > 0).then_some(Interval {
+                (end > rect.row).then_some(Interval {
                     start: rect.row,
                     end,
                     value,

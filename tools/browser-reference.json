@@ -1,0 +1,221 @@
+{
+  "schema": 1,
+  "viewports": [
+    { "id": "40x30", "columns": 40, "rows": 30 },
+    { "id": "100x38", "columns": 100, "rows": 38 },
+    { "id": "160x45", "columns": 160, "rows": 45 }
+  ],
+  "renderers": ["terminal", "vga"],
+  "requiredShapes": [
+    "baseline",
+    "long-article-media",
+    "dense-table-list",
+    "forms-search",
+    "flex-grid-documentation",
+    "horizontal-rtl"
+  ],
+  "pages": [
+    {
+      "slug": "example",
+      "requestedUrl": "https://example.com",
+      "shapes": ["baseline"],
+      "bundleSha256": "2c572ea8aceb539a75bfd04a099f868b5cb79d9ab0001f676de0a9582102ea13",
+      "references": [
+        { "viewport": "40x30", "sha256": "97a9d9f493696ea7862b3a01185072cc18283de4a16fcf40db5acdf436249c86" },
+        { "viewport": "100x38", "sha256": "6a430ba293144346bd805de1edeced1097b69749e82c20169a22c77a6c16c1cf" },
+        { "viewport": "160x45", "sha256": "9e77c0c84f78190997621baab7b65a22d260cad2d630c7a5678a1710c41f9276" }
+      ],
+      "expectations": [
+        { "renderer": "terminal", "viewport": "40x30", "xfails": [] },
+        { "renderer": "terminal", "viewport": "100x38", "xfails": [] },
+        { "renderer": "terminal", "viewport": "160x45", "xfails": [] },
+        { "renderer": "vga", "viewport": "40x30", "xfails": [] },
+        { "renderer": "vga", "viewport": "100x38", "xfails": [] },
+        { "renderer": "vga", "viewport": "160x45", "xfails": [] }
+      ]
+    },
+    {
+      "slug": "wikipedia-linux",
+      "requestedUrl": "https://en.wikipedia.org/wiki/Linux",
+      "shapes": ["long-article-media"],
+      "bundleSha256": "85d25b87a8df32b15838b910fe45d4df78bf78b4a9aec3ea5ac966597d286187",
+      "references": [
+        { "viewport": "40x30", "sha256": "698db155a5efe98baf9a6817500f0296e85e6ceb26423fa3c782ef2b3f8bc848" },
+        { "viewport": "100x38", "sha256": "ee2285b228a0bf46ff5a82e9e77ea38b75da86d040d4e5979088ccbb9e92acb1" },
+        { "viewport": "160x45", "sha256": "7fa7e7c4fd29694b8e14698a4bbc99a75676e584d1227a3d2670437fe59dd0ba" }
+      ],
+      "expectations": [
+        { "renderer": "terminal", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 351, "sha256": "5b6242438e81ad28db4874d6bd79ddb6d07dba000fd181a57340d9d79b2196c0", "owner": "M1-F general flow", "reason": "Chromium-visible runs are omitted by fixed-cell line breaking and unsupported positioned responsive layout." },
+          { "relation": "a1-hidden-leak", "count": 143, "sha256": "46ef0fbdd3a36a66bf88dc2f0e9ca892d435080d012775e2d4edc3bda48d61d8", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive navigation and auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 608, "sha256": "f57c6e8c993c8a9960cbc42cc6d29dc68809cd39b86468c863e9e1067111f51c", "owner": "M1-F general flow", "reason": "Fixed-cell wrapping, floats, and positioned responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "terminal", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 53, "sha256": "fbb3830729bca0363144a66627cefdff1654f9959bf8ef65c37f5ecc48e61647", "owner": "M1-F general flow", "reason": "Chromium-visible runs are omitted by fixed-cell line breaking and unsupported positioned responsive layout." },
+          { "relation": "a1-hidden-leak", "count": 7, "sha256": "5b547c5a8efdfd0180e10e338ccd7d500d954a1fec3468945a9377010eaf04f4", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive navigation and auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 365, "sha256": "b16207a6ff00824c6e1cd47d621a2456dd7a86dcf79a2a2c9ad2a9113d3013c9", "owner": "M1-F general flow", "reason": "Fixed-cell wrapping, floats, and positioned responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "terminal", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 47, "sha256": "6bc05a263f8e4472dd060ae50595ab6f3f455842893b52e903ce8174c37310d8", "owner": "M1-F general flow", "reason": "Chromium-visible runs are omitted by fixed-cell line breaking and unsupported positioned responsive layout." },
+          { "relation": "a1-hidden-leak", "count": 8, "sha256": "9928f769291bf4d261602a67b5652f60ed9c9d9bc7c9d9e89af05d61b1b9ef4b", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive navigation and auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 393, "sha256": "815aafaf437b4d1900e0f0c71435ea9ba5171d7e777a03d259f5d28ac5a43226", "owner": "M1-F general flow", "reason": "Fixed-cell wrapping, floats, and positioned responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 351, "sha256": "5b6242438e81ad28db4874d6bd79ddb6d07dba000fd181a57340d9d79b2196c0", "owner": "M1-F general flow", "reason": "Chromium-visible runs are omitted by fixed-cell line breaking and unsupported positioned responsive layout." },
+          { "relation": "a1-hidden-leak", "count": 143, "sha256": "46ef0fbdd3a36a66bf88dc2f0e9ca892d435080d012775e2d4edc3bda48d61d8", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive navigation and auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 608, "sha256": "f57c6e8c993c8a9960cbc42cc6d29dc68809cd39b86468c863e9e1067111f51c", "owner": "M1-F general flow", "reason": "Fixed-cell wrapping, floats, and positioned responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 53, "sha256": "fbb3830729bca0363144a66627cefdff1654f9959bf8ef65c37f5ecc48e61647", "owner": "M1-F general flow", "reason": "Chromium-visible runs are omitted by fixed-cell line breaking and unsupported positioned responsive layout." },
+          { "relation": "a1-hidden-leak", "count": 7, "sha256": "5b547c5a8efdfd0180e10e338ccd7d500d954a1fec3468945a9377010eaf04f4", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive navigation and auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 365, "sha256": "b16207a6ff00824c6e1cd47d621a2456dd7a86dcf79a2a2c9ad2a9113d3013c9", "owner": "M1-F general flow", "reason": "Fixed-cell wrapping, floats, and positioned responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 47, "sha256": "6bc05a263f8e4472dd060ae50595ab6f3f455842893b52e903ce8174c37310d8", "owner": "M1-F general flow", "reason": "Chromium-visible runs are omitted by fixed-cell line breaking and unsupported positioned responsive layout." },
+          { "relation": "a1-hidden-leak", "count": 8, "sha256": "9928f769291bf4d261602a67b5652f60ed9c9d9bc7c9d9e89af05d61b1b9ef4b", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive navigation and auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 393, "sha256": "815aafaf437b4d1900e0f0c71435ea9ba5171d7e777a03d259f5d28ac5a43226", "owner": "M1-F general flow", "reason": "Fixed-cell wrapping, floats, and positioned responsive regions differ from Chromium visual order." }
+        ] }
+      ]
+    },
+    {
+      "slug": "duckduckgo-lite",
+      "requestedUrl": "https://lite.duckduckgo.com/lite/",
+      "shapes": ["forms-search"],
+      "bundleSha256": "aca6f93f1339af681c6f26712acb9f49eaca301a5ad741e91b92712f0fabf80b",
+      "references": [
+        { "viewport": "40x30", "sha256": "6b7d3f7697b9c679cf34a3c12400bfb1d3a4db990af77993df2328403a72ca5d" },
+        { "viewport": "100x38", "sha256": "7accaaf6aeea8a9eb92bd5e7fe8d2f4057716e532fca41fc129387f1a3a83e41" },
+        { "viewport": "160x45", "sha256": "e0a4c60496f56d1c50dc03e9909523605f7cd02d5608e2166c5fd74fe095fb1e" }
+      ],
+      "expectations": [
+        { "renderer": "terminal", "viewport": "40x30", "xfails": [] },
+        { "renderer": "terminal", "viewport": "100x38", "xfails": [] },
+        { "renderer": "terminal", "viewport": "160x45", "xfails": [] },
+        { "renderer": "vga", "viewport": "40x30", "xfails": [] },
+        { "renderer": "vga", "viewport": "100x38", "xfails": [] },
+        { "renderer": "vga", "viewport": "160x45", "xfails": [] }
+      ]
+    },
+    {
+      "slug": "mdn-css-grid",
+      "requestedUrl": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Grid_layout",
+      "shapes": ["flex-grid-documentation"],
+      "bundleSha256": "9710661ccfe6c25b4664b0acac4924b583c3900448c661d6c1c8374020f64c18",
+      "references": [
+        { "viewport": "40x30", "sha256": "2bba92a2358acb2e888c061e20db30da71eee9ba157b2f4d50a340ab988bc7fe" },
+        { "viewport": "100x38", "sha256": "0ae5616ede55f6d5ade10564b16ee220f5a13181b37f5301a8453c9dd54f787a" },
+        { "viewport": "160x45", "sha256": "b21cf46fed4d8fc6a18cffe066be4d025b084c84d9094c606177c7dc1b20c3a7" }
+      ],
+      "expectations": [
+        { "renderer": "terminal", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 5, "sha256": "930381bf6211b1c9ad662f6768952e16c483662cf9fa65fb3160efe38c3bd092", "owner": "M1-F stacking and positioned content", "reason": "Chromium exposes off-flow accessibility navigation that TextSurfer does not retain as visible content." },
+          { "relation": "a2-order", "count": 7, "sha256": "782b492d2d4ba1522e1865d0b57a1e194b118afcf38b70d76dbe43d0e6f9cdab", "owner": "M1-F stacking and positioned content", "reason": "Off-flow accessibility navigation differs from Chromium visual order." }
+        ] },
+        { "renderer": "terminal", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 5, "sha256": "930381bf6211b1c9ad662f6768952e16c483662cf9fa65fb3160efe38c3bd092", "owner": "M1-F stacking and positioned content", "reason": "Chromium exposes off-flow accessibility navigation that TextSurfer does not retain as visible content." },
+          { "relation": "a2-order", "count": 27, "sha256": "f5178c253596e58b0b1a5850594c7d2e5f1655b46e955c5492752a7edc1a9ed5", "owner": "M1-F stacking and positioned content", "reason": "Off-flow navigation and responsive document regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "terminal", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 6, "sha256": "0f35edc304778bc6ce4a9b93aa3d0fe0715c979e89f45c2201f5bec69de36de0", "owner": "M1-F stacking and positioned content", "reason": "Chromium exposes off-flow navigation that TextSurfer does not retain as visible content." },
+          { "relation": "a1-hidden-leak", "count": 7, "sha256": "03b7229206bddd8b4b2c4813e966502555c0ffc99012365679ba98ba7bd90a2a", "owner": "M1-F general flow", "reason": "Chromium-hidden responsive documentation navigation remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 45, "sha256": "840b398c104f6ed94f99e132fe828114e231f509366fd17f337e870e9da3c098", "owner": "M1-F stacking and positioned content", "reason": "Off-flow navigation and responsive document regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 5, "sha256": "930381bf6211b1c9ad662f6768952e16c483662cf9fa65fb3160efe38c3bd092", "owner": "M1-F stacking and positioned content", "reason": "Chromium exposes off-flow accessibility navigation that TextSurfer does not retain as visible content." },
+          { "relation": "a2-order", "count": 7, "sha256": "782b492d2d4ba1522e1865d0b57a1e194b118afcf38b70d76dbe43d0e6f9cdab", "owner": "M1-F stacking and positioned content", "reason": "Off-flow accessibility navigation differs from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 5, "sha256": "930381bf6211b1c9ad662f6768952e16c483662cf9fa65fb3160efe38c3bd092", "owner": "M1-F stacking and positioned content", "reason": "Chromium exposes off-flow accessibility navigation that TextSurfer does not retain as visible content." },
+          { "relation": "a2-order", "count": 25, "sha256": "26defaf37e98281cef32b4f38bc4b05237b78d0051673082c2ba9527c9b16bd5", "owner": "M1-F stacking and positioned content", "reason": "Off-flow navigation and responsive document regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 6, "sha256": "0f35edc304778bc6ce4a9b93aa3d0fe0715c979e89f45c2201f5bec69de36de0", "owner": "M1-F stacking and positioned content", "reason": "Chromium exposes off-flow navigation that TextSurfer does not retain as visible content." },
+          { "relation": "a1-hidden-leak", "count": 7, "sha256": "03b7229206bddd8b4b2c4813e966502555c0ffc99012365679ba98ba7bd90a2a", "owner": "M1-F general flow", "reason": "Chromium-hidden responsive documentation navigation remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 44, "sha256": "ab2355663325ad04d232d279e917cbb6c75aa9566c45b71f117edf25320d0779", "owner": "M1-F stacking and positioned content", "reason": "Off-flow navigation and responsive document regions differ from Chromium visual order." }
+        ] }
+      ]
+    },
+    {
+      "slug": "wikipedia-linux-distributions",
+      "requestedUrl": "https://en.wikipedia.org/wiki/Comparison_of_Linux_distributions",
+      "shapes": ["dense-table-list"],
+      "bundleSha256": "e98a67d120e6b6d5e6ed16a1772d7ab827bf7c62771dac63643bef22ef709544",
+      "references": [
+        { "viewport": "40x30", "sha256": "79a7e4b994b4e01c88ace2b530fcc9165d0069b906a20028e8bf58d96386ae25" },
+        { "viewport": "100x38", "sha256": "30a73e4f29638caf82fa23b423898f5400a4d883e4827a6ad94556a2d4fb9fcd" },
+        { "viewport": "160x45", "sha256": "8e1fd757208f31c54b0450707bcda696e241631fdcae392d77a376a20b6db7ea" }
+      ],
+      "expectations": [
+        { "renderer": "terminal", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 624, "sha256": "722dbdde746bae694f0fda4e93100775160f94e0f31504f928ab15d8cc4723e6", "owner": "M1-F general flow", "reason": "Dense responsive table and list content is omitted by TextSurfer's current fixed-cell layout." },
+          { "relation": "a1-hidden-leak", "count": 236, "sha256": "09ff5fb84c047f8ded9443c91e84078d12e32b5657d282b74861fd9424462076", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive table and navigation content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1594, "sha256": "1d1fc1922c307b4900bf65d5e660d18c2cca3994451c5299f0f6759c722aeb18", "owner": "M1-F general flow", "reason": "Dense tables, lists, floats, and responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "terminal", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 339, "sha256": "4abc59382afeaa344b40a35575a184f7e4a8fcdf4e305ed08c7ea978dc69d7aa", "owner": "M1-F general flow", "reason": "Dense responsive table and list content is omitted by TextSurfer's current fixed-cell layout." },
+          { "relation": "a1-hidden-leak", "count": 49, "sha256": "aa07de864a124e2426005eccfd76eb94d3cfa626f916fe3646afc684eb6c2f88", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive table and navigation content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1986, "sha256": "f9cb96473892e4ef5372ca8b69943b0b3aba3e021761d3c4c945f5be25bc0824", "owner": "M1-F general flow", "reason": "Dense tables, lists, floats, and responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "terminal", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 228, "sha256": "e8c474d53bf66db2469bc3e1308cdef31df90cc9fd2526488022b4687e1f7160", "owner": "M1-F general flow", "reason": "Dense responsive table and list content is omitted by TextSurfer's current fixed-cell layout." },
+          { "relation": "a1-hidden-leak", "count": 41, "sha256": "89084b5cb55410ef80a3fb2590f966382eaf52a131d29bf8f834dee13a75e262", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive table and navigation content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1768, "sha256": "96609deb7609b01bd3242eb7e411a326cb791b2a34ba9ab7f387941fda7eb3ae", "owner": "M1-F general flow", "reason": "Dense tables, lists, floats, and responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 624, "sha256": "722dbdde746bae694f0fda4e93100775160f94e0f31504f928ab15d8cc4723e6", "owner": "M1-F general flow", "reason": "Dense responsive table and list content is omitted by TextSurfer's current fixed-cell layout." },
+          { "relation": "a1-hidden-leak", "count": 236, "sha256": "09ff5fb84c047f8ded9443c91e84078d12e32b5657d282b74861fd9424462076", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive table and navigation content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1594, "sha256": "1d1fc1922c307b4900bf65d5e660d18c2cca3994451c5299f0f6759c722aeb18", "owner": "M1-F general flow", "reason": "Dense tables, lists, floats, and responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 339, "sha256": "4abc59382afeaa344b40a35575a184f7e4a8fcdf4e305ed08c7ea978dc69d7aa", "owner": "M1-F general flow", "reason": "Dense responsive table and list content is omitted by TextSurfer's current fixed-cell layout." },
+          { "relation": "a1-hidden-leak", "count": 49, "sha256": "aa07de864a124e2426005eccfd76eb94d3cfa626f916fe3646afc684eb6c2f88", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive table and navigation content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1986, "sha256": "f9cb96473892e4ef5372ca8b69943b0b3aba3e021761d3c4c945f5be25bc0824", "owner": "M1-F general flow", "reason": "Dense tables, lists, floats, and responsive regions differ from Chromium visual order." }
+        ] },
+        { "renderer": "vga", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 228, "sha256": "e8c474d53bf66db2469bc3e1308cdef31df90cc9fd2526488022b4687e1f7160", "owner": "M1-F general flow", "reason": "Dense responsive table and list content is omitted by TextSurfer's current fixed-cell layout." },
+          { "relation": "a1-hidden-leak", "count": 41, "sha256": "89084b5cb55410ef80a3fb2590f966382eaf52a131d29bf8f834dee13a75e262", "owner": "M1-F stacking and positioned content", "reason": "Chromium-hidden responsive table and navigation content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1768, "sha256": "96609deb7609b01bd3242eb7e411a326cb791b2a34ba9ab7f387941fda7eb3ae", "owner": "M1-F general flow", "reason": "Dense tables, lists, floats, and responsive regions differ from Chromium visual order." }
+        ] }
+      ]
+    },
+    {
+      "slug": "wikipedia-arabic-linux",
+      "requestedUrl": "https://ar.wikipedia.org/wiki/لينكس",
+      "shapes": ["horizontal-rtl"],
+      "bundleSha256": "acd99e0744d2adbe3fdb07ce351b92182d6e4244faa399bd1c6bb12abc4f37a1",
+      "references": [
+        { "viewport": "40x30", "sha256": "1177099382d271737e1eb28e6a82612487992abfc13680ab96b74a4c378fac36" },
+        { "viewport": "100x38", "sha256": "37ed4103d153e4980751ba59b44d0382cf95b2a8c69f6e66e1a264c8e015a8c2" },
+        { "viewport": "160x45", "sha256": "2180cfbefd17518b14337cea33dcc2b34ccaab966e0e83d206e38be0d02a8c75" }
+      ],
+      "expectations": [
+        { "renderer": "terminal", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 420, "sha256": "3d206c2f9fbf7b0868ab6d7d0c076c107e2563ac37476abc59972c97facfe34d", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 119, "sha256": "f9e965447d375d08ff0b69e7b87aeadd366d10831a064174949a0464b7ddd267", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
+        ] },
+        { "renderer": "terminal", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 227, "sha256": "c38d23d19aa765b14b69a525d44bd281a3dc6fe3a474857a75f9a130f269af31", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 54, "sha256": "ec393e25d5d74b8dd65ac7a657f7eb4604834bbd428491b29faa2b46ee68164a", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
+        ] },
+        { "renderer": "terminal", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 233, "sha256": "c52e941d11ca29e8fad847cb3689207d797572909bfe8f2c26b5220d60cd4a6f", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 19, "sha256": "cfe3bb022034f9f0886783992fdb149d667de8bb1fd8b5d0edafbebd5de9c30c", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1, "sha256": "fd4f54dafd02c1cb8d01ef4954cd52d549be2d5081f6e9e42fcb7cd1d48555e4", "owner": "M1-F horizontal international layout", "reason": "The remaining non-RTL occurrence differs from Chromium visual order on the RTL page." }
+        ] },
+        { "renderer": "vga", "viewport": "40x30", "xfails": [
+          { "relation": "a1-missing", "count": 420, "sha256": "3d206c2f9fbf7b0868ab6d7d0c076c107e2563ac37476abc59972c97facfe34d", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 119, "sha256": "f9e965447d375d08ff0b69e7b87aeadd366d10831a064174949a0464b7ddd267", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
+        ] },
+        { "renderer": "vga", "viewport": "100x38", "xfails": [
+          { "relation": "a1-missing", "count": 227, "sha256": "c38d23d19aa765b14b69a525d44bd281a3dc6fe3a474857a75f9a130f269af31", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 54, "sha256": "ec393e25d5d74b8dd65ac7a657f7eb4604834bbd428491b29faa2b46ee68164a", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
+        ] },
+        { "renderer": "vga", "viewport": "160x45", "xfails": [
+          { "relation": "a1-missing", "count": 233, "sha256": "c52e941d11ca29e8fad847cb3689207d797572909bfe8f2c26b5220d60cd4a6f", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 19, "sha256": "cfe3bb022034f9f0886783992fdb149d667de8bb1fd8b5d0edafbebd5de9c30c", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." },
+          { "relation": "a2-order", "count": 1, "sha256": "fd4f54dafd02c1cb8d01ef4954cd52d549be2d5081f6e9e42fcb7cd1d48555e4", "owner": "M1-F horizontal international layout", "reason": "The remaining non-RTL occurrence differs from Chromium visual order on the RTL page." }
+        ] }
+      ]
+    }
+  ]
+}

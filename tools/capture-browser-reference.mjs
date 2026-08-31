@@ -26,24 +26,23 @@ const CHROME = join(
   "chrome.exe",
 );
 
-const WIDTHS = [
-  [40, 30],
-  [100, 38],
-  [160, 45],
-];
 const COLUMN_PX = 8;
 const ROW_PX = 16;
 
 function parseArgs(argv) {
-  const args = { probe: false };
+  const args = { probe: false, replace: false };
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     if (key === "--probe") args.probe = true;
+    else if (key === "--replace") args.replace = true;
     else if (key === "--url") args.url = argv[++index];
     else if (key === "--slug") args.slug = argv[++index];
     else throw new Error(`unknown argument ${key}`);
   }
-  if (!args.url) throw new Error("--url is required");
+  if (args.probe && !args.url) throw new Error("--url is required with --probe");
+  if (!args.probe && !args.slug) throw new Error("--slug is required for a capture");
+  if (!args.probe && args.url) throw new Error("capture URLs come from tools/browser-reference.json");
+  if (args.probe && args.replace) throw new Error("--replace is not valid with --probe");
   return args;
 }
 
@@ -167,6 +166,8 @@ async function openPage(cdp, cols, rows) {
 function collectResources(cdp, sessionId) {
   const responses = new Map();
   const finished = [];
+  const inflight = new Set();
+  cdp.on("Network.requestWillBeSent", (params) => inflight.add(params.requestId));
   cdp.on("Network.responseReceived", (params) => {
     if (params.sessionId && params.sessionId !== sessionId) return;
     responses.set(params.requestId, {
@@ -176,8 +177,26 @@ function collectResources(cdp, sessionId) {
       type: params.type,
     });
   });
-  cdp.on("Network.loadingFinished", (params) => finished.push(params.requestId));
-  return { responses, finished };
+  cdp.on("Network.loadingFinished", (params) => {
+    inflight.delete(params.requestId);
+    finished.push(params.requestId);
+  });
+  cdp.on("Network.loadingFailed", (params) => inflight.delete(params.requestId));
+  return { responses, finished, inflight };
+}
+
+async function waitForQuiet(resources) {
+  const deadline = Date.now() + 15_000;
+  let quietSince = Date.now();
+  while (Date.now() < deadline) {
+    if (resources.inflight.size === 0) {
+      if (Date.now() - quietSince >= 750) return;
+    } else {
+      quietSince = Date.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("network did not become quiet within 15 seconds");
 }
 
 async function evaluate(cdp, sessionId, expression) {
@@ -350,6 +369,29 @@ const EXTRACT = `(() => {
     }
   }
 
+  for (const control of document.querySelectorAll("input, textarea, select")) {
+    const style = getComputedStyle(control);
+    const type = (control.getAttribute("type") || "text").toLowerCase();
+    const text =
+      control instanceof HTMLSelectElement
+        ? control.selectedOptions[0]?.textContent || ""
+        : type === "submit" || type === "button" || type === "reset"
+          ? control.value
+          : control.value || control.placeholder || "";
+    if (!text || style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+    const box = control.getBoundingClientRect();
+    if (box.width === 0 && box.height === 0 || box.right <= 0 || box.left >= viewportWidth) continue;
+    words.push([
+      text,
+      Math.round(box.left),
+      Math.round(box.top),
+      Math.round(box.width),
+      Math.round(box.height),
+      1,
+      style.direction === "rtl" ? 1 : 0,
+    ]);
+  }
+
   // Element boxes for the R1 geometry diagnostic are deliberately not captured: nothing reads them
   // yet, and they cost more bytes than every word on the page put together.
   return { words, documentUrl: location.href, documentHeight: document.documentElement.scrollHeight };
@@ -363,59 +405,87 @@ function extensionFor(mimeType, url) {
   return guess && guess.length <= 5 ? guess : "bin";
 }
 
-async function capture(url, slug) {
+async function capture(url, slug, widths) {
   const { child, profile, endpoint } = await launch();
   const cdp = await Cdp.connect(endpoint);
-  const outputDir = join(process.cwd(), "testdata", "browser-corpus", slug);
   const bundle = new Map();
   const references = [];
+  const processed = new Set();
   try {
-    for (const [cols, rows] of WIDTHS) {
-      const sessionId = await openPage(cdp, cols, rows);
-      const resources = collectResources(cdp, sessionId);
-      const loaded = cdp.once("Page.loadEventFired");
-      await cdp.send("Page.navigate", { url }, sessionId);
-      await loaded;
-      await new Promise((resolve) => setTimeout(resolve, 750));
+    const [[firstCols, firstRows]] = widths;
+    const sessionId = await openPage(cdp, firstCols, firstRows);
+    const resources = collectResources(cdp, sessionId);
+    const loaded = cdp.once("Page.loadEventFired");
+    await cdp.send("Page.navigate", { url }, sessionId);
+    await loaded;
+    for (const [cols, rows] of widths) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { width: cols * COLUMN_PX, height: rows * ROW_PX, deviceScaleFactor: 1, mobile: false },
+        sessionId,
+      );
+      await evaluate(cdp, sessionId, "document.fonts ? document.fonts.ready.then(() => true) : true");
+      await waitForQuiet(resources);
 
       for (const requestId of resources.finished) {
+        if (processed.has(requestId)) continue;
+        processed.add(requestId);
         const meta = resources.responses.get(requestId);
-        if (!meta || bundle.has(meta.url)) continue;
+        if (!meta) continue;
         try {
           const body = await cdp.send("Network.getResponseBody", { requestId }, sessionId);
           const bytes = body.base64Encoded
             ? Buffer.from(body.body, "base64")
             : Buffer.from(body.body, "utf8");
-          bundle.set(meta.url, { ...meta, bytes });
-        } catch {
-          // A body Chromium no longer holds is recorded as absent, not as a silent success.
-          bundle.set(meta.url, { ...meta, bytes: null });
+          const prior = bundle.get(meta.url);
+          if (prior?.bytes && !prior.bytes.equals(bytes)) {
+            throw new Error(`resource changed across viewports: ${meta.url}`);
+          }
+          if (!prior) bundle.set(meta.url, { ...meta, bytes });
+        } catch (error) {
+          if (error.message?.startsWith("resource changed across viewports:")) throw error;
+          if (!bundle.has(meta.url)) bundle.set(meta.url, { ...meta, bytes: null });
         }
       }
 
       const extracted = await evaluate(cdp, sessionId, EXTRACT);
       references.push({ cols, rows, ...extracted });
-      await cdp.send("Page.close", {}, sessionId);
     }
+    await cdp.send("Page.close", {}, sessionId);
   } finally {
     cdp.close();
     child.kill();
     await rm(profile, { recursive: true, force: true }).catch(() => {});
   }
-  return { outputDir, bundle, references };
+  return { bundle, references };
 }
 
 const args = parseArgs(process.argv.slice(2));
 if (args.probe) {
   await probe(args.url);
 } else {
-  if (!args.slug) throw new Error("--slug is required for a capture");
-  const { outputDir, bundle, references } = await capture(args.url, args.slug);
-  const { writeFile, mkdir } = await import("node:fs/promises");
-  await mkdir(outputDir, { recursive: true });
+  const { access, writeFile, mkdir, rename } = await import("node:fs/promises");
+  const manifestPath = join(process.cwd(), "tools", "browser-reference.json");
+  const manifest = JSON.parse(await (await import("node:fs/promises")).readFile(manifestPath, "utf8"));
+  const page = manifest.pages.find((candidate) => candidate.slug === args.slug);
+  if (!page) throw new Error(`unknown manifest slug ${args.slug}`);
+  const widths = manifest.viewports.map((viewport) => [viewport.columns, viewport.rows]);
+  const outputDir = join(process.cwd(), "testdata", "browser-corpus", args.slug);
+  const stage = join(process.cwd(), "target", "browser-corpus-capture", `${args.slug}-${process.pid}`);
+  const exists = await access(outputDir).then(() => true, () => false);
+  if (exists && !args.replace) throw new Error(`${outputDir} exists; pass --replace explicitly`);
+  await mkdir(stage, { recursive: true });
+  const { bundle, references } = await capture(page.requestedUrl, args.slug, widths);
   // The page's own `location.href`, not the URL typed on the command line: a redirect or an added
   // trailing slash otherwise leaves the bundle unable to name its own document.
   const documentUrl = references[0].documentUrl;
+  if (!references.every((reference) => reference.documentUrl === documentUrl)) {
+    throw new Error("canonical document URL changed across viewports");
+  }
+  const document = bundle.get(documentUrl);
+  if (!document?.bytes || document.status < 200 || document.status >= 300) {
+    throw new Error(`top-level document was not captured as 2xx: ${documentUrl}`);
+  }
   const resources = [];
   let index = 0;
   for (const [resourceUrl, meta] of bundle) {
@@ -427,7 +497,7 @@ if (args.probe) {
       meta.type === "Document" && resourceUrl === documentUrl
         ? `document.${extensionFor(meta.mimeType, resourceUrl)}`
         : `r${String(index++).padStart(3, "0")}.${extensionFor(meta.mimeType, resourceUrl)}`;
-    await writeFile(join(outputDir, file), meta.bytes);
+    await writeFile(join(stage, file), meta.bytes);
     resources.push({
       url: resourceUrl,
       status: meta.status,
@@ -437,12 +507,12 @@ if (args.probe) {
     });
   }
   await writeFile(
-    join(outputDir, "bundle.json"),
-    `${JSON.stringify({ schema: 1, slug: args.slug, url: documentUrl, requested: args.url, capturedWith: "chromium", resources }, null, 2)}\n`,
+    join(stage, "bundle.json"),
+    `${JSON.stringify({ schema: 1, slug: args.slug, url: documentUrl, requested: page.requestedUrl, capturedWith: "chromium", resources }, null, 2)}\n`,
   );
   for (const reference of references) {
     await writeFile(
-      join(outputDir, `reference-${reference.cols}x${reference.rows}.json`),
+      join(stage, `reference-${reference.cols}x${reference.rows}.json`),
       `${JSON.stringify(reference)}\n`,
     );
     const visible = reference.words.filter((word) => word[5] === 1).length;
@@ -450,5 +520,11 @@ if (args.probe) {
       `${args.slug} ${reference.cols}x${reference.rows}: ${visible}/${reference.words.length} visible words, document ${reference.documentHeight}px`,
     );
   }
+  if (exists) {
+    const backupRoot = join(process.cwd(), "target", "browser-corpus-backup");
+    await mkdir(backupRoot, { recursive: true });
+    await rename(outputDir, join(backupRoot, `${args.slug}-${Date.now()}`));
+  }
+  await rename(stage, outputDir);
   console.log(`wrote ${resources.length} resources to ${outputDir}`);
 }

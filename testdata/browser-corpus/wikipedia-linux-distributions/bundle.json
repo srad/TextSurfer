@@ -1,0 +1,268 @@
+{
+  "schema": 1,
+  "slug": "wikipedia-linux-distributions",
+  "url": "https://en.wikipedia.org/wiki/Comparison_of_Linux_distributions",
+  "requested": "https://en.wikipedia.org/wiki/Comparison_of_Linux_distributions",
+  "capturedWith": "chromium",
+  "resources": [
+    {
+      "url": "https://en.wikipedia.org/w/load.php?lang=en&modules=ext.cite.parsoid.styles%7Cext.cite.styles%7Cext.uls.interlanguage%7Cext.visualEditor.desktopArticleTarget.noscript%7Cext.wikimediamessages.styles%7Cjquery.makeCollapsible.styles%7Cjquery.tablesorter.styles%7Cmediawiki.skinning.content.parsoid%7Cskins.vector.icons%2Cstyles%7Cskins.vector.search.codex.styles%7Cwikibase.client.init&only=styles&skin=vector-2022",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r000.css",
+      "sha256": "b64ad7d5808eb2f827b8a396c3f38c9a4dc9c37aba4d6ae8badef1c14c8056d2"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?lang=en&modules=site.styles&only=styles&skin=vector-2022",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r001.css",
+      "sha256": "776a17712cefe2a971dc7dad0b40560215c75f84c01cef34ae574c472a2cfe38"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/mobile/copyright/wikipedia-wordmark-en-25.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r002.svg",
+      "sha256": "169241aebac0b1222230274878e82c34fd51865f825c29516386810fcdbf6fc2"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/icons/enwiki-25.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r003.svg",
+      "sha256": "095fb188212ac25419535feb7aee7a6a7b2d58270ae42a168abf9942d1b44315"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/mobile/copyright/wikipedia-tagline-en-25.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r004.svg",
+      "sha256": "400508c091b4e9cd71f55512b8c871e08e4ad6ddfc54597c6ec0733d67d064ca"
+    },
+    {
+      "url": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"%23000\"><path d=\"m16.7 8-6 6H9.3l-6-6 1.4-1.4 5.3 5.3 5.3-5.3z\"/></svg>",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r005.svg",
+      "sha256": "5bc2ff21be391234895c1177e3f8abb6912d4531b331e252c7138f45d89affce"
+    },
+    {
+      "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r006.png",
+      "sha256": "63ef318d96b5d0d0ceba6e04a4e622b1158335cdc67c49e27839132c6f655058"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/Free_and_open-source_software_logo_%282009%29.svg/40px-Free_and_open-source_software_logo_%282009%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r007.webp",
+      "sha256": "77c109c341f6ac1829597f89d5d35777d8d28f55e4588a9cb91dd0c97c7049cd"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/f/f2/Edit-clear.svg/40px-Edit-clear.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r008.webp",
+      "sha256": "a4320a07e8f8f0acdde3b9c8b0e1b9730a87e8ccb5c1aa514d062069b8adb6b8"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/b/b4/Ambox_important.svg/40px-Ambox_important.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r009.webp",
+      "sha256": "7856335e83fb8b9046fbe8b23f5a859d144de86f9f97f27a2791accc57fb0a09"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Ambox_current_red.svg/60px-Ambox_current_red.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r010.webp",
+      "sha256": "e19b8838705ac261083d11cfdffa18e22166757e96be4a1659a52fdda06d2cb1"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/8/8a/OOjs_UI_icon_edit-ltr-progressive.svg/20px-OOjs_UI_icon_edit-ltr-progressive.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r011.webp",
+      "sha256": "659912e3ebc4dd65a4e0c8c75d0812b921715cb90d9d2387f1b57d6872593d5c"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Ambox_question.svg/40px-Ambox_question.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r012.webp",
+      "sha256": "901d056cd59ac0b23d732737168a46cf1f8592f98a5c2b71949443e5c1b4b81e"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b0/NewTux.svg/40px-NewTux.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r013.webp",
+      "sha256": "bc63ace7045bc019f3c9f299c8cc8ac035e1b0b14b0d3e14957ce9dc52bcdd1c"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=search&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r014.svg",
+      "sha256": "e3c3f409daed8b352e66c602eacaa02e8e553ffa8909868ca7b79089bbcf7a51"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=heart&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r015.svg",
+      "sha256": "a6412eec1710f2032c0da112e6a8bff50d25dd9bfb008cd04fa611352d4b712b"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=menu&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r016.svg",
+      "sha256": "f95bdd835f49a42def318ad8c291d14b46a3fdfb12b4a69031c94367dc663765"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=userAvatar&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r017.svg",
+      "sha256": "9030062ecfd77880b308dccf7ad119f57da3f2e5fe29daf47643b0f46898a8cc"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=logIn&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r018.svg",
+      "sha256": "c6fb02b34f352720c6bc7f5da5f68218001d21c0d362c6e052d55ddb43a85f0f"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=language&variant=progressive&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r019.svg",
+      "sha256": "b665bdf3802a04109a9c5aac7ad6a085856250bb64b6276e997d6f7e55199ac6"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/skins/Vector/resources/skins.vector.styles/images/arrow-down-progressive.svg?5cd6d",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r020.svg",
+      "sha256": "57e3ab07391cd97b6b0c95e7d0142f34af796bff0932d8a83179b0638256a188"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=verticalEllipsis&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r021.svg",
+      "sha256": "f7e5fd7b1f8c36c951633d54ad17be0736501c17c487862e5698a517c137d8f0"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/load.php?modules=skins.vector.icons&image=eye&format=original&lang=en&skin=vector-2022&version=2p4m9",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r022.svg",
+      "sha256": "a7c66ba3f771527b08507c0e2e57398808898e17c0e6ad6ccd465799758f14ea"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/skins/Vector/resources/skins.vector.styles/images/link-external-small-ltr-progressive.svg?fb64d",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r023.svg",
+      "sha256": "b324430a72a978ffc29853c1dbb95679833c58b30e5b5d10e5063f96f98c5ba2"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/4d/Icon_pdf_file.png",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r024.png",
+      "sha256": "a524ef7507020b455c32f5ed4cfc65a13a047c432b3000477443ff23502575a5"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/d/db/Symbol_list_class.svg/20px-Symbol_list_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r025.webp",
+      "sha256": "3e81e803dbecb91ee53867f3a881db87e022bac9c63fdd3bc22ed8b03590d497"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/9/96/Symbol_category_class.svg/20px-Symbol_category_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r026.webp",
+      "sha256": "f26ce6db4c1bf269a17fc1775688be66b6cee25266424370da814f453fd6cbf9"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/6/6a/Symbol_na_class.svg/20px-Symbol_na_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r027.webp",
+      "sha256": "c81c63a647f32f2b56049a455c5cb7249504558981bb5fe2c79501b95cc5d4fb"
+    },
+    {
+      "url": "https://upload.wikimedia.org/wikipedia/en/thumb/e/e2/Symbol_portal_class.svg/20px-Symbol_portal_class.svg.png?utm_source=en.wikipedia.org&utm_campaign=parser&utm_content=thumbnail",
+      "status": 200,
+      "mimeType": "image/webp",
+      "file": "r028.webp",
+      "sha256": "3c8c3a03088c930f81f07e08d5391c25ce7ca76f9f2374087d566fe74b8f7b23"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/resources/assets/mediawiki_compact.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r029.svg",
+      "sha256": "d0b9c6e983d71f5c033beab214ce122f4a6dba1fd1173b344e3487afb0f730fa"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/footer/wikimedia.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r030.svg",
+      "sha256": "c989c591b888781ee3bf6ef2f4a273f1509310e0e238579c33602e0fd7b34d02"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Comparison_of_Linux_distributions",
+      "status": 200,
+      "mimeType": "text/html",
+      "file": "document.html",
+      "sha256": "b97c27b720e45ec27c570b4c90a4408679db850fdc335015a41b7e17f6ac6e40"
+    },
+    {
+      "url": "https://auth.wikimedia.org/metawiki/wiki/Special:CentralAutoLogin/checkLoggedIn?useformat=desktop&wikiid=enwiki&usesul3=1&type=1x1",
+      "status": 200,
+      "mimeType": "image/png",
+      "file": "r031.png",
+      "sha256": "fe67e12a6497f8518ef1673fd8cf5622871935ff85f204715e78b2009dd48588"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/favicon/wikipedia.ico",
+      "status": 200,
+      "mimeType": "image/vnd.microsoft.icon",
+      "file": "r032.vnd.microsoft.icon",
+      "sha256": "3638de61226857e62cf5187d7d59cf902111ad4f792b5bdff1bfed3f5ed5e608"
+    },
+    {
+      "url": "https://en.wikipedia.org/static/images/footer/wikimedia-button.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r033.svg",
+      "sha256": "0c2aa872dd39b943efde8b4e444bd7c627e5ab740684356046bbb8a2248b57cd"
+    },
+    {
+      "url": "https://en.wikipedia.org/w/resources/assets/poweredby_mediawiki.svg",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r034.svg",
+      "sha256": "75444929595b7c4040288c822835ce3e8f82d7b67eb6b9a3546765ad74698ede"
+    },
+    {
+      "url": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"%23000\"><path d=\"M8 1a7 7 0 015.605 11.191l5.102 5.102-1.414 1.414-5.102-5.102A7 7 0 118 1m0 2a5 5 0 100 10A5 5 0 008 3\"/></svg>",
+      "status": 200,
+      "mimeType": "image/svg+xml",
+      "file": "r035.svg",
+      "sha256": "65b41e1581b31f9335a754c3f4b6b84822d8f5dbbf1a1625975c91136a4afdad"
+    }
+  ]
+}

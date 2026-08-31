@@ -35,7 +35,7 @@ use flow::{
 use links::{assign_link_rects, collect_links};
 use paint_index::{PaintIndex, PaintPrimitives};
 use tables::append_table_output;
-use taffy_style::{TaffyStyleInput, layout_rect, taffy_style};
+use taffy_style::{TaffyStyleInput, layout_offset, layout_rect, taffy_style};
 use tree::LayoutTree;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -468,11 +468,10 @@ fn try_layout_flow(
                         .saturating_add(flow[index].style.border.top.layout_width());
                     baseline.saturating_add(inset) as f32
                 });
+                let height = formatted_height(lines, pieces);
                 TaffySize {
                     width: known.width.unwrap_or(measured_width),
-                    height: known
-                        .height
-                        .unwrap_or(formatted_height(lines, pieces) as f32),
+                    height: known.height.unwrap_or(height as f32),
                 }
             },
         );
@@ -593,8 +592,8 @@ fn try_layout_flow(
             append_table_output(
                 &mut tree,
                 output,
-                absolute_col.round() as isize,
-                absolute_row.round() as isize,
+                layout_offset(absolute_col),
+                layout_offset(absolute_row),
                 flow[index].depth,
                 index.saturating_add(1),
             );
@@ -742,8 +741,8 @@ fn try_layout_flow(
                     &mut tree,
                     inline_cache.get(&key).expect("resolved inline"),
                     shaped,
-                    absolute_col.round() as isize,
-                    absolute_row.round() as isize,
+                    layout_offset(absolute_col),
+                    layout_offset(absolute_row),
                     flow[index].style.text_align,
                     index.saturating_add(1),
                 );
@@ -758,8 +757,8 @@ fn try_layout_flow(
                     &mut tree,
                     inline_cache.get(&key).expect("resolved inline"),
                     lines,
-                    absolute_col.round() as isize,
-                    absolute_row.round() as isize,
+                    layout_offset(absolute_col),
+                    layout_offset(absolute_row),
                     layout_width,
                     flow[index].style.text_align,
                     index.saturating_add(1),

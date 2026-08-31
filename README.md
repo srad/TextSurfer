@@ -242,11 +242,13 @@ its override key (usually `Shift`) while TextSurfer has the screen.
   watchdog: `terminal-cell-v1` for cell rendering and crash safety, `vga-pixel-v1` for exact-RGB
   raster reftests. These are TextSurfer slices, not browser pixel conformance.
 - **Browser-reference corpus** — real pages captured once from a headless Chromium with scripting
-  disabled, storing both the bytes it fetched and the geometry it laid out, then compared offline.
+  disabled, storing both the bytes it fetched and the geometry it laid out, then compared offline
+  across six page shapes, three viewport widths and both renderers.
   Because a terminal cell is exactly 8×16 CSS pixels, the browser's viewport is the same canvas we
   lay out in. The comparison is structural, never pixels: text the browser shows must appear, in its
-  reading order, and text it keeps apart must never share a cell. Capturing is human-run; tests stay
-  offline.
+  reading order, and text it keeps apart must never share a cell. Exact classified A1/A2 exceptions
+  live in `tools/browser-reference.json`; A3 overlap exceptions are forbidden. Capturing is
+  human-run with `node tools/capture-browser-reference.mjs --slug <slug>`; tests stay offline.
 
 Gates are local-only (no CI) and must be green before anything is marked done:
 
@@ -282,8 +284,8 @@ Status, decisions in force, acceptance criteria and open plans live in
 **[`ROADMAP.md`](ROADMAP.md)** — read it first if you want to contribute. Dated history lives in
 `git log`, and the standing rules coding agents follow are in [`AGENTS.md`](AGENTS.md).
 
-Next up: finish classifying the browser-reference corpus, then close stacking and positioned content,
-inline geometry and horizontal RTL alongside CSS-pixel replaced sizing and static SVG. Run the
+Next up: close general-flow findings, then stacking and positioned content, inline geometry and
+horizontal RTL alongside CSS-pixel replaced sizing and static SVG. Run the
 representative-page image and styling smoke in VGA and terminal before resuming cold-render
 optimization; retained-paint smoke, keymap unification, keyboard link hints, the help overlay and
 in-page search follow that work.

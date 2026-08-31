@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "slug": "duckduckgo-lite",
+  "url": "https://lite.duckduckgo.com/lite/",
+  "requested": "https://lite.duckduckgo.com/lite/",
+  "capturedWith": "chromium",
+  "resources": [
+    {
+      "url": "https://lite.duckduckgo.com/lite/",
+      "status": 202,
+      "mimeType": "text/html",
+      "file": "document.html",
+      "sha256": "2358d65f2a980721a43652c4aa6ea864d3ca07ab510e7151a6a12818a17baf15"
+    },
+    {
+      "url": "https://duckduckgo.com/dist/l.304bf63bbd053ee46b28.css",
+      "status": 200,
+      "mimeType": "text/css",
+      "file": "r000.css",
+      "sha256": "027fcb6a7487f2c5d3edd9c52e8b2a396b96181720408f2c6e413f912424e3b8"
+    },
+    {
+      "url": "https://duckduckgo.com/favicon.ico",
+      "status": 200,
+      "mimeType": "image/x-icon",
+      "file": "r001.x-icon",
+      "sha256": "d994f806b1e4225b50be5ab681b2cecf845cc216a19a432d878cea3cb815bafd"
+    }
+  ]
+}
