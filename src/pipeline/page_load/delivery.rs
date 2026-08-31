@@ -7,8 +7,9 @@ use mediatype::{MediaType, names};
 
 use crate::core::dom::DomQuirksMode;
 use crate::net::{
-    FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId, charset_from_content_type,
+    FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId, charset_from_content_type, decode_text,
 };
+use crate::script::{HostCompletion, HostResponse};
 
 use super::super::render::RenderCause;
 use super::resource_url::normalized_url;
@@ -38,6 +39,9 @@ impl PageLoad {
         resource_id: ResourceId,
         result: Result<FetchResponse, FetchError>,
     ) -> bool {
+        if self.script_host_fetch_index.contains_key(&resource_id) {
+            return self.deliver_script_host_fetch(resource_id, result);
+        }
         if resource_id == ResourceId::DOCUMENT || self.external_disabled {
             if resource_id == ResourceId::DOCUMENT {
                 return false;
@@ -45,7 +49,13 @@ impl PageLoad {
             if self.image_fetch_index.contains_key(&resource_id) {
                 return self.deliver_image_fetch(resource_id, result);
             }
+            if self.script_fetch_index.contains_key(&resource_id) {
+                return self.deliver_script_fetch(resource_id, result);
+            }
             return false;
+        }
+        if self.script_fetch_index.contains_key(&resource_id) {
+            return self.deliver_script_fetch(resource_id, result);
         }
         if self.image_fetch_index.contains_key(&resource_id) {
             return self.deliver_image_fetch(resource_id, result);
@@ -82,6 +92,67 @@ impl PageLoad {
         self.process_materializations();
         self.invalidate_soft(RenderInvalidation::STYLE, RenderCause::Stylesheet);
         true
+    }
+
+    fn deliver_script_host_fetch(
+        &mut self,
+        resource_id: ResourceId,
+        result: Result<FetchResponse, FetchError>,
+    ) -> bool {
+        let Some(id) = self.script_host_fetch_index.remove(&resource_id) else {
+            return false;
+        };
+        let result = match result {
+            Ok(response) if response.body.len() <= MAX_BODY_BYTES => {
+                let charset = response
+                    .content_type
+                    .as_deref()
+                    .and_then(charset_from_content_type);
+                Ok(HostResponse {
+                    status: response.status,
+                    url: response.final_url.to_string(),
+                    text: decode_text(&response.body, charset.as_deref()).text,
+                })
+            }
+            Ok(_) => Err("fetch response exceeded the body limit".to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        self.script_completions
+            .push_back(HostCompletion::Fetch { id, result });
+        true
+    }
+
+    fn deliver_script_fetch(
+        &mut self,
+        resource_id: ResourceId,
+        result: Result<FetchResponse, FetchError>,
+    ) -> bool {
+        let Some(index) = self.script_fetch_index.remove(&resource_id) else {
+            return false;
+        };
+        let (source, final_url) = match result {
+            Ok(response) if response.is_success() && response.body.len() <= MAX_BODY_BYTES => {
+                let charset = response
+                    .content_type
+                    .as_deref()
+                    .and_then(charset_from_content_type);
+                (
+                    Some(decode_text(&response.body, charset.as_deref()).text),
+                    response.final_url.to_string(),
+                )
+            }
+            Ok(response) => {
+                self.failed_resources = self.failed_resources.saturating_add(1);
+                (None, response.final_url.to_string())
+            }
+            Err(_) => {
+                self.failed_resources = self.failed_resources.saturating_add(1);
+                (None, self.document_url.to_string())
+            }
+        };
+        self.script
+            .as_mut()
+            .is_some_and(|script| script.deliver_external(index, source, final_url))
     }
 
     pub(super) fn process_materializations(&mut self) {

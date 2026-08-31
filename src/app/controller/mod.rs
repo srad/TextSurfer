@@ -27,6 +27,7 @@ use crate::pipeline::render::BlockingRenderQueue;
 #[cfg(not(test))]
 use crate::pipeline::render::ThreadedRenderQueue;
 use crate::pipeline::render::{RenderJob, RenderKey, RenderQueue};
+use crate::script::JsEngineFactory;
 use crate::ui::mouse::ChromeGeometry;
 use crate::ui::widgets::text_field::{ClipboardAction, TextFieldState};
 
@@ -77,6 +78,7 @@ pub struct App {
     screenshot_request: bool,
     flash: Option<FlashNotice>,
     progress_tick: u128,
+    script_factory: Option<Arc<dyn JsEngineFactory>>,
 }
 
 impl Default for App {
@@ -181,7 +183,12 @@ impl App {
             screenshot_request: false,
             flash: None,
             progress_tick: 0,
+            script_factory: None,
         }
+    }
+
+    pub fn set_script_factory(&mut self, factory: Option<Arc<dyn JsEngineFactory>>) {
+        self.script_factory = factory;
     }
 
     pub fn should_quit(&self) -> bool {

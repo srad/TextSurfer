@@ -138,6 +138,21 @@ fn cli_parses_the_start_url_and_rejects_unknown_flags() {
 }
 
 #[test]
+fn runtime_js_mode_respects_the_build_and_explicit_off() {
+    assert!(script_factory(JsMode::Off).unwrap().is_none());
+    #[cfg(feature = "js")]
+    {
+        assert!(script_factory(JsMode::Auto).unwrap().is_some());
+        assert!(script_factory(JsMode::On).unwrap().is_some());
+    }
+    #[cfg(not(feature = "js"))]
+    {
+        assert!(script_factory(JsMode::Auto).unwrap().is_none());
+        assert!(script_factory(JsMode::On).is_err());
+    }
+}
+
+#[test]
 fn default_user_agent_is_versioned_identifiable_and_contactable() {
     assert_eq!(
         default_user_agent(),

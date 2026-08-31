@@ -24,6 +24,240 @@ fn load(source: &str) -> PageLoad {
     )
 }
 
+#[cfg(feature = "js")]
+#[test]
+fn inline_script_mutations_reach_title_and_rendering() {
+    let mut load = PageLoad::new_with_scripts(
+        "<title>Before</title><p id=target class=old>old</p><script>const target = document.querySelector('#target'); target.textContent = 'script rendered'; target.className = 'updated'; document.title = 'Scripted title'; console.log('ready');</script>",
+        Url::parse("https://example.com/scripted").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let page = load.force_render();
+    assert!(
+        page.painted
+            .text_lines()
+            .join("\n")
+            .contains("script rendered")
+    );
+    assert!(!page.painted.text_lines().join("\n").contains("old"));
+    assert_eq!(load.page_title(), "Scripted title");
+    assert_eq!(load.take_script_message().as_deref(), Some("ready"));
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn script_style_and_class_mutations_flow_back_through_the_cascade() {
+    let mut load = PageLoad::new_with_scripts(
+        "<style>.hidden { display: none }</style><p id=class-target>class text</p><p id=style-target>style text</p><p>visible text</p><script>document.getElementById('class-target').classList.add('hidden'); document.getElementById('style-target').style.display = 'none';</script>",
+        Url::parse("https://example.com/style").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let text = load.force_render().painted.text_lines().join("\n");
+    assert!(text.contains("visible text"));
+    assert!(!text.contains("class text"));
+    assert!(!text.contains("style text"));
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn onclick_runs_in_the_loaded_document_and_can_cancel_default_action() {
+    let mut load = PageLoad::new_with_scripts(
+        "<button id=target>before</button><script>document.getElementById('target').onclick = function () { this.textContent = 'clicked'; document.title = 'Click title'; console.log('click message'); return false; };</script>",
+        Url::parse("https://example.com/click").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let _ = load.force_render();
+    let target = load.document.borrow().element_by_id("target").unwrap();
+    assert!(load.dispatch_click(target, Duration::ZERO).canceled);
+    assert_eq!(load.page_title(), "Click title");
+    assert_eq!(load.take_script_message().as_deref(), Some("click message"));
+    assert!(
+        load.force_render()
+            .painted
+            .text_lines()
+            .join("\n")
+            .contains("clicked")
+    );
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn scripting_hides_noscript_and_globals_do_not_cross_documents() {
+    let options = || PageLoadOptions {
+        render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+        palette: Palette::default(),
+        scripting: true,
+        color_scheme: ColorScheme::Dark,
+        started: Duration::ZERO,
+    };
+    let mut first = PageLoad::new_with_scripts(
+        "<script>globalThis.pageSecret = 'leaked';</script>",
+        Url::parse("https://example.com/first").unwrap(),
+        UTF_8,
+        options(),
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let _ = first.force_render();
+    let mut second = PageLoad::new_with_scripts(
+        "<noscript><p>fallback must stay hidden</p></noscript><p id=target>live</p><script>document.getElementById('target').textContent = typeof pageSecret;</script>",
+        Url::parse("https://example.com/second").unwrap(),
+        UTF_8,
+        options(),
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let text = second.force_render().painted.text_lines().join("\n");
+    assert!(text.contains("undefined"));
+    assert!(!text.contains("fallback must stay hidden"));
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn external_classic_scripts_preserve_document_order() {
+    let mut load = PageLoad::new_with_scripts(
+        "<p id=target>old</p><script src=first.js></script><script>document.getElementById('target').textContent += ' then inline';</script>",
+        Url::parse("https://example.com/page").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let command = load.take_commands().pop().unwrap();
+    assert!(!load.scripts_runnable());
+    assert!(load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            status: 200,
+            content_type: Some("text/javascript".to_string()),
+            final_url: command.url,
+            body: b"document.getElementById('target').textContent = 'external';".to_vec(),
+        })
+    ));
+    let page = load.force_render();
+    assert!(
+        page.painted
+            .text_lines()
+            .join("\n")
+            .contains("external then inline")
+    );
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn scripts_inside_template_contents_stay_inert() {
+    let mut load = PageLoad::new_with_scripts(
+        "<p id=target>old</p><template><script>document.getElementById('target').textContent = 'template ran';</script></template><script>document.getElementById('target').textContent = 'live script';</script>",
+        Url::parse("https://example.com/template").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let text = load.force_render().painted.text_lines().join("\n");
+    assert!(text.contains("live script"));
+    assert!(!text.contains("template ran"));
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn timers_run_only_after_the_injected_deadline() {
+    let mut load = PageLoad::new_with_scripts(
+        "<p id=target>old</p><script>setTimeout(() => document.getElementById('target').textContent = 'timer ran', 10);</script>",
+        Url::parse("https://example.com/timer").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let _ = load.advance_scripts(Duration::ZERO);
+    assert!(!load.scripts_runnable_at(Duration::from_millis(9)));
+    assert!(load.scripts_runnable_at(Duration::from_millis(10)));
+    let _ = load.advance_scripts(Duration::from_millis(10));
+    assert!(
+        load.force_render()
+            .painted
+            .text_lines()
+            .join("\n")
+            .contains("timer ran")
+    );
+}
+
+#[cfg(feature = "js")]
+#[test]
+fn fetch_resolves_through_the_page_resource_graph() {
+    let mut load = PageLoad::new_with_scripts(
+        "<p id=target>old</p><script>fetch('/data').then(response => response.text()).then(text => document.getElementById('target').textContent = text);</script>",
+        Url::parse("https://example.com/page").unwrap(),
+        UTF_8,
+        PageLoadOptions {
+            render: crate::core::style::RenderContext::terminal(Size { cols: 80, rows: 24 }),
+            palette: Palette::default(),
+            scripting: true,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+        Arc::new(crate::script::BoaEngineFactory),
+    );
+    let _ = load.advance_scripts(Duration::ZERO);
+    let command = load.take_commands().pop().unwrap();
+    assert_eq!(command.url.as_str(), "https://example.com/data");
+    assert!(load.deliver(
+        command.resource_id,
+        Ok(FetchResponse {
+            status: 200,
+            content_type: Some("text/plain; charset=utf-8".to_string()),
+            final_url: command.url,
+            body: b"fetched text".to_vec(),
+        })
+    ));
+    let _ = load.advance_scripts(Duration::ZERO);
+    assert!(
+        load.force_render()
+            .painted
+            .text_lines()
+            .join("\n")
+            .contains("fetched text")
+    );
+}
+
 fn render(job: RenderJob) -> RenderResult {
     BlockingRenderQueue::new().render(job).unwrap()
 }

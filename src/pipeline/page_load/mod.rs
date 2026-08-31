@@ -4,13 +4,14 @@ mod images;
 mod pending;
 mod refresh;
 mod resource_url;
+mod script;
 mod settle;
 mod sheets;
 
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,6 +29,9 @@ use crate::core::style::{Palette, RenderContext};
 use crate::css::{ColorScheme, DynamicState, MediaContext};
 use crate::html::{Html5everParser, HtmlParser, ParseOutcome};
 use crate::net::{FetchResponse, ResourceId};
+use crate::script::{
+    EventOutcome, HostCompletion, HostOpId, HostRequest, JsEngineFactory, NavigationKind,
+};
 
 use super::render::{RenderCause, RenderCauses, RenderedPage};
 use crate::core::style::StyleTree;
@@ -75,6 +79,15 @@ pub const MAX_IMAGE_URLS: usize = 128;
 pub const MAX_IMAGE_FETCH_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_IMAGE_DECODED_BYTES: usize = 128 * 1024 * 1024;
 pub const MAX_DECLARATIVE_REFRESHES: u8 = 8;
+const MAX_SCRIPT_FETCHES: usize = 32;
+const MAX_SCRIPT_TIMERS: usize = 256;
+const MIN_INTERVAL: Duration = Duration::from_millis(4);
+
+#[derive(Clone, Copy)]
+struct ScriptTimer {
+    due: Duration,
+    interval: Option<Duration>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FetchCommand {
@@ -226,6 +239,13 @@ pub struct PageLoad {
     style_revision: u64,
     last_published_epoch: u64,
     direct_renders: Option<super::render::BlockingRenderQueue>,
+    script: Option<script::ScriptController>,
+    script_messages: Vec<String>,
+    script_navigation: Option<(String, NavigationKind)>,
+    script_fetch_index: HashMap<ResourceId, usize>,
+    script_host_fetch_index: HashMap<ResourceId, HostOpId>,
+    script_completions: VecDeque<HostCompletion>,
+    script_timers: HashMap<HostOpId, ScriptTimer>,
 }
 
 impl PageLoad {
@@ -294,11 +314,38 @@ impl PageLoad {
         Self::from_outcome(outcome, document_url, html_encoding, options)
     }
 
+    pub fn new_with_scripts(
+        source: &str,
+        document_url: Url,
+        html_encoding: &'static Encoding,
+        options: PageLoadOptions,
+        factory: Arc<dyn JsEngineFactory>,
+    ) -> Self {
+        let outcome = Html5everParser::new(options.scripting).parse_document(source);
+        Self::from_outcome_with_scripts(
+            outcome,
+            document_url,
+            html_encoding,
+            options,
+            Some(factory),
+        )
+    }
+
     pub(crate) fn from_outcome(
         outcome: ParseOutcome,
         document_url: Url,
         html_encoding: &'static Encoding,
         options: PageLoadOptions,
+    ) -> Self {
+        Self::from_outcome_with_scripts(outcome, document_url, html_encoding, options, None)
+    }
+
+    pub(crate) fn from_outcome_with_scripts(
+        outcome: ParseOutcome,
+        document_url: Url,
+        html_encoding: &'static Encoding,
+        options: PageLoadOptions,
+        factory: Option<Arc<dyn JsEngineFactory>>,
     ) -> Self {
         let PageLoadOptions {
             render,
@@ -366,11 +413,204 @@ impl PageLoad {
             style_revision: 1,
             last_published_epoch: 0,
             direct_renders: None,
+            script: None,
+            script_messages: Vec::new(),
+            script_navigation: None,
+            script_fetch_index: HashMap::new(),
+            script_host_fetch_index: HashMap::new(),
+            script_completions: VecDeque::new(),
+            script_timers: HashMap::new(),
         };
+        if scripting && let Some(factory) = factory {
+            match script::ScriptController::new(
+                load.document.clone(),
+                &load.document_url,
+                &effective_base,
+                factory,
+            ) {
+                Ok(controller) => load.script = Some(controller),
+                Err(error) => load.script_messages.push(error),
+            }
+        }
         load.discover_document_sources(&effective_base);
         load.discover_document_images(&effective_base);
         load.process_materializations();
+        load.discover_script_fetches();
         load
+    }
+
+    fn discover_script_fetches(&mut self) {
+        let requests = self
+            .script
+            .as_ref()
+            .map_or_else(Vec::new, script::ScriptController::external_requests);
+        for (index, mut url) in requests {
+            url.set_fragment(None);
+            if !self.scheme_allowed(&url) {
+                if let Some(script) = self.script.as_mut() {
+                    let _ = script.deliver_external(index, None, url.to_string());
+                }
+                self.failed_resources = self.failed_resources.saturating_add(1);
+                continue;
+            }
+            let resource_id = ResourceId(self.next_resource_id);
+            self.next_resource_id = self.next_resource_id.saturating_add(1);
+            self.script_fetch_index.insert(resource_id, index);
+            self.commands.push(FetchCommand { resource_id, url });
+        }
+    }
+
+    pub fn scripts_pending(&self) -> bool {
+        !self.script_host_fetch_index.is_empty()
+            || !self.script_completions.is_empty()
+            || self.script.as_ref().is_some_and(|script| !script.is_idle())
+    }
+
+    pub fn scripts_runnable(&self) -> bool {
+        !self.script_completions.is_empty()
+            || self
+                .script
+                .as_ref()
+                .is_some_and(script::ScriptController::is_runnable)
+    }
+
+    pub fn scripts_runnable_at(&self, now: Duration) -> bool {
+        self.scripts_runnable() || self.script_timers.values().any(|timer| timer.due <= now)
+    }
+
+    pub fn next_script_deadline(&self) -> Option<Duration> {
+        self.script_timers.values().map(|timer| timer.due).min()
+    }
+
+    pub fn advance_scripts(&mut self, now: Duration) -> Option<RenderedPage> {
+        let completion = self.script_completions.pop_front().or_else(|| {
+            let id = self
+                .script_timers
+                .iter()
+                .filter(|(_, timer)| timer.due <= now)
+                .min_by_key(|(_, timer)| timer.due)
+                .map(|(id, _)| *id)?;
+            let timer = self.script_timers.remove(&id)?;
+            if let Some(interval) = timer.interval {
+                self.script_timers.insert(
+                    id,
+                    ScriptTimer {
+                        due: now.saturating_add(interval),
+                        interval: Some(interval),
+                    },
+                );
+            }
+            Some(HostCompletion::Timer { id })
+        });
+        let advance = match completion {
+            Some(completion) => self.script.as_mut()?.complete(completion),
+            None => self.script.as_mut()?.advance(),
+        };
+        if let Some(error) = advance.report.error {
+            self.script_messages.push(error);
+        }
+        let effects = advance.effects;
+        self.schedule_script_requests(effects.requests, now);
+        self.script_messages.extend(effects.messages);
+        if let Some(navigation) = effects.navigation {
+            self.script_navigation = Some(navigation);
+        }
+        if effects.impact.render {
+            self.style_revision = self.style_revision.wrapping_add(1);
+            self.invalidate(RenderInvalidation::STYLE, RenderCause::Script);
+            if self.first_painted {
+                return self.render_or_defer();
+            }
+        }
+        None
+    }
+
+    fn schedule_script_requests(&mut self, requests: Vec<(HostOpId, HostRequest)>, now: Duration) {
+        for (id, request) in requests {
+            match request {
+                HostRequest::Fetch { url } => {
+                    let resolved = self.effective_base.join(&url).or_else(|_| Url::parse(&url));
+                    let Ok(mut url) = resolved else {
+                        self.script_completions.push_back(HostCompletion::Fetch {
+                            id,
+                            result: Err("invalid fetch URL".to_string()),
+                        });
+                        continue;
+                    };
+                    url.set_fragment(None);
+                    if self.script_host_fetch_index.len() >= MAX_SCRIPT_FETCHES
+                        || !self.scheme_allowed(&url)
+                    {
+                        self.script_completions.push_back(HostCompletion::Fetch {
+                            id,
+                            result: Err("fetch refused by the resource policy".to_string()),
+                        });
+                        continue;
+                    }
+                    let resource_id = ResourceId(self.next_resource_id);
+                    self.next_resource_id = self.next_resource_id.saturating_add(1);
+                    self.script_host_fetch_index.insert(resource_id, id);
+                    self.commands.push(FetchCommand { resource_id, url });
+                }
+                HostRequest::Timer { delay_ms, repeat } => {
+                    if self.script_timers.len() >= MAX_SCRIPT_TIMERS {
+                        self.script_messages
+                            .push("script timer limit reached".to_string());
+                        continue;
+                    }
+                    let mut delay = Duration::from_millis(delay_ms);
+                    if repeat {
+                        delay = delay.max(MIN_INTERVAL);
+                    }
+                    self.script_timers.insert(
+                        id,
+                        ScriptTimer {
+                            due: now.saturating_add(delay),
+                            interval: repeat.then_some(delay),
+                        },
+                    );
+                }
+                HostRequest::CancelTimer { id } => {
+                    self.script_timers.remove(&id);
+                }
+            }
+        }
+    }
+
+    pub fn dispatch_click(&mut self, target: NodeId, now: Duration) -> EventOutcome {
+        let Some(script) = self.script.as_mut() else {
+            return EventOutcome::default();
+        };
+        let (outcome, effects) = script.dispatch_click(target);
+        self.schedule_script_requests(effects.requests, now);
+        self.script_messages.extend(effects.messages);
+        if let Some(navigation) = effects.navigation {
+            self.script_navigation = Some(navigation);
+        }
+        if effects.impact.render {
+            self.style_revision = self.style_revision.wrapping_add(1);
+            self.invalidate(RenderInvalidation::STYLE, RenderCause::Script);
+        }
+        outcome
+    }
+
+    pub fn take_script_message(&mut self) -> Option<String> {
+        (!self.script_messages.is_empty()).then(|| self.script_messages.remove(0))
+    }
+
+    pub fn take_script_navigation(&mut self) -> Option<(String, NavigationKind)> {
+        self.script_navigation.take()
+    }
+
+    pub fn page_title(&self) -> String {
+        let document = self.document.borrow();
+        document
+            .element_by_name("title")
+            .and_then(|title| document.text_content(title))
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn take_commands(&mut self) -> Vec<FetchCommand> {
@@ -505,7 +745,7 @@ impl PageLoad {
                 .fetches
                 .iter()
                 .all(|fetch| !matches!(fetch.state, FetchState::Pending));
-        styles_settled && self.images_settled()
+        styles_settled && self.images_settled() && !self.scripts_pending()
     }
 
     fn images_settled(&self) -> bool {

@@ -27,6 +27,7 @@ use crate::core::frontend::Frontend;
 use crate::core::geom::{Point, Size};
 use crate::core::style::{Cursor, RenderMetrics, Rgb};
 use crate::layout::LayoutRect;
+use crate::script::JsEngineFactory;
 use crate::ui::chrome;
 use crate::ui::frame::FrameComposer;
 use crate::ui::mouse::WHEEL_ROWS;
@@ -61,8 +62,17 @@ impl Default for VgaOptions {
 
 /// Open a window and run the browser in it until the user quits.
 pub fn run(net: Arc<dyn Navigate>, options: VgaOptions, url: Option<String>) -> io::Result<()> {
+    run_with_scripts(net, options, url, None)
+}
+
+pub fn run_with_scripts(
+    net: Arc<dyn Navigate>,
+    options: VgaOptions,
+    url: Option<String>,
+    script_factory: Option<Arc<dyn JsEngineFactory>>,
+) -> io::Result<()> {
     let event_loop = EventLoop::new().map_err(into_io)?;
-    let mut handler = VgaApp::new(net, options, url)?;
+    let mut handler = VgaApp::new_with_scripts(net, options, url, script_factory)?;
     event_loop.run_app(&mut handler).map_err(into_io)?;
     handler.failure.map_or(Ok(()), Err)
 }
@@ -111,12 +121,23 @@ pub(super) struct VgaApp {
 }
 
 impl VgaApp {
+    #[cfg(test)]
     pub(super) fn new(
         net: Arc<dyn Navigate>,
         options: VgaOptions,
         url: Option<String>,
     ) -> io::Result<Self> {
+        Self::new_with_scripts(net, options, url, None)
+    }
+
+    pub(super) fn new_with_scripts(
+        net: Arc<dyn Navigate>,
+        options: VgaOptions,
+        url: Option<String>,
+        script_factory: Option<Arc<dyn JsEngineFactory>>,
+    ) -> io::Result<Self> {
         let mut app = App::with_net_and_metrics(net, RenderMetrics::VGA);
+        app.set_script_factory(script_factory);
         let theme = *app.theme();
         let palette = theme.palette();
         let backend = VgaBackend::new(SurfaceConfig {

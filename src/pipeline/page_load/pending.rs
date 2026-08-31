@@ -1,8 +1,10 @@
 use encoding_rs::{CoderResult, Decoder, Encoding};
+use std::sync::Arc;
 use url::Url;
 
 use crate::html::IncrementalHtmlParser;
 use crate::net::html_encoding;
+use crate::script::JsEngineFactory;
 
 use super::{PageLoad, PageLoadOptions};
 
@@ -14,6 +16,7 @@ pub struct PendingPageLoad {
     document_url: Url,
     html_encoding: &'static Encoding,
     options: PageLoadOptions,
+    script_factory: Option<Arc<dyn JsEngineFactory>>,
 }
 
 impl PendingPageLoad {
@@ -23,7 +26,13 @@ impl PendingPageLoad {
         html_encoding: &'static Encoding,
         options: PageLoadOptions,
     ) -> Self {
-        Self::from_encoded_bytes(source.into_bytes(), document_url, html_encoding, options)
+        Self::from_encoded_bytes(
+            source.into_bytes(),
+            document_url,
+            html_encoding,
+            options,
+            None,
+        )
     }
 
     pub fn from_bytes(
@@ -33,7 +42,18 @@ impl PendingPageLoad {
         options: PageLoadOptions,
     ) -> Self {
         let encoding = html_encoding(&body, header_charset);
-        Self::from_encoded_bytes(body, document_url, encoding, options)
+        Self::from_encoded_bytes(body, document_url, encoding, options, None)
+    }
+
+    pub fn from_bytes_with_scripts(
+        body: Vec<u8>,
+        header_charset: Option<&str>,
+        document_url: Url,
+        options: PageLoadOptions,
+        script_factory: Arc<dyn JsEngineFactory>,
+    ) -> Self {
+        let encoding = html_encoding(&body, header_charset);
+        Self::from_encoded_bytes(body, document_url, encoding, options, Some(script_factory))
     }
 
     fn from_encoded_bytes(
@@ -41,6 +61,7 @@ impl PendingPageLoad {
         document_url: Url,
         html_encoding: &'static Encoding,
         options: PageLoadOptions,
+        script_factory: Option<Arc<dyn JsEngineFactory>>,
     ) -> Self {
         Self {
             parser: IncrementalHtmlParser::new(options.scripting),
@@ -50,6 +71,7 @@ impl PendingPageLoad {
             document_url,
             html_encoding,
             options,
+            script_factory,
         }
     }
 
@@ -82,11 +104,12 @@ impl PendingPageLoad {
         let outcome = self.parser.finish()?;
         let mut options = self.options;
         options.started = now;
-        let mut load = PageLoad::from_outcome(
+        let mut load = PageLoad::from_outcome_with_scripts(
             outcome,
             self.document_url.clone(),
             self.html_encoding,
             options,
+            self.script_factory.clone(),
         );
         load.defer_rendering();
         Some(load)

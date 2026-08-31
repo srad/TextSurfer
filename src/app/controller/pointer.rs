@@ -485,6 +485,9 @@ impl App {
             if Some(node) != pressed.link {
                 return;
             }
+            if self.dispatch_script_click(node) {
+                return;
+            }
             let new_tab = button == MouseButton::Middle || self.link_opens_a_new_tab(node);
             self.activate_link(&href, new_tab);
             return;

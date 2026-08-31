@@ -26,4 +26,4 @@ mod tests;
 
 pub use backend::VgaBackend;
 pub use surface::{CellState, Surface, SurfaceConfig};
-pub use window::{VgaOptions, run};
+pub use window::{VgaOptions, run, run_with_scripts};

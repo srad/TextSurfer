@@ -54,6 +54,9 @@ impl App {
         let Some(node) = self.tabs.active().dom_focus.map(|focus| focus.node) else {
             return;
         };
+        if self.dispatch_script_click(node) {
+            return;
+        }
         if let Some(href) = self
             .tabs
             .active()
@@ -81,6 +84,46 @@ impl App {
             Some(ControlKind::Submit) => self.submit_control_form(node),
             _ => {}
         }
+    }
+
+    pub(super) fn dispatch_script_click(&mut self, node: NodeId) -> bool {
+        let (outcome, title, message, navigation) = {
+            let tab = self.tabs.active_mut();
+            let Some(load) = tab.load.as_mut() else {
+                return false;
+            };
+            let outcome = load.dispatch_click(node, self.now);
+            (
+                outcome,
+                load.page_title(),
+                load.take_script_message(),
+                load.take_script_navigation(),
+            )
+        };
+        if !title.is_empty() {
+            self.tabs.active_mut().title = title;
+        }
+        if let Some(message) = message {
+            self.tabs.active_mut().message = message;
+            self.touch_status();
+        }
+        let scripted_navigation = navigation.is_some();
+        if let Some((target, kind)) = navigation {
+            match kind {
+                crate::script::NavigationKind::Reload => self.reload(),
+                crate::script::NavigationKind::Push | crate::script::NavigationKind::Replace => {
+                    let resolved = url::Url::parse(self.tabs.active().url.as_str())
+                        .ok()
+                        .and_then(|base| base.join(&target).ok())
+                        .map_or(target, |url| url.to_string());
+                    self.submit_url(&resolved);
+                    if kind == crate::script::NavigationKind::Replace {
+                        self.tabs.active_mut().replace_history(&resolved);
+                    }
+                }
+            }
+        }
+        outcome.canceled || scripted_navigation
     }
 
     pub(super) fn handle_form_key(&mut self, event: &KeyEvent) -> bool {

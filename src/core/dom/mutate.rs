@@ -3,9 +3,67 @@ use super::{Attr, Document, DomError, ElementNs, Node, NodeId};
 impl Document {
     pub fn create_template_contents(&mut self, template: NodeId) -> Result<NodeId, DomError> {
         self.ensure_node(template)?;
+        if let Some(fragment) = self.template_contents.get(&template).copied() {
+            return Ok(fragment);
+        }
         let fragment = self.create_detached(Node::DocumentFragment);
         self.template_contents.insert(template, fragment);
         Ok(fragment)
+    }
+
+    pub fn create_element(&mut self, name: &str) -> NodeId {
+        self.create_detached(Node::Element {
+            name: name.to_ascii_lowercase(),
+            ns: ElementNs::Html,
+            attrs: Vec::new(),
+        })
+    }
+
+    pub fn set_attribute(&mut self, id: NodeId, name: &str, value: String) -> Result<(), DomError> {
+        self.ensure_node(id)?;
+        let Some(Node::Element { attrs, .. }) =
+            self.arena.get_mut(id.0).map(indextree::Node::get_mut)
+        else {
+            return Err(DomError::InvalidNode);
+        };
+        if let Some(attribute) = attrs.iter_mut().find(|attribute| {
+            attribute.ns == super::AttrNs::None && attribute.name.eq_ignore_ascii_case(name)
+        }) {
+            attribute.name = name.to_ascii_lowercase();
+            attribute.value = value;
+        } else {
+            attrs.push(Attr::plain(&name.to_ascii_lowercase(), &value));
+        }
+        Ok(())
+    }
+
+    pub fn remove_attribute(&mut self, id: NodeId, name: &str) -> Result<bool, DomError> {
+        self.ensure_node(id)?;
+        let Some(Node::Element { attrs, .. }) =
+            self.arena.get_mut(id.0).map(indextree::Node::get_mut)
+        else {
+            return Err(DomError::InvalidNode);
+        };
+        let previous = attrs.len();
+        attrs.retain(|attribute| {
+            attribute.ns != super::AttrNs::None || !attribute.name.eq_ignore_ascii_case(name)
+        });
+        Ok(attrs.len() != previous)
+    }
+
+    pub fn set_text_content(&mut self, id: NodeId, text: String) -> Result<(), DomError> {
+        self.ensure_node(id)?;
+        if let Some(Node::Text { data }) = self.arena.get_mut(id.0).map(indextree::Node::get_mut) {
+            *data = text;
+            return Ok(());
+        }
+        for child in self.children(id) {
+            self.detach(child)?;
+        }
+        if !text.is_empty() {
+            self.insert_text(Some(id), &text);
+        }
+        Ok(())
     }
 
     pub fn insert_element(

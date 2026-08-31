@@ -167,6 +167,7 @@ pub(crate) enum RenderCause {
     DynamicState,
     Theme,
     FormState,
+    Script,
     ResourceSettlement,
     Forced,
 }
@@ -215,6 +216,7 @@ impl fmt::Display for RenderCauses {
             (RenderCause::DynamicState, "dynamic_state"),
             (RenderCause::Theme, "theme"),
             (RenderCause::FormState, "form_state"),
+            (RenderCause::Script, "script"),
             (RenderCause::ResourceSettlement, "resource_settlement"),
             (RenderCause::Forced, "forced"),
         ] {

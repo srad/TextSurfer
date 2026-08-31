@@ -81,8 +81,8 @@ signed off.
 | M1-F — Practical rendering fidelity | Cross-context correctness, stacking, inline geometry, horizontal RTL | (in progress) |
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, in-page search, forms | (in progress) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
-| M4 — JS seam | `JsEngine` trait + Noop impl + host layer, `js` feature off | (open) |
-| M5 — Boa | Boa 0.21.1 behind the trait; host bindings subset; job pump; test262 slice | (open) |
+| M4 — JS seam | Runtime-neutral engine/factory traits + Noop impl + typed host layer | (done) |
+| M5 — Boa | Boa 0.22.0 adapter; practical DOM bindings; bounded jobs and host operations | (in progress) |
 | M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · practical image fidelity · floats ✅ · perf | (in progress) |
 | M7 — Stylo cascade | Stylo 0.20.0 as the sole full and incremental cascade | (done — smoke pending) |
 
@@ -94,9 +94,10 @@ with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green default run (2026-08-31): **935 total** (932 passing, 3 ignored).
-The last `--no-default-features` run remains **821** (819 passing, 2 ignored) from 2026-08-30. The WPT target contributes 7 tests (6 passing and 1 ignored;
-5 passing and 1 ignored without `vga`).
+Test counts at the last green matrix run (2026-08-31): default/VGA **960 total**
+(956 passing, 4 ignored), JavaScript+VGA **972 total** (968 passing, 4 ignored), and
+terminal/no-default-features **852 total** (849 passing, 3 ignored). The WPT target contributes 7
+tests (6 passing and 1 ignored; 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
 
@@ -182,7 +183,7 @@ before any item is marked `(done)`.
 - `StyleTree` carries per-node `ComputedStyle` plus two side tables — pseudo-element boxes keyed by
   `(NodeId, PseudoElement)`, and list markers keyed by node. Generated text is heap-allocated and
   `ComputedStyle` is `Copy`, so the strings live beside it rather than in it.
-- No tokio. `boa_engine 0.21.1` is an optional dep behind feature `js`; `--js=off` overrides it.
+- No tokio. `boa_engine 0.22.0` is an optional dep behind feature `js`; `--js=off` overrides it.
 - Module structure rules (a module is a responsibility, not a file) live in `AGENTS.md`.
 
 ## Decisions log
@@ -250,7 +251,8 @@ before any item is marked `(done)`.
 - `cssparser` + `selectors` for CSS (`(rejected)`: lightningcss — no selector matcher).
 - `html5ever` with our own `TreeSink` building an `indextree`-backed `Document`; `scraper`/ego-tree/
   RcDom rejected (none meets the mutable multiple-root, detached-template, future-JS contract).
-- Boa as the first real JS engine (`(rejected)`: rquickjs — C toolchain / unsafe FFI).
+- Boa 0.22.0 as the first real JS engine behind the runtime-neutral adapter (`(rejected)`:
+  rquickjs — C toolchain / unsafe FFI). The adapter boundary remains the Deno Core replacement seam.
 - `ureq` (blocking, rustls native roots) behind `Fetch`; four fixed workers over crossbeam channels,
   superseded jobs cancelled per tab, 10 MiB shared body limit. `mediatype` parses response metadata.
   The default user agent is `TextSurfer/<version> (+https://github.com/srad/TextSurfer)`;
@@ -576,8 +578,9 @@ path.
       parse-error counts or generation numbers; actionable HTTP, fetch, stylesheet and layout
       failures still reach the status bar. The bottom-right progress widget uses measured byte or
       resource counts where totals are known and animated named phases for indefinite work, including
-      elapsed cascade/layout/paint time; it never presents a fabricated overall percentage. First
-      paint stops blocking on styles after 250 ms and late resources coalesce.
+      elapsed cascade/layout/paint time; it never presents a fabricated overall percentage. The
+      five-second coherent initial-resource window coalesces styles and images into one first paint;
+      resources arriving after it repaint normally.
 - [x] Declarative refresh navigation — the first valid WHATWG `meta[http-equiv=refresh]` in document
       order, including `<noscript>` markup while scripting is disabled; zero-delay navigation through
       the per-load pivot, trampoline history entries replaced, chains capped at eight, `--dump` on
@@ -692,26 +695,32 @@ fluency: the native window still feels loaded and laggy.
 layout-changing hover fixed-point regression; native and terminal launch confirmation plus the
 manual mouse walkthrough remain pending.
 
-### M4 — JS seam (open)
+### M4 — JS seam (done)
 
-- [ ] `JsEngine` + `js` feature wiring in the composition root; runtime `--js=off` wins over the
-      feature.
-- [ ] `MutateOp` funnel + invalidation-once rule; host subset: document, location, console→status
-      buffer, alert→dialog line; no dispatch except `onclick`. Harden the DOM boundary at this first
-      non-html5ever caller: repeated template-content creation must not orphan the prior fragment or
-      overwrite its mapping, and mutation failures must not reach existing panic paths.
-- [ ] Noop contract suite covers the inert set; app behavior byte-identical compiled-off vs on-but-off.
-- **Acceptance:** `--js=off` and no-js builds pass identical integration suites.
+Runtime-neutral `JsEngine`/factory/typed-host contracts, capability-parameterized Noop coverage and
+the single checked `MutateOp` invalidation funnel are wired only from the composition root. The `js`
+feature remains default-off and runtime `--js=off` always wins. Template-content creation is
+idempotent, template scripts stay inert, and host failures surface without entering DOM panic paths.
 
-### M5 — Boa (open)
+### M5 — Boa (in progress)
 
-- [ ] Decision gate: Boa 0.21.1 vs Deno Core on an async responsiveness fixture.
-- [ ] `BoaEngine` behind the trait; one engine instance per loaded document; job pump per tick
-      (≤256) on the injected clock; fetch/timer promises resolved from the job queue; TLA excluded.
-- [ ] Full-suite contract run (script feature); noscript fixture; globals isolation across documents.
+- [x] Decision gate: retain Boa 0.22.0. A 600-job Promise fixture is owner-sequence sliced at the
+      requested 256-job budget; the loop-iteration ceiling bounds a single synchronous evaluation.
+- [x] `BoaEngine` behind the runtime-neutral factory/engine/host contracts; one engine instance per
+      loaded document; job pump per tick
+      (≤256) on the injected clock; fetch/timer promises resolved from the generation-tagged page
+      resource graph; at most 32 script fetches and 256 timers per load; TLA excluded.
+- [x] Full executing contract suite under the script feature; scripting-aware `noscript`, inert
+      template contents and globals isolation across documents.
+- [x] Practical rendering bindings: document/title/location, ID and simple-selector lookup,
+      checked DOM tree mutation, attributes/properties, `classList`, inline `style`, console/alert,
+      classic external scripts, click handlers with cancellation/bubbling, fetch text/JSON and
+      injected-time timeout/interval scheduling. `addEventListener`, full selectors and full DOM
+      remain deferred as recorded under Non-goals.
 - [ ] test262 subset runner: pinned checkout under `testdata/test262`, harness files, YAML
       frontmatter, curated slices, xfail manifest by feature, regressions forbidden. Upstream
-      reference: Boa 0.21.1 ≈ 94.12%; our slice must stay within a documented delta.
+      reference must be refreshed against Boa 0.22.0 before the runner lands; our slice must stay
+      within a documented delta.
 - **Acceptance:** a fixture page (inline script + onclick + `document.title` + console echo) green;
   no crashes on example.com with JS on; gates green with `--features js`.
 
@@ -1190,7 +1199,7 @@ incrementally.
 
 - WPT `html/syntax/parsing/resources/*.dat` (pinned commit `ed37f83e`; the html5lib-tests repo is
   archived and points here) is the M1-A landing gate; the tokenizer suite is informational.
-- test262 (pinned commit) at M5: executed through `boa_engine` 0.21.1 with harness files and YAML
+- test262 (pinned commit) at M5: executed through `boa_engine` 0.22.0 with harness files and YAML
   frontmatter honored; per-milestone curated slices with an explicit xfail manifest.
 - css-syntax + WPT-selectors corpora are inherited by adopting `cssparser` / `selectors`.
 - Corpora live in `testdata/`; HTML parsing uses `tools/fetch-corpus.ps1`, rendering its own
@@ -1207,4 +1216,4 @@ incrementally.
 Page-content selection/copy, iframes/`<frame>`, vertical writing modes, remote `@font-face`/custom
 font-family selection, border radius, transforms, multicolumn layout, cookies, `addEventListener`
 DOM events (click-only v0), top-level await, full CSS/DOM, window-title setting, syscall sandboxing,
-config files pre-M6, drag input pre-M6.
+native OS-window title setting, config files pre-M6, drag input pre-M6.

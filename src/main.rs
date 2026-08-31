@@ -21,7 +21,8 @@ use textsurfer::core::event::{
 use textsurfer::core::frame::{EVENTS_PER_FRAME, FrameDamage, FrameScheduler};
 use textsurfer::core::geom::{Point, Size};
 use textsurfer::net::{FetchPool, FileFetch, SchemeFetch, UreqFetch, default_user_agent};
-use textsurfer::pipeline::dump::dump_lines;
+use textsurfer::pipeline::dump::dump_lines_with_scripts;
+use textsurfer::script::JsEngineFactory;
 use textsurfer::ui::frame::FrameComposer;
 use textsurfer::ui::mouse::WHEEL_ROWS;
 use textsurfer::ui::theme::DEFAULT;
@@ -106,12 +107,7 @@ fn frontend_choice(cli: &Cli) -> io::Result<FrontendChoice> {
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
     let _diagnostics_guard = init_logging(cli.log_file.as_deref(), cli.diagnostics.as_deref())?;
-    if cli.js == JsMode::On {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "JavaScript execution is not available before milestone M5",
-        ));
-    }
+    let script_factory = script_factory(cli.js)?;
     let fetch: Arc<dyn textsurfer::net::Fetch> = Arc::new(SchemeFetch {
         http: Arc::new(match cli.user_agent.clone() {
             Some(user_agent) => UreqFetch::with_user_agent(user_agent),
@@ -126,10 +122,10 @@ fn main() -> io::Result<()> {
                 "--dump needs a --url",
             ));
         };
-        return dump(fetch, url, cli.cols, cli.rows);
+        return dump(fetch, url, cli.cols, cli.rows, script_factory);
     }
     if frontend_choice(&cli)? == FrontendChoice::Vga {
-        return run_vga(fetch, &cli);
+        return run_vga(fetch, &cli, script_factory);
     }
     // `ratatui::restore` leaves raw mode and the alternate screen, but knows nothing
     // about mouse capture: without this a panic would leave the shell reporting mouse
@@ -145,6 +141,7 @@ fn main() -> io::Result<()> {
             .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
         let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
         let mut app = App::with_net(net);
+        app.set_script_factory(script_factory);
         let area = terminal.size()?;
         app.on_resize(Size {
             cols: area.width,
@@ -160,6 +157,27 @@ fn main() -> io::Result<()> {
         io::stdout().execute(DisableMouseCapture)?;
         outcome
     })
+}
+
+fn script_factory(mode: JsMode) -> io::Result<Option<Arc<dyn JsEngineFactory>>> {
+    if mode == JsMode::Off {
+        return Ok(None);
+    }
+    #[cfg(feature = "js")]
+    {
+        Ok(Some(Arc::new(textsurfer::script::BoaEngineFactory)))
+    }
+    #[cfg(not(feature = "js"))]
+    {
+        if mode == JsMode::On {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "JavaScript execution is unavailable; rebuild with --features js",
+            ))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 fn init_logging(
@@ -290,25 +308,45 @@ fn init_diagnostics(prefix: &Path) -> io::Result<tracing_chrome::FlushGuard> {
 /// The flag exists in both builds so the failure is a clear message rather than an
 /// unrecognised argument, matching how `--js on` reports an unavailable engine.
 #[cfg(feature = "vga")]
-fn run_vga(fetch: Arc<dyn textsurfer::net::Fetch>, cli: &Cli) -> io::Result<()> {
+fn run_vga(
+    fetch: Arc<dyn textsurfer::net::Fetch>,
+    cli: &Cli,
+    script_factory: Option<Arc<dyn JsEngineFactory>>,
+) -> io::Result<()> {
     let net: Arc<dyn Navigate> = Arc::new(PoolNet::new(Arc::new(FetchPool::spawn(fetch, 4))));
     let options = textsurfer::vga::VgaOptions {
         scale: usize::from(cli.vga_scale),
         ..Default::default()
     };
-    textsurfer::vga::run(net, options, cli.url.clone())
+    textsurfer::vga::run_with_scripts(net, options, cli.url.clone(), script_factory)
 }
 
 #[cfg(not(feature = "vga"))]
-fn run_vga(_fetch: Arc<dyn textsurfer::net::Fetch>, _cli: &Cli) -> io::Result<()> {
+fn run_vga(
+    _fetch: Arc<dyn textsurfer::net::Fetch>,
+    _cli: &Cli,
+    _script_factory: Option<Arc<dyn JsEngineFactory>>,
+) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "this build has no framebuffer frontend; rebuild with --features vga",
     ))
 }
 
-fn dump(fetch: Arc<dyn textsurfer::net::Fetch>, url: &str, cols: u16, rows: u16) -> io::Result<()> {
-    let lines = dump_lines(fetch, url, Size { cols, rows }, DEFAULT.palette())?;
+fn dump(
+    fetch: Arc<dyn textsurfer::net::Fetch>,
+    url: &str,
+    cols: u16,
+    rows: u16,
+    script_factory: Option<Arc<dyn JsEngineFactory>>,
+) -> io::Result<()> {
+    let lines = dump_lines_with_scripts(
+        fetch,
+        url,
+        Size { cols, rows },
+        DEFAULT.palette(),
+        script_factory,
+    )?;
     let mut out = io::stdout().lock();
     for line in lines {
         writeln!(out, "{}", line.trim_end())?;

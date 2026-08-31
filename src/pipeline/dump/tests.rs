@@ -41,6 +41,23 @@ fn dump_uses_the_external_stylesheet_load_driver() {
     assert!(!lines.iter().any(|line| line.contains("sidebar")));
 }
 
+#[cfg(feature = "js")]
+#[test]
+fn dump_executes_scripts_through_the_shared_page_driver() {
+    let lines = dump_lines_with_scripts(
+        Arc::new(UntypedDumpFetch {
+            body: b"<p id=result>static</p><script>document.getElementById('result').textContent = 'scripted dump';</script>".to_vec(),
+        }),
+        "https://example.com/scripted",
+        Size { cols: 80, rows: 24 },
+        Palette::DEFAULT,
+        Some(Arc::new(crate::script::BoaEngineFactory)),
+    )
+    .unwrap();
+    assert!(lines.iter().any(|line| line.contains("scripted dump")));
+    assert!(!lines.iter().any(|line| line.contains("static")));
+}
+
 struct RefreshDumpFetch;
 
 impl Fetch for RefreshDumpFetch {

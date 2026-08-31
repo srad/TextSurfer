@@ -2,7 +2,7 @@
 name = "textsurfer"
 version = "0.0.1"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.91"
 description = "A text-mode web browser for the terminal."
 
 [dependencies]
@@ -31,7 +31,7 @@ image = { version = "0.25.10", default-features = false, features = ["gif", "jpe
 im = { version = "15.1.0", default-features = false }
 ratatui-image = { version = "11.0.6", default-features = false, features = ["crossterm"] }
 ureq = { version = "3.4.0", features = ["platform-verifier"] }
-boa_engine = { version = "0.21.1", optional = true }
+boa_engine = { version = "0.22.0", features = ["annex-b"], optional = true }
 softbuffer = { version = "0.4.8", optional = true }
 unifont-bitmap = { version = "1.0.0", optional = true }
 winit = { version = "0.30.13", optional = true }

@@ -16,6 +16,36 @@ fn empty_document_has_no_root() {
 }
 
 #[test]
+fn template_contents_creation_is_idempotent() {
+    let mut document = Document::new();
+    let template = document.insert_element(None, "template", ElementNs::Html, vec![]);
+    let first = document.create_template_contents(template).unwrap();
+    let child = document.insert_text(Some(first), "kept");
+    let second = document.create_template_contents(template).unwrap();
+    assert_eq!(second, first);
+    assert_eq!(document.children(second), vec![child]);
+}
+
+#[test]
+fn script_facing_text_and_attribute_mutations_roundtrip() {
+    let mut document = Document::new();
+    let element = document.create_element("DIV");
+    document
+        .set_attribute(element, "ID", "result".to_string())
+        .unwrap();
+    document
+        .set_text_content(element, "rendered".to_string())
+        .unwrap();
+    document.attach(element, None).unwrap();
+    assert_eq!(document.element_name(element), Some("div"));
+    assert_eq!(document.element_by_id("result"), Some(element));
+    assert_eq!(document.text_content(element).as_deref(), Some("rendered"));
+    assert_eq!(document.parent_chain(element), vec![element]);
+    assert_eq!(document.remove_attribute(element, "id"), Ok(true));
+    assert_eq!(document.element_by_id("result"), None);
+}
+
+#[test]
 fn children_follow_sibling_order() {
     let mut document = Document::new();
     let parent = document.insert_element(None, "html", ElementNs::Html, vec![]);

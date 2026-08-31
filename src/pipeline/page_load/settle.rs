@@ -48,6 +48,9 @@ impl PageLoad {
     }
 
     pub fn force_render(&mut self) -> RenderedPage {
+        while self.scripts_runnable_at(Duration::ZERO) {
+            let _ = self.advance_scripts(Duration::ZERO);
+        }
         self.first_painted = true;
         self.final_painted = self.applicable_graph_settled();
         if self.invalidation.is_none() {
@@ -65,20 +68,19 @@ impl PageLoad {
     }
 
     pub(super) fn applicable_graph_settled(&self) -> bool {
-        if self.external_disabled {
-            return true;
-        }
-        self.roots.iter().all(|root| match root {
-            RootSource::Inline { media, imports, .. } => {
-                !self.media_matches(media)
-                    || imports
-                        .iter()
-                        .all(|occurrence| self.occurrence_settled(*occurrence, true))
-            }
-            RootSource::External { occurrence, media } => {
-                !self.media_matches(media) || self.occurrence_settled(*occurrence, true)
-            }
-        })
+        let styles_settled = self.external_disabled
+            || self.roots.iter().all(|root| match root {
+                RootSource::Inline { media, imports, .. } => {
+                    !self.media_matches(media)
+                        || imports
+                            .iter()
+                            .all(|occurrence| self.occurrence_settled(*occurrence, true))
+                }
+                RootSource::External { occurrence, media } => {
+                    !self.media_matches(media) || self.occurrence_settled(*occurrence, true)
+                }
+            });
+        styles_settled && !self.scripts_pending()
     }
 
     fn occurrence_settled(&self, occurrence_id: usize, inherited_match: bool) -> bool {

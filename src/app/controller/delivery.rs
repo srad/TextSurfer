@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use url::Url;
+
 use crate::core::geom::Size;
 use crate::core::style::RenderContext;
 use crate::net::{FetchPayload, FetchPoll, ResourceId, charset_from_content_type, decode_text};
@@ -60,10 +62,22 @@ impl App {
             .iter()
             .any(|tab| tab.pending_load.is_some())
             .then_some(self.now.saturating_add(PARSE_POLL));
+        let script = self
+            .tabs
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                let load = tab.load.as_ref()?;
+                load.scripts_runnable_at(self.now)
+                    .then_some(self.now)
+                    .or_else(|| load.next_script_deadline())
+            })
+            .min();
         [
             load,
             render,
             parse,
+            script,
             self.pending_resize.map(|(_, deadline)| deadline),
             self.dynamic_settle,
             self.flash_deadline(),
@@ -107,6 +121,7 @@ impl App {
             self.report_image_decode_lost();
         }
         let parsed_page_changed = self.advance_pending_parse();
+        let scripted_page_changed = self.advance_script_work();
         let width = self.geometry.content_cols();
         let rows = self.geometry.content_rows();
         let display_changed = {
@@ -123,7 +138,10 @@ impl App {
                 false
             }
         };
-        let display_changed = self.advance_render_queue() || display_changed || parsed_page_changed;
+        let display_changed = self.advance_render_queue()
+            || display_changed
+            || parsed_page_changed
+            || scripted_page_changed;
         if display_changed {
             self.refresh_hover();
             self.touch();
@@ -191,6 +209,10 @@ impl App {
         let image_commands = load.take_image_decode_commands();
         let cancel = load.take_cancel_requested();
         let _ = (index == active_index).then(|| load.render_if_ready(self.now));
+        let title = load.page_title();
+        if !title.is_empty() {
+            self.tabs.tabs_mut()[index].title = title;
+        }
         self.tabs.tabs_mut()[index].load = Some(load);
         self.tabs.tabs_mut()[index].render_dirty = index != active_index;
         let count = self.tabs.tabs()[index]
@@ -241,6 +263,104 @@ impl App {
             self.net.cancel(tab_id, generation);
         }
         index == active_index
+    }
+
+    fn advance_script_work(&mut self) -> bool {
+        let active_index = self.tabs.active_index();
+        let Some(index) = self
+            .tabs
+            .tabs()
+            .iter()
+            .enumerate()
+            .find(|(index, tab)| {
+                *index == active_index
+                    && tab
+                        .load
+                        .as_ref()
+                        .is_some_and(|load| load.scripts_runnable_at(self.now))
+            })
+            .or_else(|| {
+                self.tabs.tabs().iter().enumerate().find(|(_, tab)| {
+                    tab.load
+                        .as_ref()
+                        .is_some_and(|load| load.scripts_runnable_at(self.now))
+                })
+            })
+            .map(|(index, _)| index)
+        else {
+            return false;
+        };
+        let width = self.geometry.content_cols();
+        let rows = self.geometry.content_rows();
+        let (page, title, message, navigation, commands, tab_id, generation) = {
+            let tab = &mut self.tabs.tabs_mut()[index];
+            let load = tab.load.as_mut().expect("selected tabs have a page load");
+            let page = load.advance_scripts(self.now);
+            let title = load.page_title();
+            let message = load.take_script_message();
+            let navigation = load.take_script_navigation();
+            let commands = load.take_commands();
+            (
+                page,
+                title,
+                message,
+                navigation,
+                commands,
+                tab.id,
+                tab.generation,
+            )
+        };
+        for command in commands {
+            let resource_id = command.resource_id;
+            let submitted = self
+                .net
+                .submit(tab_id, generation, resource_id, command.url);
+            if submitted == crate::net::Submitted::Closed {
+                let _ = self.deliver_fetch(FetchPayload {
+                    tab_id,
+                    generation,
+                    resource_id,
+                    result: Err(crate::net::FetchError::Network(
+                        "the network is not running".to_string(),
+                    )),
+                });
+            }
+        }
+        let had_message = message.is_some();
+        let tab = &mut self.tabs.tabs_mut()[index];
+        if !title.is_empty() {
+            tab.title = title;
+        }
+        if let Some(message) = message {
+            tab.message = message;
+        }
+        let mut changed = index == active_index && (page.is_some() || had_message);
+        if let Some(page) = page {
+            if index == active_index {
+                apply_rendered_page(tab, page, width, rows);
+            } else {
+                tab.render_dirty = true;
+            }
+        }
+        if index == active_index
+            && let Some((target, kind)) = navigation
+        {
+            match kind {
+                crate::script::NavigationKind::Reload => self.reload(),
+                crate::script::NavigationKind::Push | crate::script::NavigationKind::Replace => {
+                    let resolved = Url::parse(self.tabs.active().url.as_str())
+                        .ok()
+                        .and_then(|base| base.join(&target).ok())
+                        .map_or(target, |url| url.to_string());
+                    self.submit_url(&resolved);
+                    if kind == crate::script::NavigationKind::Replace {
+                        self.tabs.active_mut().replace_history(&resolved);
+                    }
+                }
+            }
+            changed = true;
+        }
+        changed
     }
 
     pub(super) fn advance_render_queue(&mut self) -> bool {
@@ -467,6 +587,7 @@ impl App {
         let rows = self.geometry.content_rows();
         let palette = self.theme().palette();
         let color_scheme = self.color_scheme();
+        let script_factory = self.script_factory.clone();
         let mut commands = Vec::new();
         let mut image_commands = Vec::new();
         let mut cancel = false;
@@ -546,17 +667,26 @@ impl App {
                                             metrics: self.render_metrics,
                                         },
                                         palette,
-                                        scripting: false,
+                                        scripting: script_factory.is_some(),
                                         color_scheme,
                                         started: self.now,
                                     };
                                     tab.load = None;
-                                    tab.pending_load = Some(PendingPageLoad::from_bytes(
-                                        response.body,
-                                        charset.as_deref(),
-                                        response.final_url,
-                                        options,
-                                    ));
+                                    tab.pending_load = Some(match script_factory.clone() {
+                                        Some(factory) => PendingPageLoad::from_bytes_with_scripts(
+                                            response.body,
+                                            charset.as_deref(),
+                                            response.final_url,
+                                            options,
+                                            factory,
+                                        ),
+                                        None => PendingPageLoad::from_bytes(
+                                            response.body,
+                                            charset.as_deref(),
+                                            response.final_url,
+                                            options,
+                                        ),
+                                    });
                                     tab.message = format!("parsing {}", tab.url);
                                     active_display_changed = index == active_index;
                                 }

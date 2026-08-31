@@ -16,12 +16,23 @@ use crate::pipeline::page_load::{
     MAX_DECLARATIVE_REFRESHES, PageLoad, PageLoadOptions, STYLESHEET_DEADLINE,
 };
 use crate::pipeline::render::{ResponseKind, response_kind};
+use crate::script::JsEngineFactory;
 
 pub fn dump_lines(
     fetch: Arc<dyn Fetch>,
     url: &str,
     viewport: Size,
     palette: Palette,
+) -> io::Result<Vec<String>> {
+    dump_lines_with_scripts(fetch, url, viewport, palette, None)
+}
+
+pub fn dump_lines_with_scripts(
+    fetch: Arc<dyn Fetch>,
+    url: &str,
+    viewport: Size,
+    palette: Palette,
+    script_factory: Option<Arc<dyn JsEngineFactory>>,
 ) -> io::Result<Vec<String>> {
     let fixed = url_fix(url);
     let mut document_url = Url::parse(&fixed)
@@ -42,18 +53,25 @@ pub fn dump_lines(
         match response_kind(response.content_type.as_deref(), &response.body) {
             ResponseKind::Html => {
                 let decoded = decode(&response.body, charset.as_deref());
-                let mut load = PageLoad::new(
-                    &decoded.text,
-                    response.final_url,
-                    decoded.encoding,
-                    PageLoadOptions {
-                        render: RenderContext::terminal(viewport),
-                        palette,
-                        scripting: false,
-                        color_scheme: ColorScheme::Dark,
-                        started: Duration::ZERO,
-                    },
-                );
+                let options = PageLoadOptions {
+                    render: RenderContext::terminal(viewport),
+                    palette,
+                    scripting: script_factory.is_some(),
+                    color_scheme: ColorScheme::Dark,
+                    started: Duration::ZERO,
+                };
+                let mut load = match script_factory.clone() {
+                    Some(factory) => PageLoad::new_with_scripts(
+                        &decoded.text,
+                        response.final_url,
+                        decoded.encoding,
+                        options,
+                        factory,
+                    ),
+                    None => {
+                        PageLoad::new(&decoded.text, response.final_url, decoded.encoding, options)
+                    }
+                };
                 if let Some(url) = load.immediate_refresh().cloned() {
                     if redirects >= MAX_DECLARATIVE_REFRESHES {
                         return Err(io::Error::other("automatic redirect limit reached"));
@@ -65,6 +83,9 @@ pub fn dump_lines(
                 }
                 let started = Instant::now();
                 loop {
+                    if load.scripts_runnable_at(Duration::ZERO) {
+                        let _ = load.advance_scripts(Duration::ZERO);
+                    }
                     for command in load.take_commands() {
                         pool.submit(
                             0,
