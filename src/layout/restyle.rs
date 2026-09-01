@@ -30,11 +30,7 @@ pub(crate) fn capture_sources(tree: &mut BoxTree, document: &Document, styles: &
             .iter()
             .map(|fragment| fragment_source(document, styles, fragment))
             .collect(),
-        fills: tree
-            .fills
-            .iter()
-            .map(|fill| box_source_for_fill(tree, fill))
-            .collect(),
+        fills: tree.fills.iter().map(|fill| fill.paint_source).collect(),
         strokes: tree
             .strokes
             .iter()
@@ -72,6 +68,9 @@ fn restyle_impl(
         |nodes| previous.layout_compatible_for(next, nodes),
     );
     if !layout_compatible {
+        return Err(RestyleFailure::LayoutChanged);
+    }
+    if collapsed_border_ink_changed(tree, previous, next) {
         return Err(RestyleFailure::LayoutChanged);
     }
     if tree.paint_sources.boxes.len() != tree.boxes.len()
@@ -113,7 +112,7 @@ fn restyle_impl(
         }) || unresolved.strokes.iter().any(|index| {
             changes.iter().any(|(old, new)| {
                 old.border == tree.strokes[*index].edges
-                    && (old.border != new.border || old.cell_style().fg != new.cell_style().fg)
+                    && (old.border != new.border || old.color != new.color)
             })
         }))
     {
@@ -170,10 +169,24 @@ fn restyle_impl(
         for index in primitives.strokes {
             damage.primitives_visited += 1;
             let stroke = &mut tree.strokes[index];
-            let before = (stroke.edges, stroke.style);
-            stroke.edges = style.border;
-            stroke.style = project_style(stroke.style, style);
-            if (stroke.edges, stroke.style) != before {
+            let before = (stroke.edges, stroke.current_color);
+            if let Some(source_edge) = stroke.source_edge {
+                let side = source_edge.side(style.border);
+                if matches!(
+                    source_edge,
+                    crate::layout::BorderEdge::Top | crate::layout::BorderEdge::Bottom
+                ) {
+                    if stroke.edges.top.layout_width() > 0 {
+                        stroke.edges.top = side;
+                    }
+                } else if stroke.edges.left.layout_width() > 0 {
+                    stroke.edges.left = side;
+                }
+            } else {
+                stroke.edges = style.border;
+            }
+            stroke.current_color = style.color;
+            if (stroke.edges, stroke.current_color) != before {
                 damage.rows.push(stroke.rect.row_range(tree.height));
             }
         }
@@ -200,10 +213,11 @@ fn merge_ranges(ranges: &mut Vec<Range<usize>>) {
 
 fn add_dormant_paint(tree: &mut BoxTree, styles: &StyleTree) {
     for box_ in &tree.boxes {
-        if !tree
-            .fills
-            .iter()
-            .any(|fill| fill.rect == box_.border_rect && fill.depth == box_.depth)
+        if !box_.background_handled
+            && !tree
+                .fills
+                .iter()
+                .any(|fill| fill.depth == box_.depth && fill.paint_source == box_.paint_source)
         {
             tree.fills.push(BackgroundFill {
                 rect: box_.border_rect,
@@ -212,9 +226,21 @@ fn add_dormant_paint(tree: &mut BoxTree, styles: &StyleTree) {
                     source => source_style(styles, source).background,
                 },
                 depth: box_.depth,
+                paint_source: box_.paint_source,
             });
         }
     }
+}
+
+fn collapsed_border_ink_changed(tree: &BoxTree, previous: &StyleTree, next: &StyleTree) -> bool {
+    tree.strokes.iter().any(|stroke| {
+        let (Some(node), Some(edge)) = (stroke.source_node, stroke.source_edge) else {
+            return false;
+        };
+        let old = previous.get(node);
+        let new = next.get(node);
+        edge.side(old.border).paints_ink(old.color) != edge.side(new.border).paints_ink(new.color)
+    })
 }
 
 fn fragment_source(
@@ -249,19 +275,10 @@ fn nearest_styled_node(document: &Document, mut node: NodeId) -> NodeId {
     node
 }
 
-fn box_source_for_fill(tree: &BoxTree, fill: &BackgroundFill) -> PaintStyleSource {
-    tree.boxes
-        .iter()
-        .filter(|box_| box_.depth == fill.depth && contains(box_.border_rect, fill.rect))
-        .min_by_key(|box_| {
-            box_.border_rect
-                .width
-                .saturating_mul(box_.border_rect.height)
-        })
-        .map_or(PaintStyleSource::Missing, |box_| box_.paint_source)
-}
-
 fn box_source_for_stroke(tree: &BoxTree, stroke: &BorderStroke) -> PaintStyleSource {
+    if let Some(node) = stroke.source_node {
+        return PaintStyleSource::Element(node);
+    }
     tree.boxes
         .iter()
         .filter(|box_| box_.depth == stroke.depth && contains(box_.border_rect, stroke.rect))

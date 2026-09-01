@@ -190,8 +190,8 @@
       ],
       "expectations": [
         { "renderer": "terminal", "viewport": "40x30", "xfails": [
-          { "relation": "a1-missing", "count": 420, "sha256": "3d206c2f9fbf7b0868ab6d7d0c076c107e2563ac37476abc59972c97facfe34d", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
-          { "relation": "a1-hidden-leak", "count": 116, "sha256": "1d2cf20143528843ed77b4eb3ce8fb094d733435eaa5bef2f4101a59610d805b", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
+          { "relation": "a1-missing", "count": 370, "sha256": "9dfc6a39dec6044489597be245bd7a6f40dc192359c492ca6e8ed47af186ff71", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 288, "sha256": "fbb9ef4b7879b7aa577f15f92edefff960f615d9ea7eeefd6c0b62b4e1c0b630", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
         ] },
         { "renderer": "terminal", "viewport": "100x38", "xfails": [
           { "relation": "a1-missing", "count": 227, "sha256": "c38d23d19aa765b14b69a525d44bd281a3dc6fe3a474857a75f9a130f269af31", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
@@ -203,8 +203,8 @@
           { "relation": "a2-order", "count": 1, "sha256": "fd4f54dafd02c1cb8d01ef4954cd52d549be2d5081f6e9e42fcb7cd1d48555e4", "owner": "M1-F horizontal international layout", "reason": "The remaining non-RTL occurrence differs from Chromium visual order on the RTL page." }
         ] },
         { "renderer": "vga", "viewport": "40x30", "xfails": [
-          { "relation": "a1-missing", "count": 420, "sha256": "3d206c2f9fbf7b0868ab6d7d0c076c107e2563ac37476abc59972c97facfe34d", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
-          { "relation": "a1-hidden-leak", "count": 116, "sha256": "1d2cf20143528843ed77b4eb3ce8fb094d733435eaa5bef2f4101a59610d805b", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
+          { "relation": "a1-missing", "count": 370, "sha256": "9dfc6a39dec6044489597be245bd7a6f40dc192359c492ca6e8ed47af186ff71", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },
+          { "relation": "a1-hidden-leak", "count": 288, "sha256": "fbb9ef4b7879b7aa577f15f92edefff960f615d9ea7eeefd6c0b62b4e1c0b630", "owner": "M1-F horizontal international layout", "reason": "Chromium-hidden responsive and bidirectional auxiliary content remains in TextSurfer flow." }
         ] },
         { "renderer": "vga", "viewport": "100x38", "xfails": [
           { "relation": "a1-missing", "count": 227, "sha256": "c38d23d19aa765b14b69a525d44bd281a3dc6fe3a474857a75f9a130f269af31", "owner": "M1-F horizontal international layout", "reason": "Horizontal RTL, responsive navigation, and fixed-cell wrapping omit Chromium-visible runs." },

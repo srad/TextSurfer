@@ -1,7 +1,7 @@
 use super::contrast::MIN_CONTRAST;
 use super::*;
 use crate::core::dom::{Document, ElementNs};
-use crate::core::style::{BorderEdges, BorderLineStyle, BorderSide, Rgb, Rgba};
+use crate::core::style::{BorderColor, BorderEdges, BorderLineStyle, BorderSide, Rgb, Rgba};
 use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, TextFragment};
 
 fn painted(tree: &BoxTree) -> DisplayList {
@@ -12,6 +12,7 @@ fn plain_box(node: NodeId, rect: LayoutRect, depth: usize) -> LayoutBox {
     LayoutBox {
         node,
         paint_source: crate::layout::engine::PaintStyleSource::Element(node),
+        background_handled: false,
         border_rect: rect,
         content_rect: rect,
         depth,
@@ -260,6 +261,7 @@ fn borders_are_drawn_from_box_geometry() {
         boxes: vec![LayoutBox {
             node,
             paint_source: crate::layout::engine::PaintStyleSource::Element(node),
+            background_handled: false,
             border_rect: rect,
             content_rect: LayoutRect {
                 col: 2,
@@ -276,13 +278,60 @@ fn borders_are_drawn_from_box_geometry() {
                 style: BorderLineStyle::Solid,
                 ..Default::default()
             }),
-            style: CellStyle::default(),
+            current_color: None,
+            source_node: None,
+            source_edge: None,
             depth: 0,
             merge_group: 1,
         }],
         ..Default::default()
     };
     assert_eq!(painted(&tree).text_lines(), vec![" ┌──┐", " │  │", " └──┘"]);
+}
+
+#[test]
+fn border_ink_preserves_the_painted_background_and_drops_text_modifiers() {
+    let rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 4,
+        height: 3,
+    };
+    let background = Rgb::new(0, 64, 0);
+    let tree = BoxTree {
+        width: 4,
+        height: 3,
+        fills: vec![BackgroundFill {
+            rect,
+            color: Some(background),
+            depth: 0,
+            paint_source: crate::layout::engine::PaintStyleSource::Missing,
+        }],
+        strokes: vec![BorderStroke {
+            rect,
+            edges: BorderEdges::uniform(BorderSide {
+                color: BorderColor::CurrentColor,
+                style: BorderLineStyle::Solid,
+                ..Default::default()
+            }),
+            current_color: Some(Rgba::opaque(Rgb::BLACK)),
+            source_node: None,
+            source_edge: None,
+            depth: 0,
+            merge_group: 1,
+        }],
+        ..Default::default()
+    };
+    let display = painted(&tree);
+    for span in display.rows.iter().flat_map(|row| &row.spans) {
+        assert_eq!(span.style.bg, Some(background));
+        assert!(!span.style.bold);
+        assert!(!span.style.underline);
+        assert!(!span.style.strike);
+        assert!(!span.style.reverse);
+        assert!(!span.style.dim);
+        assert_eq!(span.style.scale, 1);
+    }
 }
 
 #[test]
@@ -338,11 +387,13 @@ fn backgrounds_paint_under_text_in_depth_order() {
                 rect: outer_rect,
                 color: Some(Rgb::new(10, 10, 10)),
                 depth: 0,
+                paint_source: crate::layout::engine::PaintStyleSource::Missing,
             },
             BackgroundFill {
                 rect: inner_rect,
                 color: Some(Rgb::new(20, 20, 20)),
                 depth: 1,
+                paint_source: crate::layout::engine::PaintStyleSource::Missing,
             },
         ],
         fragments: vec![TextFragment {
@@ -391,11 +442,13 @@ fn partial_foreground_alpha_resolves_against_the_deepest_background() {
                 rect: outer_rect,
                 color: Some(Rgb::new(0, 0, 128)),
                 depth: 0,
+                paint_source: crate::layout::engine::PaintStyleSource::Missing,
             },
             BackgroundFill {
                 rect: inner_rect,
                 color: Some(Rgb::BLACK),
                 depth: 1,
+                paint_source: crate::layout::engine::PaintStyleSource::Missing,
             },
         ],
         fragments: vec![TextFragment {

@@ -142,6 +142,13 @@ impl CellLayout {
             .map(|line| line_metrics(line, &self.pieces).1)
             .unwrap_or_else(|| self.height().saturating_sub(1))
     }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.lines
+            .iter()
+            .flatten()
+            .all(|glyph| glyph.width == 0 && glyph.atom.is_none())
+    }
 }
 
 enum ContentEvent {
@@ -255,8 +262,21 @@ impl TableFormatter<'_> {
                     } else {
                         style.border.top.layout_width() + style.border.bottom.layout_width()
                     };
-                row_heights[cell.row] =
-                    row_heights[cell.row].max(layout.height().saturating_add(vertical));
+                let authored = definite_height(self.styles, style.height)
+                    .into_iter()
+                    .chain(definite_height(self.styles, style.min_height))
+                    .max()
+                    .map(|height| {
+                        if style.box_sizing == crate::core::style::BoxSizing::ContentBox {
+                            height.saturating_add(vertical)
+                        } else {
+                            height
+                        }
+                    })
+                    .unwrap_or(0);
+                row_heights[cell.row] = row_heights[cell.row]
+                    .max(layout.height().saturating_add(vertical))
+                    .max(authored);
             }
             if style.vertical_align == crate::core::style::VerticalAlign::Baseline {
                 let top = padding.top
@@ -289,6 +309,17 @@ impl TableFormatter<'_> {
                     .saturating_add(row_descents[row])
                     .saturating_add(1),
             );
+        }
+        for (index, row) in model.rows.iter().enumerate() {
+            if let Some(node) = row.node {
+                let style = self.styles.get(node);
+                let authored = definite_height(self.styles, style.height)
+                    .into_iter()
+                    .chain(definite_height(self.styles, style.min_height))
+                    .max()
+                    .unwrap_or(0);
+                row_heights[index] = row_heights[index].max(authored);
+            }
         }
         for (cell, layout) in model.cells.iter().zip(&layouts) {
             if cell.row_span > 1 {
@@ -604,6 +635,20 @@ impl TableFormatter<'_> {
             1,
         );
         output
+    }
+}
+
+pub(super) fn definite_height(
+    styles: &crate::core::style::StyleTree,
+    height: crate::core::style::CssSize,
+) -> Option<usize> {
+    match height {
+        crate::core::style::CssSize::Auto | crate::core::style::CssSize::Percent(_) => None,
+        crate::core::style::CssSize::Cells(value) => Some(value),
+        crate::core::style::CssSize::Calc(value) if styles.calc_depends_on_basis(value)? => None,
+        crate::core::style::CssSize::Calc(value) => {
+            Some(styles.resolve_calc(value, 0.0)?.max(0.0).round() as usize)
+        }
     }
 }
 

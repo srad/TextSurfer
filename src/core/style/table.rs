@@ -33,3 +33,17 @@ pub enum CaptionSide {
     Top,
     Bottom,
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Direction {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmptyCells {
+    #[default]
+    Show,
+    Hide,
+}

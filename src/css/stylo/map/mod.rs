@@ -237,6 +237,8 @@ impl Mapper {
             border_collapse: text::border_collapse(values),
             border_spacing: text::border_spacing(values, lengths),
             caption_side: text::caption_side(values),
+            direction: text::direction(values),
+            empty_cells: text::empty_cells(values),
             text_align: text::text_align(values),
             vertical_align: text::vertical_align(values),
             list_style_type: text::list_style_type(values),

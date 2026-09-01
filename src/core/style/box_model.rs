@@ -1,4 +1,4 @@
-use super::{CssCalc, Rgb};
+use super::{CssCalc, Rgb, Rgba};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CssSize {
@@ -303,6 +303,7 @@ pub enum BorderColor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BorderSide {
     pub width: usize,
+    pub conflict_width: u32,
     pub style: BorderLineStyle,
     pub color: BorderColor,
 }
@@ -312,6 +313,14 @@ impl BorderSide {
         self.width > 0
             && !matches!(self.style, BorderLineStyle::None | BorderLineStyle::Hidden)
             && !matches!(self.color, BorderColor::Transparent)
+    }
+
+    pub(crate) const fn paints_ink(self, current_color: Option<Rgba>) -> bool {
+        self.is_visible()
+            && !matches!(
+                (self.color, current_color),
+                (BorderColor::CurrentColor, Some(Rgba { alpha: 0, .. }))
+            )
     }
 
     pub const fn visible_width(self) -> usize {
@@ -332,6 +341,7 @@ impl Default for BorderSide {
     fn default() -> Self {
         Self {
             width: 1,
+            conflict_width: 65_536,
             style: BorderLineStyle::None,
             color: BorderColor::CurrentColor,
         }

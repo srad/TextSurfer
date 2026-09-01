@@ -90,15 +90,30 @@ impl TableFormatter<'_> {
         for child in children {
             match self.styles.get(child).display {
                 Display::TABLE_CAPTION => {
-                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.flush_anonymous_section(
+                        &mut group,
+                        &mut anonymous_cells,
+                        &mut anonymous_rows,
+                        &mut sections,
+                    );
                     captions.push(child);
                 }
                 Display::TABLE_COLUMN => {
-                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.flush_anonymous_section(
+                        &mut group,
+                        &mut anonymous_cells,
+                        &mut anonymous_rows,
+                        &mut sections,
+                    );
                     self.expand_column(child, None, &mut column_nodes);
                 }
                 Display::TABLE_COLUMN_GROUP => {
-                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.flush_anonymous_section(
+                        &mut group,
+                        &mut anonymous_cells,
+                        &mut anonymous_rows,
+                        &mut sections,
+                    );
                     let before = column_nodes.len();
                     for column in self.document.children(child) {
                         if self.styles.get(column).display == Display::TABLE_COLUMN {
@@ -106,21 +121,43 @@ impl TableFormatter<'_> {
                         }
                     }
                     if column_nodes.len() == before {
-                        self.expand_column(child, Some(child), &mut column_nodes);
+                        let span = self.span(child, "span", false).clamp(1, 1_000);
+                        column_nodes.extend(std::iter::repeat_n(
+                            ColumnTrack {
+                                group: Some(child),
+                                column: None,
+                            },
+                            span,
+                        ));
                     }
                 }
                 Display::TABLE_HEADER_GROUP => {
-                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.flush_anonymous_section(
+                        &mut group,
+                        &mut anonymous_cells,
+                        &mut anonymous_rows,
+                        &mut sections,
+                    );
                     sections.push((SectionKind::Header, self.rows_in_group(child, group)));
                     group += 1;
                 }
                 Display::TABLE_FOOTER_GROUP => {
-                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.flush_anonymous_section(
+                        &mut group,
+                        &mut anonymous_cells,
+                        &mut anonymous_rows,
+                        &mut sections,
+                    );
                     sections.push((SectionKind::Footer, self.rows_in_group(child, group)));
                     group += 1;
                 }
                 Display::TABLE_ROW_GROUP => {
-                    self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
+                    self.flush_anonymous_section(
+                        &mut group,
+                        &mut anonymous_cells,
+                        &mut anonymous_rows,
+                        &mut sections,
+                    );
                     sections.push((SectionKind::Body, self.rows_in_group(child, group)));
                     group += 1;
                 }
@@ -141,10 +178,12 @@ impl TableFormatter<'_> {
                 _ => anonymous_cells.push(child),
             }
         }
-        self.flush_anonymous(group, &mut anonymous_cells, &mut anonymous_rows);
-        if !anonymous_rows.is_empty() {
-            sections.push((SectionKind::Body, anonymous_rows));
-        }
+        self.flush_anonymous_section(
+            &mut group,
+            &mut anonymous_cells,
+            &mut anonymous_rows,
+            &mut sections,
+        );
 
         let header = sections
             .iter()
@@ -195,7 +234,7 @@ impl TableFormatter<'_> {
                 let row_span = if raw_row_span == 0 {
                     group_end.saturating_sub(row).max(1)
                 } else {
-                    raw_row_span.clamp(1, seeds.len().saturating_sub(row).max(1))
+                    raw_row_span.clamp(1, group_end.saturating_sub(row).max(1))
                 };
                 let mut col = 0usize;
                 while !range_free(&occupied, row, col, row_span, col_span) {
@@ -289,6 +328,20 @@ impl TableFormatter<'_> {
                 group_node: None,
                 cells: self.cell_seeds(std::mem::take(cells)),
             });
+        }
+    }
+
+    fn flush_anonymous_section(
+        &self,
+        group: &mut usize,
+        cells: &mut Vec<NodeId>,
+        rows: &mut Vec<RowSeed>,
+        sections: &mut Vec<(SectionKind, Vec<RowSeed>)>,
+    ) {
+        self.flush_anonymous(*group, cells, rows);
+        if !rows.is_empty() {
+            sections.push((SectionKind::Body, std::mem::take(rows)));
+            *group = group.saturating_add(1);
         }
     }
 

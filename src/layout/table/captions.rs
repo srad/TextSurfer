@@ -127,18 +127,27 @@ pub(super) fn append_captions(
             output.boxes.push(LayoutBox {
                 node: caption.node,
                 paint_source: crate::layout::engine::PaintStyleSource::Element(caption.node),
+                background_handled: true,
                 border_rect,
                 content_rect,
                 depth: 1,
                 style: caption.style.cell_style(),
             });
         }
-        add_fill(&mut output.fills, border_rect, caption.style, 1);
+        add_fill(
+            &mut output.fills,
+            border_rect,
+            caption.style,
+            1,
+            Some(caption.node),
+        );
         if !caption.style.visibility.is_hidden() && caption.style.border.has_layout() {
             output.strokes.push(BorderStroke {
                 rect: border_rect,
                 edges: caption.style.border,
-                style: caption.style.cell_style(),
+                current_color: caption.style.color,
+                source_node: None,
+                source_edge: None,
                 depth: 1,
                 merge_group: 900_000usize.saturating_add(index),
             });

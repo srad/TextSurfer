@@ -6,8 +6,8 @@ mod table;
 mod text_flow;
 
 pub use engine::{
-    BackgroundFill, BorderStroke, BoxTree, ImagePlacement, LayoutBox, LayoutEngine, LayoutLimits,
-    LayoutRect, LinkBox, TaffyLayoutEngine, TextFragment,
+    BackgroundFill, BorderEdge, BorderStroke, BoxTree, ImagePlacement, LayoutBox, LayoutEngine,
+    LayoutLimits, LayoutRect, LinkBox, TaffyLayoutEngine, TextFragment,
 };
 pub(crate) use restyle::{RestyleFailure, restyle, restyle_nodes};
 

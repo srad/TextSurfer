@@ -45,7 +45,9 @@ pub use list::{ListStylePosition, ListStyleType};
 pub use math::CssCalc;
 pub(crate) use math::{CalcRange, CssCalcExpr, CssCalcStore};
 pub use render::{RenderContext, RenderMetrics};
-pub use table::{BorderCollapse, BorderSpacing, CaptionSide, TableLayoutMode};
+pub use table::{
+    BorderCollapse, BorderSpacing, CaptionSide, Direction, EmptyCells, TableLayoutMode,
+};
 pub use typography::{FontSize, TextPresentation, TextRendering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -165,6 +167,8 @@ pub struct ComputedStyle {
     pub border_collapse: BorderCollapse,
     pub border_spacing: BorderSpacing,
     pub caption_side: CaptionSide,
+    pub direction: Direction,
+    pub empty_cells: EmptyCells,
     pub text_align: TextAlign,
     pub vertical_align: VerticalAlign,
     pub(crate) legacy_align: LegacyAlign,
@@ -192,6 +196,8 @@ impl ComputedStyle {
             border_collapse: parent.border_collapse,
             border_spacing: parent.border_spacing,
             caption_side: parent.caption_side,
+            direction: parent.direction,
+            empty_cells: parent.empty_cells,
             text_align: parent.text_align,
             legacy_align: parent.legacy_align,
             color: parent.color,

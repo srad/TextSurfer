@@ -171,21 +171,25 @@ pub(super) fn borders(values: &ComputedValues) -> BorderEdges {
     BorderEdges {
         top: BorderSide {
             width: binary_width(values.clone_border_top_width().0.to_f64_px()),
+            conflict_width: conflict_width(values.clone_border_top_width().0.to_f64_px()),
             style: line_style(values.clone_border_top_style()),
             color: border_color(values, &values.clone_border_top_color()),
         },
         right: BorderSide {
             width: binary_width(values.clone_border_right_width().0.to_f64_px()),
+            conflict_width: conflict_width(values.clone_border_right_width().0.to_f64_px()),
             style: line_style(values.clone_border_right_style()),
             color: border_color(values, &values.clone_border_right_color()),
         },
         bottom: BorderSide {
             width: binary_width(values.clone_border_bottom_width().0.to_f64_px()),
+            conflict_width: conflict_width(values.clone_border_bottom_width().0.to_f64_px()),
             style: line_style(values.clone_border_bottom_style()),
             color: border_color(values, &values.clone_border_bottom_color()),
         },
         left: BorderSide {
             width: binary_width(values.clone_border_left_width().0.to_f64_px()),
+            conflict_width: conflict_width(values.clone_border_left_width().0.to_f64_px()),
             style: line_style(values.clone_border_left_style()),
             color: border_color(values, &values.clone_border_left_color()),
         },
@@ -201,6 +205,10 @@ pub(super) fn borders(values: &ComputedValues) -> BorderEdges {
 /// = 0` and erase the frame from every box that declares a style without a width.
 fn binary_width(px: f64) -> usize {
     usize::from(px > 0.0)
+}
+
+fn conflict_width(px: f64) -> u32 {
+    (px.max(0.0) * 65_536.0).round().min(u32::MAX as f64) as u32
 }
 
 fn line_style(value: BorderStyle) -> BorderLineStyle {

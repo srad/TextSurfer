@@ -1450,10 +1450,12 @@ fn inherited_cursor_state_does_not_report_paint_damage() {
 #[test]
 fn paint_only_dynamic_state_recascades_without_relayout() {
     let source = "<!doctype html><style>
-        #x { border: 1px solid transparent }
-        #x:hover { color: red; background: blue; border-color: green;
+        table { border-collapse: collapse; background: maroon }
+        #a { color: red; background: teal; border: 1px solid currentColor }
+        #x { color: green; background: green; border: 1px double currentColor }
+        #x:hover { color: yellow; background: blue;
                    font-weight: bold; text-decoration: underline }
-        </style><p id=x>x</p>";
+        </style><table><tr><td id=a>a</td><td id=x>x</td></tr></table>";
     let mut page_load = load(source);
     page_load.defer_rendering();
     assert!(page_load.render_if_ready(Duration::ZERO).is_none());

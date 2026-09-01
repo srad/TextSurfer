@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use textsurfer::core::geom::Size;
 use textsurfer::core::image::DecodedImage;
-use textsurfer::core::style::{RenderContext, RenderMetrics};
+use textsurfer::core::style::{RenderContext, RenderMetrics, Rgb};
 use textsurfer::css::ColorScheme;
 #[cfg(feature = "vga")]
 use textsurfer::layout::LayoutRect;
@@ -160,6 +160,10 @@ fn panel_ranges(painted: &DisplayList) -> Vec<(&'static str, usize, usize)> {
             (*case, start, end)
         })
         .collect()
+}
+
+fn is_border_glyph(character: char) -> bool {
+    "┌┐└┘─│├┤┬┴┼".contains(character)
 }
 
 fn styled_panel(painted: &DisplayList, width: u16, start: usize, end: usize) -> String {
@@ -326,6 +330,54 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
                 text.contains(marker),
                 "missing nested table marker {marker} at {cols} columns"
             );
+        }
+        let ranges = panel_ranges(&decoded.painted);
+        let (_, tables_start, tables_end) = ranges
+            .iter()
+            .find(|(case, _, _)| *case == "tables")
+            .copied()
+            .unwrap();
+        for span in decoded.painted.rows[tables_start..tables_end]
+            .iter()
+            .flat_map(|row| &row.spans)
+            .filter(|span| span.text.chars().any(is_border_glyph))
+        {
+            assert!(!span.style.bold, "table border inherited header boldness");
+            assert!(!span.style.underline);
+            assert!(!span.style.strike);
+            assert!(!span.style.reverse);
+            assert!(!span.style.dim);
+            assert_eq!(span.style.scale, 1);
+        }
+        let table_background = |label: &str| {
+            decoded.painted.rows[tables_start..tables_end]
+                .iter()
+                .flat_map(|row| &row.spans)
+                .find(|span| span.text.contains(label))
+                .and_then(|span| span.style.bg)
+        };
+        assert_eq!(table_background("LAYER-MODE"), Some(Rgb::new(0, 64, 0)));
+        assert_eq!(table_background("LAYER-SYSTEM"), Some(Rgb::new(0, 0, 64)));
+        if cols >= 100 {
+            assert_eq!(table_background("LAYER-OTHER"), Some(Rgb::new(64, 64, 0)));
+            assert_eq!(
+                table_background("LAYER-HARDWARE"),
+                Some(Rgb::new(128, 64, 0))
+            );
+        }
+        assert_eq!(table_background("LAYER-KERNEL"), Some(Rgb::new(64, 0, 0)));
+        let (_, presentational_start, presentational_end) = ranges
+            .iter()
+            .find(|(case, _, _)| *case == "presentational")
+            .copied()
+            .unwrap();
+        let table_background = Some(Rgb::new(64, 0, 0));
+        for span in decoded.painted.rows[presentational_start..presentational_end]
+            .iter()
+            .flat_map(|row| &row.spans)
+            .filter(|span| span.text.chars().any(is_border_glyph))
+        {
+            assert_eq!(span.style.bg, table_background);
         }
         for (case, start, end) in panel_ranges(&decoded.painted) {
             assert!(

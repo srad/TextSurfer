@@ -73,6 +73,149 @@ fn spans_form_a_sparse_non_overlapping_grid() {
 }
 
 #[test]
+fn a_row_background_is_contributed_only_through_real_cells() {
+    let output = formatted(
+        "<style id=css>#table{border-spacing:0;background:#000040} tr:first-child{background:#400000} td{padding:0}</style>
+         <table id=table><tr><td>A</td></tr><tr><td>B</td><td>wide</td></tr></table>",
+        30,
+    );
+    let cells: Vec<_> = output.boxes.iter().filter(|box_| box_.depth == 5).collect();
+    assert_eq!(cells.len(), 3);
+    let first = cells[0].border_rect;
+    let missing = LayoutRect {
+        col: cells[2].border_rect.col,
+        row: first.row,
+        width: 1,
+        height: 1,
+    };
+    let row_color = crate::core::style::Rgb::new(64, 0, 0);
+    assert!(output.fills.iter().any(|fill| {
+        fill.color == Some(row_color)
+            && fill.rect.col <= first.col
+            && fill.rect.col.saturating_add(fill.rect.width) > first.col
+            && fill.rect.row <= first.row
+            && fill.rect.row.saturating_add(fill.rect.height) > first.row
+    }));
+    assert!(!output.fills.iter().any(|fill| {
+        fill.color == Some(row_color)
+            && fill.rect.col <= missing.col
+            && fill.rect.col.saturating_add(fill.rect.width) > missing.col
+            && fill.rect.row <= missing.row
+            && fill.rect.row.saturating_add(fill.rect.height) > missing.row
+    }));
+}
+
+#[test]
+fn anonymous_row_groups_keep_their_source_position() {
+    let output = formatted(
+        "<style id=css>#table{display:table}.row{display:table-row}.group{display:table-row-group}.cell{display:table-cell}</style>
+         <div id=table><div class=row><span class=cell>A</span></div><div class=group><div class=row><span class=cell>B</span></div></div></div>",
+        30,
+    );
+    assert_eq!(output.plain_text(), "A B");
+}
+
+#[test]
+fn positive_rowspans_stop_at_their_row_group_boundary() {
+    let output = formatted(
+        "<table id=table><tbody><tr><td rowspan=9>A</td></tr></tbody><tbody><tr><td>B</td></tr></tbody></table>",
+        30,
+    );
+    assert_eq!(output.model.cells[0].row_span, 1);
+    assert_eq!(output.model.cells[1].col, 0);
+}
+
+#[test]
+fn an_empty_colgroup_contributes_one_group_layer_not_a_column_layer() {
+    let output = formatted(
+        "<style id=css>#table{border-spacing:0} colgroup{background:#400000} td{padding:0}</style>
+         <table id=table><colgroup span=2><tr><td>A</td><td>B</td></tr></table>",
+        30,
+    );
+    let color = crate::core::style::Rgb::new(64, 0, 0);
+    assert_eq!(
+        output
+            .fills
+            .iter()
+            .filter(|fill| fill.color == Some(color))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn rtl_tables_place_the_first_logical_cell_at_inline_start() {
+    let output = formatted(
+        "<style id=css>#table{direction:rtl;border-spacing:0} td{padding:0}</style><table id=table><tr><td>A</td><td>B</td></tr></table>",
+        30,
+    );
+    assert_eq!(output.plain_text(), "B A");
+}
+
+#[test]
+fn empty_cells_hide_suppresses_only_empty_separated_cells() {
+    let output = formatted(
+        "<style id=css>#table{border-spacing:0} td{empty-cells:hide;background:#400000;border:solid;padding:0}</style>
+         <table id=table><tr><td></td><td>B</td></tr></table>",
+        30,
+    );
+    assert_eq!(
+        output.boxes.iter().filter(|box_| box_.depth == 5).count(),
+        1
+    );
+}
+
+#[test]
+fn collapsed_rows_remove_their_track_space_after_sizing() {
+    let collapsed = formatted(
+        "<style id=css>#table{border-spacing:0}td{padding:0}.gone{visibility:collapse}</style><table id=table><tr><td>A</td></tr><tr class=gone><td>hidden</td></tr><tr><td>C</td></tr></table>",
+        30,
+    );
+    let reference = formatted(
+        "<style id=css>#table{border-spacing:0}td{padding:0}</style><table id=table><tr><td>A</td></tr><tr><td>C</td></tr></table>",
+        30,
+    );
+    assert_eq!(collapsed.height, reference.height);
+}
+
+#[test]
+fn collapsed_columns_remove_their_track_space_after_sizing() {
+    let collapsed = formatted(
+        "<style id=css>#table{border-spacing:0}td{padding:0}.gone{visibility:collapse}</style><table id=table><col class=gone><col><tr><td>very-wide-hidden</td><td>B</td></tr></table>",
+        40,
+    );
+    let reference = formatted(
+        "<style id=css>#table{border-spacing:0}td{padding:0}</style><table id=table><tr><td>B</td></tr></table>",
+        40,
+    );
+    assert_eq!(collapsed.width, reference.width);
+}
+
+#[test]
+fn definite_cell_and_row_heights_are_track_minima() {
+    let cell = formatted(
+        "<style id=css>#table{border-spacing:0}td{padding:0;height:48px}</style><table id=table><tr><td>A</td></tr></table>",
+        30,
+    );
+    let row = formatted(
+        "<style id=css>#table{border-spacing:0}td{padding:0}tr{height:64px}</style><table id=table><tr><td>A</td></tr></table>",
+        30,
+    );
+    assert_eq!(cell.height, 3);
+    assert_eq!(row.height, 4);
+}
+
+#[test]
+fn a_definite_table_height_distributes_only_required_extra_space() {
+    let output = formatted(
+        "<style id=css>#table{border-spacing:0;height:64px}td{padding:0}</style><table id=table><tr><td>A</td></tr><tr><td>B</td></tr></table>",
+        30,
+    );
+    assert_eq!(output.height, 4);
+    assert_eq!(output.model.rows.len(), 2);
+}
+
+#[test]
 fn image_alt_fallbacks_match_inside_table_cells() {
     let output = formatted(
         "<table id=table><tr><td>A<img alt=''>B<img alt='   '>C<img alt='cat'><img></td></tr></table>",
@@ -366,6 +509,134 @@ fn hidden_collapsed_edge_suppresses_the_competing_visible_edge() {
             .iter()
             .any(|stroke| stroke.rect.col == boundary && stroke.rect.width == 1)
     );
+}
+
+#[test]
+fn the_widest_collapsed_border_wins_before_line_style() {
+    let output = formatted(
+        "<style id=css>#table{border-collapse:collapse}.left{border-right:1px solid #400000}.right{border-left:5px dotted #000040}</style>
+         <table id=table><tr><td class=left>A</td><td class=right>B</td></tr></table>",
+        30,
+    );
+    let cells: Vec<_> = output.boxes.iter().filter(|box_| box_.depth == 5).collect();
+    let shared_col = cells[0]
+        .border_rect
+        .col
+        .saturating_add(cells[0].border_rect.width)
+        .saturating_sub(1);
+    let winner = output
+        .strokes
+        .iter()
+        .find(|stroke| stroke.edges.left.layout_width() > 0)
+        .unwrap_or_else(|| panic!("shared column {shared_col}, strokes: {:?}", output.strokes));
+    assert_eq!(
+        winner.edges.left.color,
+        crate::core::style::BorderColor::Rgb(crate::core::style::Rgb::new(0, 0, 64))
+    );
+    assert_eq!(
+        winner.edges.left.style,
+        crate::core::style::BorderLineStyle::Dotted
+    );
+}
+
+#[test]
+fn collapsed_shared_borders_expose_only_the_table_background() {
+    let output = formatted(
+        "<style id=css>#table{border-collapse:collapse;background:#202020}td{border:solid;padding:0}.left{background:#400000}.right{background:#004000}</style>
+         <table id=table><tr><td class=left>A</td><td class=right>B</td></tr></table>",
+        30,
+    );
+    let cells: Vec<_> = output.boxes.iter().filter(|box_| box_.depth == 5).collect();
+    let shared_col = cells[1].border_rect.col;
+    let row = cells[1].border_rect.row.saturating_add(1);
+    let covers = |color, fill: &&crate::layout::BackgroundFill| {
+        fill.color == Some(color)
+            && fill.rect.col <= shared_col
+            && fill.rect.col.saturating_add(fill.rect.width) > shared_col
+            && fill.rect.row <= row
+            && fill.rect.row.saturating_add(fill.rect.height) > row
+    };
+    assert!(
+        output
+            .fills
+            .iter()
+            .any(|fill| covers(crate::core::style::Rgb::new(32, 32, 32), &fill))
+    );
+    assert!(
+        !output
+            .fills
+            .iter()
+            .any(|fill| covers(crate::core::style::Rgb::new(64, 0, 0), &fill))
+    );
+    assert!(
+        !output
+            .fills
+            .iter()
+            .any(|fill| covers(crate::core::style::Rgb::new(0, 64, 0), &fill))
+    );
+}
+
+#[test]
+fn collapsed_transparent_shared_borders_keep_normal_background_ownership() {
+    let output = formatted(
+        "<style id=css>#table{border-collapse:collapse;background:#202020}td{padding:0;border:solid}.left{background:#400000;border-right-color:transparent}.right{background:#004000;border-left-color:transparent}</style>
+         <table id=table><tr><td class=left>A</td><td class=right>B</td></tr></table>",
+        30,
+    );
+    let cells: Vec<_> = output.boxes.iter().filter(|box_| box_.depth == 5).collect();
+    let shared_col = cells[1].border_rect.col;
+    let row = cells[1].border_rect.row.saturating_add(1);
+    let covers = |color, fill: &&crate::layout::BackgroundFill| {
+        fill.color == Some(color)
+            && fill.rect.col <= shared_col
+            && fill.rect.col.saturating_add(fill.rect.width) > shared_col
+            && fill.rect.row <= row
+            && fill.rect.row.saturating_add(fill.rect.height) > row
+    };
+    assert!(
+        output
+            .fills
+            .iter()
+            .any(|fill| covers(crate::core::style::Rgb::new(64, 0, 0), &fill))
+    );
+}
+
+#[test]
+fn collapsed_empty_cells_do_not_recreate_fully_masked_backgrounds() {
+    let output = formatted(
+        "<style id=css>#table{border-collapse:collapse;background:#202020}td{padding:0;border:solid;background:#400000}</style>
+         <table id=table><tr><td></td></tr></table>",
+        30,
+    );
+    let cell = output.boxes.iter().find(|box_| box_.depth == 5).unwrap();
+    assert!(cell.background_handled);
+    assert!(
+        output
+            .fills
+            .iter()
+            .filter(|fill| fill.color == Some(crate::core::style::Rgb::new(64, 0, 0)))
+            .all(|fill| {
+                fill.rect.col > cell.border_rect.col
+                    && fill.rect.row > cell.border_rect.row
+                    && fill.rect.col.saturating_add(fill.rect.width)
+                        < cell.border_rect.col.saturating_add(cell.border_rect.width)
+                    && fill.rect.row.saturating_add(fill.rect.height)
+                        < cell.border_rect.row.saturating_add(cell.border_rect.height)
+            })
+    );
+}
+
+#[test]
+fn collapsed_transparent_current_color_does_not_mask_cell_backgrounds() {
+    let output = formatted(
+        "<style id=css>#table{border-collapse:collapse}td{padding:0;border:solid currentColor;color:transparent;background:#400000}</style>
+         <table id=table><tr><td>A</td></tr></table>",
+        30,
+    );
+    let cell = output.boxes.iter().find(|box_| box_.depth == 5).unwrap();
+    assert!(output.fills.iter().any(|fill| {
+        fill.color == Some(crate::core::style::Rgb::new(64, 0, 0)) && fill.rect == cell.border_rect
+    }));
 }
 
 #[test]

@@ -58,10 +58,10 @@ fn add_stroke_row(
     if row < rect.row || row > bottom {
         return;
     }
-    if row == rect.row && stroke.edges.top.is_visible() {
+    if row == rect.row && stroke.edges.top.paints_ink(stroke.current_color) {
         add_horizontal(cells, row, rect.col, right, stroke, stroke.edges.top);
     }
-    if row == bottom && stroke.edges.bottom.is_visible() {
+    if row == bottom && stroke.edges.bottom.paints_ink(stroke.current_color) {
         add_horizontal(cells, row, rect.col, right, stroke, stroke.edges.bottom);
     }
     let mask = if rect.row == bottom {
@@ -69,10 +69,10 @@ fn add_stroke_row(
     } else {
         u8::from(row > rect.row) | (u8::from(row < bottom) << 2)
     };
-    if stroke.edges.left.is_visible() {
+    if stroke.edges.left.paints_ink(stroke.current_color) {
         place_stroke(cells, row, rect.col, mask, stroke, stroke.edges.left);
     }
-    if stroke.edges.right.is_visible() {
+    if stroke.edges.right.paints_ink(stroke.current_color) {
         place_stroke(cells, row, right, mask, stroke, stroke.edges.right);
     }
 }
@@ -117,16 +117,16 @@ fn add_stroke(
         .row
         .saturating_add(rect.height - 1)
         .min(document_height - 1);
-    if stroke.edges.top.is_visible() {
+    if stroke.edges.top.paints_ink(stroke.current_color) {
         add_horizontal(cells, rect.row, rect.col, right, stroke, stroke.edges.top);
     }
-    if stroke.edges.bottom.is_visible() {
+    if stroke.edges.bottom.paints_ink(stroke.current_color) {
         add_horizontal(cells, bottom, rect.col, right, stroke, stroke.edges.bottom);
     }
-    if stroke.edges.left.is_visible() {
+    if stroke.edges.left.paints_ink(stroke.current_color) {
         add_vertical(cells, rect.col, rect.row, bottom, stroke, stroke.edges.left);
     }
-    if stroke.edges.right.is_visible() {
+    if stroke.edges.right.paints_ink(stroke.current_color) {
         add_vertical(cells, right, rect.row, bottom, stroke, stroke.edges.right);
     }
 }
@@ -186,11 +186,13 @@ fn place_stroke(
     side: BorderSide,
 ) {
     let rank = side.style as u8;
-    let mut style = stroke.style;
-    style.fg = match side.color {
-        BorderColor::CurrentColor => stroke.style.fg,
-        BorderColor::Transparent => None,
-        BorderColor::Rgb(color) => Some(Rgba::opaque(color)),
+    let style = CellStyle {
+        fg: match side.color {
+            BorderColor::CurrentColor => stroke.current_color,
+            BorderColor::Transparent => None,
+            BorderColor::Rgb(color) => Some(Rgba::opaque(color)),
+        },
+        ..Default::default()
     };
     match cells.get_mut(&(row, col)) {
         Some(cell) if cell.group == stroke.merge_group => {

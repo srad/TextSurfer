@@ -6,8 +6,9 @@ use style::values::specified::text::TextAlignKeyword;
 use style::values::specified::ui::CursorKind;
 
 use crate::core::style::{
-    BorderCollapse, BorderSpacing, CaptionSide, Cursor, FontSize, LengthAxis, ListStylePosition,
-    ListStyleType, TableLayoutMode, TextAlign, VerticalAlign, Visibility, WhiteSpace,
+    BorderCollapse, BorderSpacing, CaptionSide, Cursor, Direction, EmptyCells, FontSize,
+    LengthAxis, ListStylePosition, ListStyleType, TableLayoutMode, TextAlign, VerticalAlign,
+    Visibility, WhiteSpace,
 };
 
 use super::length::Lengths;
@@ -26,6 +27,24 @@ pub(super) fn white_space(values: &ComputedValues) -> WhiteSpace {
         // The collapse mode is what decides how the text reads, so it wins and `nowrap` is dropped.
         Collapse::PreserveBreaks => WhiteSpace::PreLine,
         Collapse::BreakSpaces => WhiteSpace::BreakSpaces,
+    }
+}
+
+pub(super) fn direction(values: &ComputedValues) -> Direction {
+    use longhands::direction::computed_value::T as Value;
+
+    match values.clone_direction() {
+        Value::Ltr => Direction::Ltr,
+        Value::Rtl => Direction::Rtl,
+    }
+}
+
+pub(super) fn empty_cells(values: &ComputedValues) -> EmptyCells {
+    use longhands::empty_cells::computed_value::T as Value;
+
+    match values.clone_empty_cells() {
+        Value::Show => EmptyCells::Show,
+        Value::Hide => EmptyCells::Hide,
     }
 }
 

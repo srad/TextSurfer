@@ -6,7 +6,7 @@
 
 ![Rust 1.91+](https://img.shields.io/badge/Rust-1.91%2B-orange?style=flat-square&logo=rust)
 ![ratatui 0.30.2](https://img.shields.io/badge/ratatui-0.30.2-ff9e18?style=flat-square)
-![983 passing tests](https://img.shields.io/badge/tests%20(VGA%2BJS)-983%20passing-brightgreen?style=flat-square)
+![1006 passing tests](https://img.shields.io/badge/tests%20(VGA%2BJS)-1006%20passing-brightgreen?style=flat-square)
 
 </div>
 

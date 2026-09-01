@@ -15,25 +15,25 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │┌────────────────────────────────┬───────────────────────────────┐                                  │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
+  1..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   67..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 ││             Head A             │             Head B            │                                  │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
+  1..2 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   2..15 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   15..21 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
   21..34 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  34..35 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
+  34..35 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   35..48 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   48..54 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 128) mod=BOLD
   54..66 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  66..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
+  66..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   67..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │├────────────────────────────────┼───────────────────────────────┤                                  │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
-  1..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=BOLD
+  1..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   67..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 ││                                │cell                           │                                  │
@@ -124,6 +124,63 @@ expression: "styled_panel(&page.painted, cols, start, end)"
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..67 fg=Rgb(128, 128, 128) bg=Rgb(0, 0, 128) mod=NONE
   67..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│                                                                                                    │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│┌──────────────┬────────────────┬──────────────────┐                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..53 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  53..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││ LAYER-MODE   │ LAYER-SYSTEM   │ LAYER-OTHER      │                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  2..3 fg=Rgb(16, 16, 16) bg=Rgb(0, 64, 0) mod=NONE
+  3..13 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  13..16 fg=Rgb(16, 16, 16) bg=Rgb(0, 64, 0) mod=NONE
+  16..17 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  17..18 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  18..30 fg=Rgb(224, 224, 224) bg=Rgb(0, 0, 64) mod=NONE
+  30..33 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 64) mod=NONE
+  33..34 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  34..35 fg=Rgb(16, 16, 16) bg=Rgb(64, 64, 0) mod=NONE
+  35..46 fg=Rgb(224, 224, 224) bg=Rgb(64, 64, 0) mod=NONE
+  46..52 fg=Rgb(16, 16, 16) bg=Rgb(64, 64, 0) mod=NONE
+  52..53 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  53..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│├──────────────┴────────────────┼──────────────────┤                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..53 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  53..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+││ LAYER-KERNEL                  │ LAYER-HARDWARE   │                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..2 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  2..3 fg=Rgb(16, 16, 16) bg=Rgb(64, 0, 0) mod=NONE
+  3..15 fg=Rgb(224, 224, 224) bg=Rgb(64, 0, 0) mod=NONE
+  15..33 fg=Rgb(16, 16, 16) bg=Rgb(64, 0, 0) mod=NONE
+  33..34 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  34..35 fg=Rgb(16, 16, 16) bg=Rgb(128, 64, 0) mod=NONE
+  35..49 fg=Rgb(224, 224, 224) bg=Rgb(128, 64, 0) mod=NONE
+  49..52 fg=Rgb(16, 16, 16) bg=Rgb(128, 64, 0) mod=NONE
+  52..53 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  53..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
+  101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+│└───────────────────────────────┴──────────────────┘                                                │
+  0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
+  1..53 fg=Rgb(128, 128, 128) bg=Rgb(32, 32, 32) mod=NONE
+  53..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                                                                                                    │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE

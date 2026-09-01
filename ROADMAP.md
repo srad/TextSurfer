@@ -464,6 +464,17 @@ Sequenced before M2 because a terminal browser is judged on whether real pages a
   spacing (one horizontal cell, zero vertical); authored `display: table` starts at zero. Fixed-layout
   overflow clips at the inner edge on grapheme boundaries. Percent constraints evaluate once against
   the selected width. Resource limits degrade an oversized table to block flow, preserving content.
+  Visible collapsed-border glyphs use the table background, or the ancestor/canvas when that is
+  transparent; column-group, column, row-group, row and cell backgrounds stop at those glyphs.
+  Borderless and transparent segments retain normal table-layer ownership, separate borders retain
+  normal CSS background painting, and border glyphs never inherit text modifiers.
+  Horizontal table repair is active: backgrounds paint once for the table and through each real
+  cell's column-group, column, row-group, row and cell layers; sparse slots expose only the table;
+  collapsed-border conflicts preserve authored-width priority independently from one-cell geometry;
+  row spans cannot cross row groups. Retained painting rebuilds collapsed table geometry when the
+  winning border changes between visible and invisible ink. The Linux-layers fixture, focused table
+  contracts and static WPT cases are the acceptance evidence; vertical writing and general bidi
+  remain M1-F.
 - **Generated content and markers** — `::before`/`::after`/`::marker`; `content` with strings,
   `counter()`, `counters()`, `attr()`, `none`/`normal`; counters over a depth-scoped stack;
   `list-style-*`; `Display::ListItem`; shared right-aligned outside marker fields; `<ol start>`,

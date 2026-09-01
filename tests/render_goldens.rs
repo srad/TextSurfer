@@ -8,7 +8,7 @@ use textsurfer::core::style::{
 };
 use textsurfer::css::{ColorScheme, DynamicState};
 use textsurfer::net::FetchResponse;
-use textsurfer::paint::DisplayList;
+use textsurfer::paint::{DisplayList, legible_foreground};
 use textsurfer::pipeline::page_load::{PageLoad, PageLoadOptions};
 use textsurfer::pipeline::render::{RenderedPage, render_html};
 
@@ -71,6 +71,148 @@ fn stateful_render_reuses_one_page_load_and_restores_hover_style() {
     );
     let restored = load.set_dynamic_state(DynamicState::INERT).unwrap();
     assert_eq!(restored.styles.get(link).color, Some(palette().link.into()));
+}
+
+#[test]
+fn retained_row_background_restyle_updates_every_contributed_cell_layer() {
+    let mut load = PageLoad::new(
+        "<!doctype html><style>body{margin:0}table{border-collapse:collapse}tr{background:#004000}tr:hover{background:#400000}td{border:solid;padding:0 1ch}</style><table><tr><td>A</td><td>B</td></tr></table>",
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            render: RenderContext::terminal(Size { cols: 20, rows: 8 }),
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+    );
+    let first = load.force_render();
+    let a = first
+        .painted
+        .rows
+        .iter()
+        .flat_map(|row| &row.spans)
+        .find(|span| span.text.contains('A'))
+        .unwrap();
+    assert_eq!(a.style.bg, Some(Rgb::new(0, 64, 0)));
+    let target = first.painted.hit_test(a.col, 1).unwrap();
+    let hovered = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(target),
+            ..Default::default()
+        })
+        .unwrap();
+    for label in ['A', 'B'] {
+        let span = hovered
+            .painted
+            .rows
+            .iter()
+            .flat_map(|row| &row.spans)
+            .find(|span| span.text.contains(label))
+            .unwrap();
+        assert_eq!(span.style.bg, Some(Rgb::new(64, 0, 0)));
+    }
+}
+
+#[test]
+fn retained_table_background_restyle_updates_collapsed_border_cells() {
+    let mut load = PageLoad::new(
+        "<!doctype html><style>body{margin:0}table{border-collapse:collapse;background:#202020}table:hover{background:#400000}tr{background:#004000}td{border:solid;padding:0 1ch}</style><table><tr><td>A</td><td>B</td></tr></table>",
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            render: RenderContext::terminal(Size { cols: 20, rows: 8 }),
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+    );
+    let first = load.force_render();
+    let (row, shared_col) = collapsed_shared_border(&first.painted);
+    assert_eq!(
+        background_at(&first.painted, row, shared_col),
+        Some(Rgb::new(32, 32, 32))
+    );
+    let target = first
+        .painted
+        .hit_test(shared_col.saturating_sub(1), row)
+        .unwrap();
+    let hovered = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(target),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        background_at(&hovered.painted, row, shared_col),
+        Some(Rgb::new(64, 0, 0))
+    );
+}
+
+#[test]
+fn collapsed_border_ink_topology_changes_rebuild_background_geometry() {
+    let mut load = PageLoad::new(
+        "<!doctype html><style>body{margin:0}table{border-collapse:collapse;background:#202020}tr{background:#004000}tr:hover td{border-color:transparent}td{border:solid #000;padding:0 1ch}</style><table><tr><td>A</td><td>B</td></tr></table>",
+        url::Url::parse("https://example.com/").unwrap(),
+        encoding_rs::UTF_8,
+        PageLoadOptions {
+            render: RenderContext::terminal(Size { cols: 20, rows: 8 }),
+            palette: palette(),
+            scripting: false,
+            color_scheme: ColorScheme::Dark,
+            started: Duration::ZERO,
+        },
+    );
+    let first = load.force_render();
+    let (row, shared_col) = collapsed_shared_border(&first.painted);
+    assert_eq!(
+        background_at(&first.painted, row, shared_col),
+        Some(Rgb::new(32, 32, 32))
+    );
+    let target = first
+        .painted
+        .hit_test(shared_col.saturating_sub(1), row)
+        .unwrap();
+    let hovered = load
+        .set_dynamic_state(DynamicState {
+            hover: Some(target),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        background_at(&hovered.painted, row, shared_col),
+        Some(Rgb::new(0, 64, 0))
+    );
+    let restored = load.set_dynamic_state(DynamicState::INERT).unwrap();
+    assert_eq!(
+        background_at(&restored.painted, row, shared_col),
+        Some(Rgb::new(32, 32, 32))
+    );
+}
+
+fn collapsed_shared_border(display: &DisplayList) -> (usize, usize) {
+    display
+        .rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, painted)| {
+            painted
+                .spans
+                .iter()
+                .find(|span| span.text.contains('│') && span.col > 0)
+                .map(|span| (row, span.col))
+        })
+        .unwrap()
+}
+
+fn background_at(display: &DisplayList, row: usize, col: usize) -> Option<Rgb> {
+    display.rows[row]
+        .spans
+        .iter()
+        .find(|span| span.col <= col && col < span.col + span.text.chars().count())
+        .and_then(|span| span.style.bg)
 }
 
 #[test]
@@ -847,6 +989,127 @@ fn table_properties_inherit_through_the_public_render_path() {
         BorderSpacing::new(3, 2)
     );
     assert_eq!(page.styles.get(caption).caption_side, CaptionSide::Bottom);
+}
+
+#[test]
+fn collapsed_table_borders_use_the_table_background() {
+    let page = render_source(
+        "<style>body{margin:0} table{border-collapse:collapse;background:#400000;border:1px solid #000;margin:0}
+         td{background:#004000;border-top:1px solid #000;border-bottom:1px solid #000;padding:0 1ch;font-weight:bold}</style>
+         <table><tr><td>cell</td></tr></table>",
+        20,
+    );
+    let cell_background = Rgb::new(0, 64, 0);
+    let border_background = Rgb::new(64, 0, 0);
+    let foreground = Rgba::opaque(legible_foreground(Rgb::BLACK, border_background, palette()));
+    let mut border_cells = 0;
+    let mut saw_text = false;
+    for span in page.painted.rows.iter().flat_map(|row| &row.spans) {
+        let borders = span
+            .text
+            .chars()
+            .filter(|character| "┌┐└┘─│├┤┬┴┼".contains(*character))
+            .count();
+        if borders > 0 {
+            border_cells += borders;
+            assert_eq!(span.style.bg, Some(border_background));
+            assert_eq!(span.style.fg, Some(foreground));
+            assert!(!span.style.bold);
+            assert!(!span.style.underline);
+            assert!(!span.style.strike);
+            assert!(!span.style.reverse);
+            assert!(!span.style.dim);
+            assert_eq!(span.style.scale, 1);
+        }
+        if span
+            .text
+            .chars()
+            .any(|character| character.is_ascii_alphabetic())
+        {
+            saw_text = true;
+            assert_eq!(span.style.bg, Some(cell_background));
+            assert!(span.style.bold);
+        }
+    }
+    assert!(border_cells >= 10);
+    assert!(saw_text);
+}
+
+#[test]
+fn collapsed_borders_of_a_transparent_table_expose_the_ancestor_background() {
+    let page = render_source(
+        "<style>body{margin:0;background:#202020}table{border-collapse:collapse}td{background:#004000;border:1px solid #000;padding:0 1ch}</style><table><tr><td>A</td></tr></table>",
+        20,
+    );
+    for span in page.painted.rows.iter().flat_map(|row| &row.spans) {
+        if span
+            .text
+            .chars()
+            .any(|character| "┌┐└┘─│├┤┬┴┼".contains(character))
+        {
+            assert_eq!(span.style.bg, Some(Rgb::new(32, 32, 32)));
+        }
+    }
+}
+
+#[test]
+fn linux_layers_table_uses_originating_row_and_cell_backgrounds() {
+    let page = render_source(
+        "<style>body{margin:0}table{border-collapse:collapse;border:1px solid #000;background:#202020}td{border:1px solid #000;padding:0 1ch}.user{background:#004000}.kernel{background:#400000}.hardware{background:#804000}.system{background:#000040}.other{background:#404000}</style>
+         <table><tr class=user><td rowspan=2>Mode</td><td class=system>System</td><td>Shell</td></tr><tr class=user><td>Library</td><td class=other>Other</td></tr><tr class=kernel><td colspan=3>Kernel</td></tr><tr class=hardware><td colspan=3>Hardware</td></tr></table>",
+        40,
+    );
+    let background = |text: &str| {
+        page.painted
+            .rows
+            .iter()
+            .flat_map(|row| &row.spans)
+            .find(|span| span.text.contains(text))
+            .and_then(|span| span.style.bg)
+    };
+    assert_eq!(background("Mode"), Some(Rgb::new(0, 64, 0)));
+    assert_eq!(background("System"), Some(Rgb::new(0, 0, 64)));
+    assert_eq!(background("Shell"), Some(Rgb::new(0, 64, 0)));
+    assert_eq!(background("Library"), Some(Rgb::new(0, 64, 0)));
+    assert_eq!(background("Other"), Some(Rgb::new(64, 64, 0)));
+    assert_eq!(background("Kernel"), Some(Rgb::new(64, 0, 0)));
+    assert_eq!(background("Hardware"), Some(Rgb::new(128, 64, 0)));
+    for span in page.painted.rows.iter().flat_map(|row| &row.spans) {
+        if span
+            .text
+            .chars()
+            .any(|character| "┌┐└┘─│├┤┬┴┼".contains(character))
+        {
+            assert_eq!(span.style.bg, Some(Rgb::new(32, 32, 32)));
+        }
+    }
+}
+
+#[test]
+fn collapsed_shared_border_backdrops_survive_source_capture() {
+    let page = render_source(
+        "<style>body{margin:0}table{border-collapse:collapse;background:#202020}td{border:1px solid #000;padding:0}.left{background:#400000}.right{background:#004000}</style><table><tr><td class=left>A</td><td class=right>B</td></tr></table>",
+        20,
+    );
+    let row = page
+        .painted
+        .rows
+        .iter()
+        .find(|row| {
+            let text = row
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>();
+            text.contains('A') && text.contains('B')
+        })
+        .unwrap();
+    let shared = row
+        .spans
+        .iter()
+        .find(|span| span.text.contains('│') && span.col > 0)
+        .unwrap();
+    assert_eq!(shared.style.bg, Some(Rgb::new(32, 32, 32)));
 }
 
 #[test]

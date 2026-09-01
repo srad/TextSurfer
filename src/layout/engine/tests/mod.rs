@@ -898,6 +898,7 @@ fn saturated_row_geometry_does_not_recurse_forever_in_the_paint_index() {
             },
             color: None,
             depth: 0,
+            paint_source: PaintStyleSource::Missing,
         }],
         paint_sources: PaintSources {
             fills: vec![PaintStyleSource::Missing],

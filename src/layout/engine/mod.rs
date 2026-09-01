@@ -160,6 +160,7 @@ pub struct LayoutRect {
 pub struct LayoutBox {
     pub node: NodeId,
     pub(crate) paint_source: PaintStyleSource,
+    pub(crate) background_handled: bool,
     pub border_rect: LayoutRect,
     pub content_rect: LayoutRect,
     pub depth: usize,
@@ -171,13 +172,35 @@ pub struct BackgroundFill {
     pub rect: LayoutRect,
     pub color: Option<crate::core::style::Rgb>,
     pub depth: usize,
+    pub(crate) paint_source: PaintStyleSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BorderEdge {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+impl BorderEdge {
+    pub(crate) fn side(self, edges: BorderEdges) -> crate::core::style::BorderSide {
+        match self {
+            Self::Top => edges.top,
+            Self::Right => edges.right,
+            Self::Bottom => edges.bottom,
+            Self::Left => edges.left,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BorderStroke {
     pub rect: LayoutRect,
     pub edges: BorderEdges,
-    pub style: CellStyle,
+    pub current_color: Option<crate::core::style::Rgba>,
+    pub source_node: Option<NodeId>,
+    pub source_edge: Option<BorderEdge>,
     pub depth: usize,
     pub merge_group: usize,
 }
@@ -622,6 +645,7 @@ fn try_layout_flow(
                     rect,
                     color: Some(color),
                     depth: flow[index].depth,
+                    paint_source: flow[index].paint_source,
                 });
             }
             if visible
@@ -629,7 +653,9 @@ fn try_layout_flow(
                 && let Some(stroke) = inherited_clip.stroke(BorderStroke {
                     rect: border_rect,
                     edges: flow[index].style.border,
-                    style,
+                    current_color: flow[index].style.color,
+                    source_node: None,
+                    source_edge: None,
                     depth: flow[index].depth,
                     merge_group: index.saturating_add(1),
                 })
@@ -640,6 +666,7 @@ fn try_layout_flow(
                 tree.boxes.push(LayoutBox {
                     node: owner,
                     paint_source: flow[index].paint_source,
+                    background_handled: false,
                     border_rect,
                     content_rect: inherited_clip.rect(content_rect).unwrap_or_default(),
                     depth: flow[index].depth,

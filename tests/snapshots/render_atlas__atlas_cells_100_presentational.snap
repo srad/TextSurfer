@@ -22,7 +22,7 @@ expression: "styled_panel(&page.painted, cols, start, end)"
 │                   ┌────────────────────────────────────┐                                           │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..58 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  20..58 fg=Rgb(102, 102, 102) bg=Rgb(64, 0, 0) mod=NONE
   58..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                   │                         legacy cell│                                           │
@@ -37,7 +37,7 @@ expression: "styled_panel(&page.painted, cols, start, end)"
 │                   └────────────────────────────────────┘                                           │
   0..1 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
   1..20 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
-  20..58 fg=Rgb(224, 224, 224) bg=Rgb(0, 64, 0) mod=NONE
+  20..58 fg=Rgb(102, 102, 102) bg=Rgb(64, 0, 0) mod=NONE
   58..101 fg=Rgb(16, 16, 16) bg=Rgb(0, 0, 128) mod=NONE
   101..102 fg=Rgb(32, 56, 100) bg=Reset mod=NONE
 │                               bottom caption                                                       │

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::style::{BorderCollapse, BorderEdges, ComputedStyle};
 use crate::layout::{BackgroundFill, BorderStroke, LayoutBox, LayoutRect};
@@ -99,6 +99,8 @@ pub(super) struct TablePlacement {
     pub(super) columns: ColumnLayout,
     pub(super) cells: CellGrid,
     pub(super) captions: CaptionBands,
+    pub(super) collapsed_columns: Vec<bool>,
+    pub(super) collapsed_rows: Vec<bool>,
 }
 
 pub(super) fn place_table(
@@ -113,6 +115,8 @@ pub(super) fn place_table(
         columns,
         cells,
         captions,
+        collapsed_columns,
+        collapsed_rows,
     } = placement;
     let top_height = captions.top_height();
     let bottom_height = captions.bottom_height();
@@ -122,9 +126,21 @@ pub(super) fn place_table(
         + geometry.table_padding.bottom
         + cells.row_heights.iter().sum::<usize>()
         + if geometry.collapsed {
-            geometry.grid.saturating_mul(model.rows.len() + 1)
+            geometry.grid.saturating_mul(
+                collapsed_rows
+                    .iter()
+                    .filter(|collapsed| !**collapsed)
+                    .count()
+                    + 1,
+            )
         } else {
-            geometry.spacing_y.saturating_mul(model.rows.len() + 1)
+            geometry.spacing_y.saturating_mul(
+                collapsed_rows
+                    .iter()
+                    .filter(|collapsed| !**collapsed)
+                    .count()
+                    + 1,
+            )
         };
     let mut output = TableOutput {
         width: columns.table_width,
@@ -145,26 +161,41 @@ pub(super) fn place_table(
         output.boxes.push(LayoutBox {
             node,
             paint_source: crate::layout::engine::PaintStyleSource::Element(node),
+            background_handled: true,
             border_rect: table_rect,
             content_rect: table_rect,
             depth: 0,
             style: table_style.cell_style(),
         });
     }
-    add_fill(&mut output.fills, table_rect, table_style, 0);
+    add_fill(&mut output.fills, table_rect, table_style, 0, root.owner);
     if !table_style.visibility.is_hidden() && !geometry.collapsed && table_style.border.has_layout()
     {
         output.strokes.push(BorderStroke {
             rect: table_rect,
             edges: table_style.border,
-            style: table_style.cell_style(),
+            current_color: table_style.color,
+            source_node: None,
+            source_edge: None,
             depth: 0,
             merge_group: 1,
         });
     }
 
-    let x_positions = track_positions(
-        &columns.widths,
+    let physical_widths = if table_style.direction == crate::core::style::Direction::Rtl {
+        columns.widths.iter().rev().copied().collect::<Vec<_>>()
+    } else {
+        columns.widths.clone()
+    };
+    let physical_collapsed_columns = if table_style.direction == crate::core::style::Direction::Rtl
+    {
+        collapsed_columns.iter().rev().copied().collect::<Vec<_>>()
+    } else {
+        collapsed_columns.clone()
+    };
+    let x_positions = track_positions_collapsing(
+        &physical_widths,
+        &physical_collapsed_columns,
         geometry.table_edges.left
             + geometry.table_padding.left
             + if geometry.collapsed {
@@ -178,8 +209,9 @@ pub(super) fn place_table(
             geometry.spacing_x
         },
     );
-    let y_positions = track_positions(
+    let y_positions = track_positions_collapsing(
         &cells.row_heights,
+        &collapsed_rows,
         top_height
             + geometry.table_edges.top
             + geometry.table_padding.top
@@ -194,77 +226,24 @@ pub(super) fn place_table(
             geometry.spacing_y
         },
     );
-    if !output.model.rows.is_empty() {
-        output.baseline = Some(y_positions[0].saturating_add(cells.row_baselines[0]));
+    if let Some(row) = collapsed_rows.iter().position(|collapsed| !*collapsed) {
+        output.baseline = Some(y_positions[row].saturating_add(cells.row_baselines[row]));
     }
-    for (column, track) in output.model.column_nodes.iter().enumerate() {
-        let rect = LayoutRect {
-            col: x_positions[column],
-            row: table_rect.row,
-            width: columns.widths[column],
-            height: table_rect.height,
-        };
-        if let Some(group) = track.group {
-            add_fill(&mut output.fills, rect, formatter.styles.get(group), 1);
-        }
-        if let Some(node) = track.column {
-            add_fill(&mut output.fills, rect, formatter.styles.get(node), 2);
-        }
-    }
-    let mut painted_groups = Vec::new();
-    for (row_index, row) in output.model.rows.iter().enumerate() {
-        let Some(group) = row.group_node else {
-            continue;
-        };
-        if painted_groups.contains(&group) {
-            continue;
-        }
-        painted_groups.push(group);
-        let end = output
-            .model
-            .rows
-            .iter()
-            .enumerate()
-            .skip(row_index + 1)
-            .find(|(_, candidate)| candidate.group_node != Some(group))
-            .map(|(index, _)| index)
-            .unwrap_or(output.model.rows.len());
-        let rect = LayoutRect {
-            col: table_rect.col,
-            row: y_positions[row_index],
-            width: table_rect.width,
-            height: y_positions[end]
-                .saturating_sub(y_positions[row_index])
-                .saturating_sub(if geometry.collapsed {
-                    0
-                } else {
-                    geometry.spacing_y
-                }),
-        };
-        add_fill(&mut output.fills, rect, formatter.styles.get(group), 3);
-    }
-    for (row_index, row) in output.model.rows.iter().enumerate() {
-        if let Some(node) = row.node {
-            let rect = LayoutRect {
-                col: x_positions[0],
-                row: y_positions[row_index],
-                width: columns.table_width.saturating_sub(x_positions[0]),
-                height: cells.row_heights[row_index],
-            };
-            add_fill(&mut output.fills, rect, formatter.styles.get(node), 4);
-        }
-    }
-
     let mut collapse_segments = BTreeMap::new();
     if geometry.collapsed {
         add_collapsed_candidates(
             &mut collapse_segments,
             table_rect,
             table_style.border,
-            table_style.cell_style(),
+            table_style.color,
+            root.owner,
             0,
         );
         for (column, track) in output.model.column_nodes.iter().enumerate() {
+            if collapsed_columns[column] {
+                continue;
+            }
+            let column = physical_column(column, output.model.columns, table_style.direction);
             let rect = LayoutRect {
                 col: x_positions[column],
                 row: table_rect.row,
@@ -279,7 +258,8 @@ pub(super) fn place_table(
                     &mut collapse_segments,
                     rect,
                     style.border,
-                    style.cell_style(),
+                    style.color,
+                    Some(group),
                     1,
                 );
             }
@@ -289,12 +269,16 @@ pub(super) fn place_table(
                     &mut collapse_segments,
                     rect,
                     style.border,
-                    style.cell_style(),
+                    style.color,
+                    Some(node),
                     2,
                 );
             }
         }
         for (row_index, row) in output.model.rows.iter().enumerate() {
+            if collapsed_rows[row_index] {
+                continue;
+            }
             let rect = LayoutRect {
                 col: table_rect.col,
                 row: y_positions[row_index],
@@ -309,7 +293,8 @@ pub(super) fn place_table(
                     &mut collapse_segments,
                     rect,
                     style.border,
-                    style.cell_style(),
+                    style.color,
+                    Some(group),
                     3,
                 );
             }
@@ -319,7 +304,8 @@ pub(super) fn place_table(
                     &mut collapse_segments,
                     rect,
                     style.border,
-                    style.cell_style(),
+                    style.color,
+                    Some(node),
                     4,
                 );
             }
@@ -328,9 +314,21 @@ pub(super) fn place_table(
     let placed_cells = output.model.cells.clone();
     for (index, cell) in placed_cells.iter().enumerate() {
         let style = formatter.cell_style(cell);
-        let left = x_positions[cell.col];
+        let collapsed_cell = collapsed_columns[cell.col..cell.col + cell.col_span]
+            .iter()
+            .all(|collapsed| *collapsed)
+            || collapsed_rows[cell.row..cell.row + cell.row_span]
+                .iter()
+                .all(|collapsed| *collapsed);
+        let (physical_start, physical_end) = physical_span(
+            cell.col,
+            cell.col_span,
+            output.model.columns,
+            table_style.direction,
+        );
+        let left = x_positions[physical_start];
         let top = y_positions[cell.row];
-        let right = x_positions[cell.col + cell.col_span].saturating_sub(if geometry.collapsed {
+        let right = x_positions[physical_end].saturating_sub(if geometry.collapsed {
             0
         } else {
             geometry.spacing_x
@@ -346,6 +344,51 @@ pub(super) fn place_table(
             width: right.saturating_sub(left).saturating_add(geometry.grid),
             height: bottom.saturating_sub(top).saturating_add(geometry.grid),
         };
+        let fill_rect = collapsed_background_rect(
+            rect,
+            geometry,
+            cell.row > 0,
+            cell.col > 0,
+            table_style.direction,
+        );
+        let column = output.model.column_nodes[cell.col];
+        let row = &output.model.rows[cell.row];
+        if let Some(group) = column.group {
+            add_fill(
+                &mut output.fills,
+                fill_rect,
+                formatter.styles.get(group),
+                1,
+                Some(group),
+            );
+        }
+        if let Some(node) = column.column {
+            add_fill(
+                &mut output.fills,
+                fill_rect,
+                formatter.styles.get(node),
+                2,
+                Some(node),
+            );
+        }
+        if let Some(group) = row.group_node {
+            add_fill(
+                &mut output.fills,
+                fill_rect,
+                formatter.styles.get(group),
+                3,
+                Some(group),
+            );
+        }
+        if let Some(node) = row.node {
+            add_fill(
+                &mut output.fills,
+                fill_rect,
+                formatter.styles.get(node),
+                4,
+                Some(node),
+            );
+        }
         let edge = if geometry.collapsed {
             EdgeInsets {
                 top: geometry.grid,
@@ -390,54 +433,70 @@ pub(super) fn place_table(
         if geometry.collapsed && cell.row + cell.row_span < output.model.rows.len() {
             hit_rect.height = hit_rect.height.saturating_sub(geometry.grid);
         }
+        let hide_empty = !geometry.collapsed
+            && style.empty_cells == crate::core::style::EmptyCells::Hide
+            && cells.layouts[index].is_empty();
         if let Some(node) = cell.owner
             && !style.visibility.is_hidden()
+            && !hide_empty
+            && !collapsed_cell
         {
             output.boxes.push(LayoutBox {
                 node,
                 paint_source: crate::layout::engine::PaintStyleSource::Element(node),
+                background_handled: true,
                 border_rect: hit_rect,
                 content_rect,
                 depth: 5,
                 style: style.cell_style(),
             });
         }
-        add_fill(&mut output.fills, rect, style, 5);
-        if !style.visibility.is_hidden() {
+        if !hide_empty && !collapsed_cell {
+            add_fill(&mut output.fills, fill_rect, style, 5, cell.owner);
+        }
+        if !style.visibility.is_hidden() && !hide_empty && !collapsed_cell {
             if geometry.collapsed {
                 add_collapsed_candidates(
                     &mut collapse_segments,
                     rect,
                     style.border,
-                    style.cell_style(),
+                    style.color,
+                    cell.owner,
                     5,
                 );
             } else if style.border.has_layout() {
                 output.strokes.push(BorderStroke {
                     rect,
                     edges: style.border,
-                    style: style.cell_style(),
+                    current_color: style.color,
+                    source_node: None,
+                    source_edge: None,
                     depth: 5,
                     merge_group: index + 2,
                 });
             }
         }
-        append_cell_content(
-            &mut output,
-            &cells.layouts[index],
-            content_rect,
-            6,
-            (index + 1).saturating_mul(1_000),
-        );
+        if !style.visibility.is_hidden() && !collapsed_cell {
+            append_cell_content(
+                &mut output,
+                &cells.layouts[index],
+                content_rect,
+                6,
+                (index + 1).saturating_mul(1_000),
+            );
+        }
     }
     if geometry.collapsed {
+        clip_table_layer_fills(&mut output.fills, &collapse_segments);
         output
             .strokes
             .extend(collapse_segments.into_values().filter_map(|candidate| {
                 (candidate.side.layout_width() > 0).then_some(BorderStroke {
                     rect: candidate.rect,
                     edges: candidate.edges,
-                    style: candidate.style,
+                    current_color: candidate.current_color,
+                    source_node: candidate.source_node,
+                    source_edge: Some(candidate.source_edge),
                     depth: candidate.depth,
                     merge_group: 1,
                 })
@@ -451,6 +510,55 @@ pub(super) fn place_table(
         columns.table_width,
     );
     output
+}
+
+fn physical_column(
+    column: usize,
+    columns: usize,
+    direction: crate::core::style::Direction,
+) -> usize {
+    match direction {
+        crate::core::style::Direction::Ltr => column,
+        crate::core::style::Direction::Rtl => columns.saturating_sub(column + 1),
+    }
+}
+
+fn physical_span(
+    column: usize,
+    span: usize,
+    columns: usize,
+    direction: crate::core::style::Direction,
+) -> (usize, usize) {
+    match direction {
+        crate::core::style::Direction::Ltr => (column, column.saturating_add(span)),
+        crate::core::style::Direction::Rtl => (
+            columns.saturating_sub(column.saturating_add(span)),
+            columns.saturating_sub(column),
+        ),
+    }
+}
+
+fn collapsed_background_rect(
+    mut rect: LayoutRect,
+    geometry: &TableGeometry,
+    after_block_start: bool,
+    after_inline_start: bool,
+    direction: crate::core::style::Direction,
+) -> LayoutRect {
+    if !geometry.collapsed {
+        return rect;
+    }
+    if after_block_start {
+        rect.row = rect.row.saturating_add(geometry.grid);
+        rect.height = rect.height.saturating_sub(geometry.grid);
+    }
+    if after_inline_start {
+        rect.width = rect.width.saturating_sub(geometry.grid);
+        if direction == crate::core::style::Direction::Ltr {
+            rect.col = rect.col.saturating_add(geometry.grid);
+        }
+    }
+    rect
 }
 
 #[derive(Clone, Copy, Default)]
@@ -490,6 +598,7 @@ impl TableFormatter<'_> {
                 .map(|node| LayoutBox {
                     node,
                     paint_source: crate::layout::engine::PaintStyleSource::Element(node),
+                    background_handled: false,
                     border_rect: rect,
                     content_rect: rect,
                     depth: 0,
@@ -503,11 +612,126 @@ impl TableFormatter<'_> {
     }
 }
 
-pub(super) fn track_positions(values: &[usize], start: usize, gap: usize) -> Vec<usize> {
+fn clip_table_layer_fills(
+    fills: &mut Vec<BackgroundFill>,
+    segments: &BTreeMap<(bool, usize, usize), super::borders::BorderCandidate>,
+) {
+    let mut border_cells = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for candidate in segments
+        .values()
+        .filter(|candidate| candidate.side.paints_ink(candidate.current_color))
+    {
+        for row in candidate.rect.row..candidate.rect.row.saturating_add(candidate.rect.height) {
+            let columns = border_cells.entry(row).or_default();
+            columns.extend(
+                candidate.rect.col..candidate.rect.col.saturating_add(candidate.rect.width),
+            );
+        }
+    }
+    if border_cells.is_empty() {
+        return;
+    }
+    let mut clipped = Vec::with_capacity(fills.len());
+    for fill in fills.drain(..) {
+        if !(1..=5).contains(&fill.depth) {
+            clipped.push(fill);
+            continue;
+        }
+        clipped.extend(
+            subtract_border_cells(fill.rect, &border_cells)
+                .into_iter()
+                .map(|rect| BackgroundFill { rect, ..fill }),
+        );
+    }
+    *fills = clipped;
+}
+
+fn subtract_border_cells(
+    rect: LayoutRect,
+    border_cells: &BTreeMap<usize, BTreeSet<usize>>,
+) -> Vec<LayoutRect> {
+    if rect.width == 0 || rect.height == 0 {
+        return vec![rect];
+    }
+    let bottom = rect.row.saturating_add(rect.height);
+    let right = rect.col.saturating_add(rect.width);
+    let mut output = Vec::new();
+    let mut active = Vec::<LayoutRect>::new();
+    let mut next_row = rect.row;
+    for (&row, columns) in border_cells.range(rect.row..bottom) {
+        if row > next_row {
+            output.append(&mut active);
+            output.push(LayoutRect {
+                col: rect.col,
+                row: next_row,
+                width: rect.width,
+                height: row - next_row,
+            });
+        }
+        let mut runs = Vec::new();
+        let mut start = rect.col;
+        for column in columns.range(rect.col..right).copied() {
+            if start < column {
+                runs.push((start, column - start));
+            }
+            start = column.saturating_add(1);
+        }
+        if start < right {
+            runs.push((start, right - start));
+        }
+        if active.len() == runs.len()
+            && active.iter().zip(&runs).all(|(active, (col, width))| {
+                active.col == *col
+                    && active.width == *width
+                    && active.row.saturating_add(active.height) == row
+            })
+        {
+            for active in &mut active {
+                active.height = active.height.saturating_add(1);
+            }
+        } else {
+            output.append(&mut active);
+            active = runs
+                .into_iter()
+                .map(|(col, width)| LayoutRect {
+                    col,
+                    row,
+                    width,
+                    height: 1,
+                })
+                .collect();
+        }
+        next_row = row.saturating_add(1);
+    }
+    output.append(&mut active);
+    if next_row < bottom {
+        output.push(LayoutRect {
+            col: rect.col,
+            row: next_row,
+            width: rect.width,
+            height: bottom - next_row,
+        });
+    }
+    output
+}
+
+fn track_positions_collapsing(
+    values: &[usize],
+    collapsed: &[bool],
+    start: usize,
+    gap: usize,
+) -> Vec<usize> {
     let mut positions = Vec::with_capacity(values.len() + 1);
     positions.push(start);
-    for value in values {
-        positions.push(positions.last().copied().unwrap_or(start) + value + gap);
+    for (value, collapsed) in values.iter().zip(collapsed) {
+        positions.push(
+            positions.last().copied().unwrap_or(start)
+                + if *collapsed {
+                    0
+                } else {
+                    value.saturating_add(gap)
+                },
+        );
     }
     positions
 }
@@ -541,14 +765,16 @@ pub(super) fn add_fill(
     rect: LayoutRect,
     style: ComputedStyle,
     depth: usize,
+    source: Option<crate::core::dom::NodeId>,
 ) {
     if !style.visibility.is_hidden()
-        && let Some(color) = style.background
+        && let Some(source) = source
     {
         fills.push(BackgroundFill {
             rect,
-            color: Some(color),
+            color: style.background,
             depth,
+            paint_source: crate::layout::engine::PaintStyleSource::Element(source),
         });
     }
 }
