@@ -8,8 +8,11 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use image::{DynamicImage, ImageDecoder as _, ImageError, ImageFormat, ImageReader, Limits};
+use resvg::{tiny_skia, usvg};
 
-use crate::core::image::{DecodedImage, ImageDecodeError, ImageDecodeRequest, ImageDecoder};
+use crate::core::image::{
+    DecodedImage, DecodedImageSource, ImageDecodeError, ImageDecodeRequest, ImageDecoder,
+};
 
 pub const MAX_IMAGE_AXIS: u32 = 8192;
 pub const MAX_IMAGE_PIXELS: u64 = 8_388_608;
@@ -255,35 +258,18 @@ fn finish_key(
 
 impl ImageDecoder for RasterImageDecoder {
     fn decode(&self, request: ImageDecodeRequest) -> Result<DecodedImage, ImageDecodeError> {
-        let mut reader = ImageReader::new(Cursor::new(request.bytes))
-            .with_guessed_format()
-            .map_err(|_| ImageDecodeError::Invalid)?;
-        match reader.format() {
-            Some(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif) => {}
-            Some(_) => return Err(ImageDecodeError::UnsupportedFormat),
-            None => return Err(ImageDecodeError::UnknownFormat),
-        }
-        let mut limits = Limits::default();
-        limits.max_image_width = Some(MAX_IMAGE_AXIS);
-        limits.max_image_height = Some(MAX_IMAGE_AXIS);
-        limits.max_alloc = Some(MAX_DECODER_ALLOC);
-        reader.limits(limits);
-        let decoder = reader.into_decoder().map_err(map_decode_error)?;
-        let (width, height) = decoder.dimensions();
-        validate_dimensions(width, height)?;
-        let rgba = DynamicImage::from_decoder(decoder)
-            .map_err(map_decode_error)?
-            .into_rgba8()
-            .into_raw();
-        if u64::try_from(rgba.len()).map_or(true, |len| len > MAX_IMAGE_RGBA_BYTES) {
-            return Err(ImageDecodeError::Limit);
-        }
+        let (width, height, rgba, svg) = decode_pixels(&request.bytes)?;
         let image = DecodedImage {
             asset_id: request.asset_id,
             revision: request.revision,
             width,
             height,
             rgba: Arc::from(rgba),
+            source: if svg {
+                DecodedImageSource::Svg(Arc::clone(&request.bytes))
+            } else {
+                DecodedImageSource::Raster
+            },
         };
         tracing::debug!(
             asset_id = image.asset_id.0,
@@ -293,6 +279,71 @@ impl ImageDecoder for RasterImageDecoder {
             "image decoded"
         );
         Ok(image)
+    }
+}
+
+fn decode_pixels(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>, bool), ImageDecodeError> {
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| ImageDecodeError::Invalid)?;
+    match reader.format() {
+        Some(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif) => {}
+        Some(_) => return Err(ImageDecodeError::UnsupportedFormat),
+        None => {
+            return decode_svg(bytes)?
+                .map(|(width, height, rgba)| (width, height, rgba, true))
+                .ok_or(ImageDecodeError::UnknownFormat);
+        }
+    }
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_AXIS);
+    limits.max_image_height = Some(MAX_IMAGE_AXIS);
+    limits.max_alloc = Some(MAX_DECODER_ALLOC);
+    reader.limits(limits);
+    let decoder = reader.into_decoder().map_err(map_decode_error)?;
+    let (width, height) = decoder.dimensions();
+    validate_dimensions(width, height)?;
+    let rgba = DynamicImage::from_decoder(decoder)
+        .map_err(map_decode_error)?
+        .into_rgba8()
+        .into_raw();
+    if u64::try_from(rgba.len()).map_or(true, |len| len > MAX_IMAGE_RGBA_BYTES) {
+        return Err(ImageDecodeError::Limit);
+    }
+    Ok((width, height, rgba, false))
+}
+
+fn decode_svg(bytes: &[u8]) -> Result<Option<(u32, u32, Vec<u8>)>, ImageDecodeError> {
+    let options = usvg::Options::default();
+    let Ok(tree) = usvg::Tree::from_data_nested(bytes, &options) else {
+        return Ok(None);
+    };
+    let size = tree.size().to_int_size();
+    let width = size.width();
+    let height = size.height();
+    validate_dimensions(width, height)?;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(ImageDecodeError::Limit)?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
+    let mut rgba = pixmap.take();
+    unpremultiply_rgba(&mut rgba);
+    Ok(Some((width, height, rgba)))
+}
+
+fn unpremultiply_rgba(rgba: &mut [u8]) {
+    for pixel in rgba.chunks_exact_mut(4) {
+        let alpha = u16::from(pixel[3]);
+        if alpha == 0 {
+            pixel[..3].fill(0);
+        } else if alpha < 255 {
+            for channel in &mut pixel[..3] {
+                let straight = (u16::from(*channel) * 255 + alpha / 2) / alpha;
+                *channel = u8::try_from(straight.min(255)).unwrap_or(255);
+            }
+        }
     }
 }
 

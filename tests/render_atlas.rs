@@ -109,6 +109,7 @@ fn atlas_image(asset_id: textsurfer::core::image::ImageAssetId, revision: u64) -
         width: 16,
         height: 16,
         rgba: rgba.into(),
+        source: textsurfer::core::image::DecodedImageSource::Raster,
     }
 }
 
@@ -172,6 +173,7 @@ fn styled_panel(painted: &DisplayList, width: u16, start: usize, end: usize) -> 
             text_fields: Vec::new(),
         },
         theme: &PAPER_WHITE,
+        render_images: true,
     }
     .render(area, &mut buffer);
     let mut out = String::new();
@@ -373,6 +375,7 @@ fn vga_panel(painted: &DisplayList, width: u16, start: usize, end: usize) -> ima
                     text_fields: Vec::new(),
                 },
                 theme: &PAPER_WHITE,
+                render_images: false,
             }
             .render(frame.area(), frame.buffer_mut());
         })

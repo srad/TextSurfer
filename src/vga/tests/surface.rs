@@ -9,6 +9,9 @@ use crate::layout::LayoutRect;
 use crate::paint::{DisplayList, PaintOverlay, PaintedImage, ScaledTextRun};
 
 use crate::vga::font::{CELL_H, CELL_W, CP437_TO_UNICODE, GlyphWidth, glyph};
+use crate::vga::image::{
+    ImagePreparationRequest, ImagePreparer, PreparedImageKey, RasterImagePreparer,
+};
 use crate::vga::{Surface, SurfaceConfig};
 
 const FG: Rgb = Rgb::new(200, 200, 200);
@@ -447,6 +450,115 @@ fn test_palette() -> Palette {
     }
 }
 
+fn draw_one_cell_image(width: u32, height: u32, rgba: Vec<u8>) -> Surface {
+    draw_image(width, height, rgba, clip(1, 1))
+}
+
+fn draw_image(width: u32, height: u32, rgba: Vec<u8>, rect: LayoutRect) -> Surface {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "img", ElementNs::Html, vec![]);
+    let asset_id = ImageAssetId(91);
+    let mut painted = DisplayList {
+        images: vec![PaintedImage {
+            node,
+            asset_id,
+            revision: 1,
+            rect,
+            clip: clip(1, 1),
+            depth: 0,
+        }],
+        overlays: vec![PaintOverlay::Image(0)],
+        ..Default::default()
+    };
+    let image = DecodedImage {
+        asset_id,
+        revision: 1,
+        width,
+        height,
+        rgba: std::sync::Arc::from(rgba),
+        source: crate::core::image::DecodedImageSource::Raster,
+    };
+    painted.image_assets.insert(asset_id, image.clone());
+    let mut surface = Surface::new(config(1, 1, 1));
+    if let (Ok(width), Ok(height)) = (
+        u32::try_from(rect.width.saturating_mul(CELL_W)),
+        u32::try_from(rect.height.saturating_mul(CELL_H)),
+    ) {
+        let (generation, surface_epoch) = surface.image_context();
+        let result = RasterImagePreparer.prepare(ImagePreparationRequest {
+            key: PreparedImageKey {
+                generation,
+                surface_epoch,
+                asset_id,
+                revision: 1,
+                width,
+                height,
+            },
+            image,
+        });
+        if let Some(rgba) = result.rgba {
+            surface.accept_prepared_image(result.key, rgba);
+        }
+    }
+    surface.draw_overlays(&painted, (0, 0), 0, clip(1, 1), &[], test_palette());
+    surface
+}
+
+#[test]
+fn image_downscaling_filters_alternating_source_pixels() {
+    let rgba = (0..CELL_H)
+        .flat_map(|_| {
+            (0..CELL_W * 2).flat_map(|x| {
+                let channel = if x % 2 == 0 { 0 } else { 255 };
+                [channel, channel, channel, 255]
+            })
+        })
+        .collect();
+    let surface = draw_one_cell_image((CELL_W * 2) as u32, CELL_H as u32, rgba);
+    let pixel = pixel_at(&surface, CELL_W / 2, CELL_H / 2);
+    let red = (pixel >> 16) & 0xff;
+    assert!((96..=159).contains(&red), "filtered red channel was {red}");
+}
+
+#[test]
+fn image_downscaling_does_not_bleed_transparent_colour() {
+    let rgba = (0..CELL_H)
+        .flat_map(|_| {
+            (0..CELL_W * 2).flat_map(|x| {
+                if x % 2 == 0 {
+                    [255, 0, 0, 0]
+                } else {
+                    [255, 255, 255, 255]
+                }
+            })
+        })
+        .collect();
+    let surface = draw_one_cell_image((CELL_W * 2) as u32, CELL_H as u32, rgba);
+    let pixel = pixel_at(&surface, CELL_W / 2, CELL_H / 2);
+    let red = (pixel >> 16) & 0xff;
+    let green = (pixel >> 8) & 0xff;
+    assert!(
+        red.abs_diff(green) <= 1,
+        "transparent red bled into {red}/{green}"
+    );
+}
+
+#[test]
+fn oversized_prepared_image_falls_back_without_disappearing() {
+    let surface = draw_image(
+        1,
+        1,
+        vec![0, 255, 0, 255],
+        LayoutRect {
+            col: 0,
+            row: 0,
+            width: 65_535,
+            height: 2,
+        },
+    );
+    assert_eq!(pixel_at(&surface, 0, 0), packed(Rgb::new(0, 255, 0)));
+}
+
 #[test]
 fn a_scaled_glyph_scrolled_off_the_top_paints_its_visible_lower_rows() {
     // A 2x block at document row 0 with scroll 1: its top cell-row is above the viewport,
@@ -623,6 +735,7 @@ fn image_overlays_scale_scroll_clip_restore_and_leave_the_cursor_on_top() {
             width: 1,
             height: 1,
             rgba: std::sync::Arc::from([255, 0, 0, 255]),
+            source: crate::core::image::DecodedImageSource::Raster,
         },
     );
     let mut surface = Surface::new(config(3, 2, 1));

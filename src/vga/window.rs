@@ -140,7 +140,7 @@ impl VgaApp {
         app.set_script_factory(script_factory);
         let theme = *app.theme();
         let palette = theme.palette();
-        let backend = VgaBackend::new(SurfaceConfig {
+        let backend = VgaBackend::with_async_images(SurfaceConfig {
             cols: options.cells.cols,
             rows: options.cells.rows,
             scale: options.scale,
@@ -154,7 +154,7 @@ impl VgaApp {
         let theme_index = app.theme_index();
         Ok(Self {
             backend,
-            composer: FrameComposer::new(ratatui::layout::Rect::new(
+            composer: FrameComposer::with_native_overlays(ratatui::layout::Rect::new(
                 0,
                 0,
                 options.cells.cols,
@@ -208,6 +208,23 @@ impl VgaApp {
             advanced = true;
         }
         self.sync_theme();
+        let generation = self.app.chrome_view().content_generation;
+        let prepared = self.backend.poll_prepared_images(generation);
+        if !prepared.is_empty() {
+            let view = self.app.chrome_view();
+            for placement in &view.content.painted.images {
+                if prepared.iter().any(|key| {
+                    key.generation == view.content_generation
+                        && key.asset_id == placement.asset_id
+                        && key.revision == placement.revision
+                }) {
+                    self.pending_damage.repaint_rows(
+                        placement.rect.row
+                            ..placement.rect.row.saturating_add(placement.rect.height),
+                    );
+                }
+            }
+        }
         if self.app.take_screenshot_request() {
             super::capture::save_active_page(
                 &mut self.app,
@@ -217,7 +234,7 @@ impl VgaApp {
         }
         self.sync_clipboard();
         let damage = self.app.take_damage();
-        let changed = !damage.is_empty();
+        let changed = !damage.is_empty() || !prepared.is_empty();
         self.pending_damage.merge(damage);
         if advanced || changed {
             self.sync_cursor_icon();
@@ -240,6 +257,7 @@ impl VgaApp {
             return;
         }
         self.closing = true;
+        self.backend.shutdown_images();
         self.app.shutdown_net();
         self.presented = None;
         self.clipboard = None;
@@ -402,6 +420,7 @@ impl VgaApp {
             || damage.content.repaint != RowDamage::None;
         {
             let view = self.app.chrome_view();
+            self.backend.set_image_generation(view.content_generation);
             let size = self.backend.surface().size();
             let area = ratatui::layout::Rect::new(0, 0, size.cols, size.rows);
             let painted = view.content.painted;
@@ -814,7 +833,12 @@ impl ApplicationHandler for VgaApp {
         {
             presented.window.request_redraw();
         }
-        match self.scheduler.next_deadline(self.app.next_wake()) {
+        let mut deadline = self.scheduler.next_deadline(self.app.next_wake());
+        if self.backend.image_work_signal().pending() {
+            let image_deadline = now.saturating_add(Duration::from_millis(16));
+            deadline = Some(deadline.map_or(image_deadline, |current| current.min(image_deadline)));
+        }
+        match deadline {
             Some(deadline) => {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(self.started + deadline));
             }

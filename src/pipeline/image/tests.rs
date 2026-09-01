@@ -98,6 +98,59 @@ fn every_per_image_limit_is_strict() {
 }
 
 #[test]
+fn svg_dimensions_view_box_and_paths_decode() {
+    let decoded = RasterImageDecoder
+        .decode(request(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="6" height="4" viewBox="0 0 3 2"><path fill="#ff0000" d="M0 0h3v2H0z"/></svg>"##
+                .to_vec(),
+        ))
+        .unwrap();
+    assert_eq!((decoded.width, decoded.height), (6, 4));
+    assert_eq!(decoded.rgba.len(), 6 * 4 * 4);
+    assert_eq!(&decoded.rgba[..4], &[255, 0, 0, 255]);
+}
+
+#[test]
+fn svg_alpha_is_straight_rgba() {
+    let decoded = RasterImageDecoder
+        .decode(request(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path fill="#804020" fill-opacity="0.5" d="M0 0h1v1H0z"/></svg>"##
+                .to_vec(),
+        ))
+        .unwrap();
+    assert_eq!(&*decoded.rgba, &[128, 64, 32, 128]);
+}
+
+#[test]
+fn svg_inputs_remain_bounded_and_external_references_are_inert() {
+    assert!(
+        RasterImageDecoder
+            .decode(request(b"<svg".to_vec()))
+            .is_err()
+    );
+    assert_eq!(
+        RasterImageDecoder.decode(request(
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="8193" height="1"><path d="M0 0h1v1H0z"/></svg>"#
+                .to_vec(),
+        )),
+        Err(ImageDecodeError::Limit)
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let external = directory.path().join("external.png");
+    std::fs::write(&external, encoded(ImageFormat::Png, 1, 1)).unwrap();
+    let external_url = url::Url::from_file_path(external).unwrap();
+    let decoded = RasterImageDecoder
+        .decode(request(
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image width="1" height="1" href="{external_url}"/></svg>"#
+            )
+            .into_bytes(),
+        ))
+        .unwrap();
+    assert_eq!(&*decoded.rgba, &[0, 0, 0, 0]);
+}
+
+#[test]
 fn worker_loop_preserves_routing_and_reports_decode_failures() {
     let (jobs_tx, jobs_rx) = crossbeam_channel::bounded(2);
     let (results_tx, results_rx) = crossbeam_channel::bounded(2);

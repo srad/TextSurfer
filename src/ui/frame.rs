@@ -13,15 +13,18 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 
 use crate::core::frame::{ChromeDamage, FrameDamage, RowDamage};
 
+#[cfg(test)]
+use super::chrome::compose;
 use super::chrome::{
-    ChromeView, compose, compose_content_rows, compose_flash, compose_menu_bar, compose_scrollbar,
-    compose_status, compose_toolbar, content_rect, cursor_position,
+    ChromeView, compose_content_rows, compose_flash, compose_menu_bar, compose_scrollbar,
+    compose_status, compose_toolbar, compose_with_image_fallback, content_rect, cursor_position,
 };
 
 pub struct FrameComposer {
     area: Rect,
     current: Buffer,
     initialized: bool,
+    render_cell_images: bool,
     image_worker: Option<ImageProtocolWorker>,
     image_protocols: HashMap<(u64, u64, u16, u16, usize), SlicedProtocol>,
     /// The cells the last `present` actually handed the backend, which is what a test needs to
@@ -153,6 +156,7 @@ impl FrameComposer {
             area,
             current: Buffer::empty(area),
             initialized: false,
+            render_cell_images: true,
             image_worker: None,
             image_protocols: HashMap::new(),
             #[cfg(test)]
@@ -163,6 +167,13 @@ impl FrameComposer {
     pub fn with_image_picker(area: Rect, picker: Picker) -> Self {
         Self {
             image_worker: Some(ImageProtocolWorker::new(picker)),
+            ..Self::new(area)
+        }
+    }
+
+    pub fn with_native_overlays(area: Rect) -> Self {
+        Self {
+            render_cell_images: false,
             ..Self::new(area)
         }
     }
@@ -195,7 +206,8 @@ impl FrameComposer {
         let mut regions = Vec::new();
         let cursor = if !self.initialized || damage.full() {
             self.current.reset();
-            let cursor = compose(area, &mut self.current, view);
+            let cursor =
+                compose_with_image_fallback(area, &mut self.current, view, self.render_cell_images);
             regions.push(area);
             cursor
         } else {
@@ -206,14 +218,25 @@ impl FrameComposer {
                 && (!view.content.painted.images.is_empty() || view.flash.is_some());
             if damage.content.scroll_rows != 0 && !pinned_scroll {
                 let rows = self.scroll(backend, view, damage.content.scroll_rows)?;
-                if let Some(rect) = compose_content_rows(&mut self.current, view, area, rows) {
+                if let Some(rect) = compose_content_rows(
+                    &mut self.current,
+                    view,
+                    area,
+                    rows,
+                    self.render_cell_images,
+                ) {
                     regions.push(rect);
                 }
             }
             if damage.content.full || pinned_scroll {
                 if let Some(content) = content_rect(view, area)
-                    && let Some(rect) =
-                        compose_content_rows(&mut self.current, view, area, 0..content.height)
+                    && let Some(rect) = compose_content_rows(
+                        &mut self.current,
+                        view,
+                        area,
+                        0..content.height,
+                        self.render_cell_images,
+                    )
                 {
                     regions.push(rect);
                 }
@@ -230,6 +253,7 @@ impl FrameComposer {
                             area,
                             u16::try_from(visible_start - scroll).unwrap_or(u16::MAX)
                                 ..u16::try_from(visible_end - scroll).unwrap_or(u16::MAX),
+                            self.render_cell_images,
                         )
                     {
                         regions.push(rect);
@@ -237,8 +261,13 @@ impl FrameComposer {
                 }
             } else if damage.content.repaint == RowDamage::Full
                 && let Some(content) = content_rect(view, area)
-                && let Some(rect) =
-                    compose_content_rows(&mut self.current, view, area, 0..content.height)
+                && let Some(rect) = compose_content_rows(
+                    &mut self.current,
+                    view,
+                    area,
+                    0..content.height,
+                    self.render_cell_images,
+                )
             {
                 regions.push(rect);
             }
@@ -821,6 +850,7 @@ mod tests {
                 width: 1,
                 height: 2,
                 rgba: std::sync::Arc::from([255, 0, 0, 255, 0, 0, 255, 255]),
+                source: crate::core::image::DecodedImageSource::Raster,
             },
         );
         let area = Rect::new(0, 0, 60, 10);
@@ -903,6 +933,7 @@ mod tests {
                 width: 4,
                 height: 4,
                 rgba: std::sync::Arc::from(vec![255u8; 4 * 4 * 4]),
+                source: crate::core::image::DecodedImageSource::Raster,
             },
         );
         let area = Rect::new(0, 0, 60, 10);
@@ -959,5 +990,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn native_image_overlays_leave_the_real_page_cells_underneath() {
+        let mut document = crate::core::dom::Document::new();
+        let node = document.insert_element(None, "img", crate::core::dom::ElementNs::Html, vec![]);
+        let asset_id = crate::core::image::ImageAssetId(31);
+        let rect = crate::layout::LayoutRect {
+            col: 0,
+            row: 0,
+            width: 1,
+            height: 1,
+        };
+        let mut painted = DisplayList {
+            rows: vec![crate::paint::PaintedRow::default()],
+            images: vec![crate::paint::PaintedImage {
+                node,
+                asset_id,
+                revision: 1,
+                rect,
+                clip: rect,
+                depth: 0,
+            }],
+            overlays: vec![crate::paint::PaintOverlay::Image(0)],
+            ..Default::default()
+        };
+        painted.image_assets.insert(
+            asset_id,
+            crate::core::image::DecodedImage {
+                asset_id,
+                revision: 1,
+                width: 1,
+                height: 1,
+                rgba: std::sync::Arc::from([255, 255, 255, 128]),
+                source: crate::core::image::DecodedImageSource::Raster,
+            },
+        );
+        let area = Rect::new(0, 0, 60, 10);
+        let mut view = draft_view();
+        view.content.painted = &painted;
+        let mut backend = TestBackend::new(area.width, area.height);
+        let mut composer = FrameComposer::with_native_overlays(area);
+        composer
+            .present(&mut backend, &view, &FrameDamage::full())
+            .unwrap();
+        let content = content_rect(&view, area).unwrap();
+        let cell = &composer.current[(content.x, content.y)];
+        assert_eq!(cell.symbol(), " ");
+        assert_eq!(cell.style().bg, Some(view.theme.bg));
     }
 }

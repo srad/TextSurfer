@@ -337,6 +337,7 @@ mod tests {
                         text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
+                    render_images: true,
                 }
                 .render(frame.area(), frame.buffer_mut());
             })

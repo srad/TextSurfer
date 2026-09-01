@@ -20,6 +20,7 @@ use crate::ui::widgets::text_field::{TextFieldMenu, menu_rect};
 use crate::ui::widgets::toolbar::{Toolbar, layout_toolbar};
 
 pub struct ChromeView<'a> {
+    pub content_generation: u64,
     pub geometry: ChromeGeometry,
     pub theme: Theme,
     pub theme_index: usize,
@@ -64,6 +65,15 @@ pub fn draw(frame: &mut Frame<'_>, view: &ChromeView<'_>) {
 }
 
 pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option<Position> {
+    compose_with_image_fallback(area, buffer, view, true)
+}
+
+pub(crate) fn compose_with_image_fallback(
+    area: Rect,
+    buffer: &mut Buffer,
+    view: &ChromeView<'_>,
+    render_images: bool,
+) -> Option<Position> {
     let layout = view.geometry.layout(area);
     let frame_style = Style::default().fg(view.theme.frame);
     buffer.set_style(area, Style::default().bg(view.theme.bg));
@@ -140,6 +150,7 @@ pub fn compose(area: Rect, buffer: &mut Buffer, view: &ChromeView<'_>) -> Option
         Content {
             lines: &view.content,
             theme: &view.theme,
+            render_images,
         }
         .render(rect, buffer);
     }
@@ -286,6 +297,7 @@ pub fn compose_content_rows(
     view: &ChromeView<'_>,
     area: Rect,
     rows: std::ops::Range<u16>,
+    render_images: bool,
 ) -> Option<Rect> {
     let content = view.geometry.layout(area).content?;
     let start = rows.start.min(content.height);
@@ -303,6 +315,7 @@ pub fn compose_content_rows(
     Content {
         lines: &lines,
         theme: &view.theme,
+        render_images,
     }
     .render(rect, buffer);
     Some(rect)

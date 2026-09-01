@@ -970,6 +970,7 @@ fn image_decode_delivery_is_revision_checked_and_budgeted() {
             width: 1,
             height: 1,
             rgba: std::sync::Arc::from([0, 0, 0, 255]),
+            source: crate::core::image::DecodedImageSource::Raster,
         })
     ));
     assert!(page_load.deliver_image_decode(
@@ -981,6 +982,7 @@ fn image_decode_delivery_is_revision_checked_and_budgeted() {
             width: 1,
             height: 1,
             rgba: std::sync::Arc::from([0, 0, 0, 255]),
+            source: crate::core::image::DecodedImageSource::Raster,
         })
     ));
     assert_eq!(page_load.image_decoded_bytes, 4);
@@ -1008,6 +1010,7 @@ fn image_decode_delivery_is_revision_checked_and_budgeted() {
             width: 1,
             height: 1,
             rgba: std::sync::Arc::from([0, 0, 0, 255]),
+            source: crate::core::image::DecodedImageSource::Raster,
         })
     ));
     assert_eq!(over_budget.failed_images(), 1);
@@ -1047,6 +1050,7 @@ fn decoded_images_replace_fallbacks_with_intrinsic_ordered_hit_geometry() {
             width: 16,
             height: 16,
             rgba: std::sync::Arc::from(vec![255; 16 * 16 * 4]),
+            source: crate::core::image::DecodedImageSource::Raster,
         })
     ));
     let page = load.render_after_image().unwrap();
@@ -1106,6 +1110,7 @@ fn decoded_images_participate_in_block_table_flex_and_grid_layout() {
                 width: 8,
                 height: 16,
                 rgba: std::sync::Arc::from(vec![255; 8 * 16 * 4]),
+                source: crate::core::image::DecodedImageSource::Raster,
             })
         ));
     }
@@ -1146,6 +1151,7 @@ fn decoded_images_do_not_inherit_the_control_content_height_floor() {
             width: 16,
             height: 64,
             rgba: std::sync::Arc::from(vec![255; 16 * 64 * 4]),
+            source: crate::core::image::DecodedImageSource::Raster,
         })
     ));
     let page = load.render_after_image().unwrap();
@@ -1195,6 +1201,7 @@ fn decoded_image_constraints_scale_the_picture_instead_of_stretching_it() {
                 width: square,
                 height: square,
                 rgba: std::sync::Arc::from(vec![255; (square * square * 4) as usize]),
+                source: crate::core::image::DecodedImageSource::Raster,
             })
         ));
     }
@@ -1245,6 +1252,7 @@ fn image_percentages_use_only_definite_layout_bases() {
                 width: 16,
                 height: 16,
                 rgba: std::sync::Arc::from(vec![255; 16 * 16 * 4]),
+                source: crate::core::image::DecodedImageSource::Raster,
             })
         ));
     }

@@ -11,6 +11,7 @@
 //! ratatui's `scrolling-regions` feature, which is not in its default set.
 
 use std::io;
+use std::sync::Arc;
 
 use ratatui::backend::{Backend, ClearType, WindowSize};
 use ratatui::buffer::Cell;
@@ -24,11 +25,16 @@ use crate::layout::LayoutRect;
 use crate::paint::{DisplayList, ScaledTextRun};
 
 use super::font::{CELL_H, CELL_W};
+use super::image::{
+    ImagePreparationPoll, ImagePreparationPool, ImagePreparationQueue, ImagePreparationSignal,
+    InlineImagePreparationQueue, PreparedImageKey, RasterImagePreparer,
+};
 use super::surface::{Surface, SurfaceConfig};
 
 /// A ratatui backend that paints into a pixel buffer.
 pub struct VgaBackend {
     surface: Surface,
+    image_queue: Arc<dyn ImagePreparationQueue>,
     cursor: Position,
     cursor_visible: bool,
 }
@@ -36,8 +42,31 @@ pub struct VgaBackend {
 impl VgaBackend {
     /// Build a backend over a fresh surface.
     pub fn new(config: SurfaceConfig) -> Self {
+        Self::with_image_queue(
+            config,
+            Arc::new(InlineImagePreparationQueue::new(Arc::new(
+                RasterImagePreparer,
+            ))),
+        )
+    }
+
+    pub fn with_async_images(config: SurfaceConfig) -> Self {
+        Self::with_image_queue(
+            config,
+            Arc::new(ImagePreparationPool::new(Arc::new(RasterImagePreparer))),
+        )
+    }
+
+    pub fn with_image_queue(
+        config: SurfaceConfig,
+        image_queue: Arc<dyn ImagePreparationQueue>,
+    ) -> Self {
+        let surface = Surface::new(config);
+        let (generation, surface_epoch) = surface.image_context();
+        image_queue.activate(generation, surface_epoch);
         Self {
-            surface: Surface::new(config),
+            surface,
+            image_queue,
             cursor: Position::ORIGIN,
             cursor_visible: false,
         }
@@ -55,7 +84,28 @@ impl VgaBackend {
     /// Resize the grid. Contents are discarded; ratatui redraws in full afterwards.
     pub fn resize(&mut self, size: Size) {
         self.surface.resize(size);
+        let (generation, epoch) = self.surface.image_context();
+        self.image_queue.activate(generation, epoch);
         self.sync_cursor();
+    }
+
+    pub fn set_image_generation(&mut self, generation: u64) {
+        self.surface.set_image_generation(generation);
+        let (_, epoch) = self.surface.image_context();
+        self.image_queue.activate(generation, epoch);
+    }
+
+    pub fn image_work_signal(&self) -> Arc<ImagePreparationSignal> {
+        self.image_queue.signal()
+    }
+
+    pub fn poll_prepared_images(&mut self, generation: u64) -> Vec<PreparedImageKey> {
+        self.set_image_generation(generation);
+        self.drain_prepared_images()
+    }
+
+    pub fn shutdown_images(&self) {
+        self.image_queue.shutdown();
     }
 
     pub fn clear_scaled_overlay(&mut self) {
@@ -84,8 +134,34 @@ impl VgaBackend {
         occlusions: &[LayoutRect],
         palette: Palette,
     ) {
+        self.drain_prepared_images();
         self.surface
             .draw_overlays(painted, origin, scroll, clip, occlusions, palette);
+        self.submit_image_preparations();
+        if !self.drain_prepared_images().is_empty() {
+            self.surface.clear_scaled_overlay();
+            self.surface
+                .draw_overlays(painted, origin, scroll, clip, occlusions, palette);
+            self.submit_image_preparations();
+        }
+    }
+
+    fn submit_image_preparations(&mut self) {
+        for request in self.surface.take_image_preparations() {
+            let _ = self.image_queue.submit(request);
+        }
+    }
+
+    fn drain_prepared_images(&mut self) -> Vec<PreparedImageKey> {
+        let mut ready = Vec::new();
+        while let ImagePreparationPoll::Ready(result) = self.image_queue.poll() {
+            if let Some(rgba) = result.rgba
+                && self.surface.accept_prepared_image(result.key, rgba)
+            {
+                ready.push(result.key);
+            }
+        }
+        ready
     }
 
     /// Push the tracked cursor state onto the surface.

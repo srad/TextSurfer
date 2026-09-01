@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, TestBackend};
 use ratatui::buffer::Cell;
@@ -7,9 +9,10 @@ use winit::dpi::PhysicalPosition;
 
 use crate::core::dom::{Document, ElementNs, NodeId};
 use crate::core::geom::{Point, Size};
+use crate::core::image::{DecodedImage, DecodedImageSource, ImageAssetId};
 use crate::core::style::{CellStyle, Palette, Rgb, Rgba};
 use crate::layout::LayoutRect;
-use crate::paint::ScaledTextRun;
+use crate::paint::{DisplayList, PaintOverlay, PaintedImage, ScaledTextRun};
 use crate::ui::chrome;
 use crate::ui::test_util::draft_view;
 use crate::ui::theme::{DEFAULT, rgb_of};
@@ -108,6 +111,55 @@ fn draw_paints_the_cells_it_is_given() {
         !cell_is_marked(&backend, 3, 1),
         "untouched cell stays blank"
     );
+}
+
+#[test]
+fn a_fresh_backend_prepares_images_for_its_initial_surface_epoch() {
+    let mut document = Document::new();
+    let node = document.insert_element(None, "img", ElementNs::Html, vec![]);
+    let asset_id = ImageAssetId(91);
+    let rect = LayoutRect {
+        col: 0,
+        row: 0,
+        width: 1,
+        height: 1,
+    };
+    let mut painted = DisplayList {
+        images: vec![PaintedImage {
+            node,
+            asset_id,
+            revision: 1,
+            rect,
+            clip: rect,
+            depth: 0,
+        }],
+        overlays: vec![PaintOverlay::Image(0)],
+        ..Default::default()
+    };
+    let rgba = (0..CELL_H)
+        .flat_map(|_| {
+            (0..CELL_W * 2).flat_map(|x| {
+                let channel = if x % 2 == 0 { 0 } else { 255 };
+                [channel, channel, channel, 255]
+            })
+        })
+        .collect::<Vec<_>>();
+    painted.image_assets.insert(
+        asset_id,
+        DecodedImage {
+            asset_id,
+            revision: 1,
+            width: (CELL_W * 2) as u32,
+            height: CELL_H as u32,
+            rgba: Arc::from(rgba),
+            source: DecodedImageSource::Raster,
+        },
+    );
+    let mut backend = backend(Size { cols: 1, rows: 1 });
+    backend.draw_overlays(&painted, (0, 0), 0, rect, &[], DEFAULT.palette());
+    let pixel = backend.surface().pixels()[(CELL_H / 2) * CELL_W + CELL_W / 2];
+    let red = (pixel >> 16) & 0xff;
+    assert!((96..=159).contains(&red), "filtered red channel was {red}");
 }
 
 #[test]

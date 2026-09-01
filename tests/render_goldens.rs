@@ -154,6 +154,7 @@ fn load_source_with_image(source: &str, width: u16) -> PageLoad {
             width: 64,
             height: 64,
             rgba: vec![255; 64 * 64 * 4].into(),
+            source: textsurfer::core::image::DecodedImageSource::Raster,
         })
     ));
     load

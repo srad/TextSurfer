@@ -17,7 +17,13 @@ TreeSink glue, cascade/style tree, layout → terminal grid, painter, chrome/App
 parsing only where the ecosystem provably has no library. Every hand-rolled parser must be justified
 against the audit below before it is written; the audit is re-run whenever a candidate crate appears.
 
-### Custom-parser audit (2026-08-20, re-checked 2026-08-26)
+Compatibility advances through **site profiles**: each profile turns the standards exercised by a
+real site into generic HTML, CSS, JavaScript and browser-platform work. Specifications and applicable
+Web Platform Tests remain authoritative; the site is integration evidence, never a reason for
+URL-, class- or markup-specific production behavior. The active profile is **WP-A — Wikipedia
+anonymous reader**. Later profiles extend the same engine to other sites.
+
+### Custom-parser audit (2026-08-20, re-checked 2026-09-01)
 
 | Parser | Status | Verdict |
 |---|---|---|
@@ -53,8 +59,10 @@ questions we were answering ad hoc.
 | [image](https://crates.io/crates/image) 0.25.10 | Signature-based raster decoding with explicit format features and decoder limits | The shared decoder for PNG, JPEG, WebP and first-frame GIF, default features off, TextSurfer-owned budgets |
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
 | [arboard](https://crates.io/crates/arboard) 3.6.1 | Current cross-platform text clipboard access without a UI toolkit | Frontend adapters only, default features off; `app` exchanges owned clipboard requests and remains I/O-free |
-| [resvg](https://crates.io/crates/resvg) 0.48.1 | Mature SVG parsing and bounded raster output without a browser DOM | Adopt next for static SVG images behind the existing decode worker and page budgets; no custom SVG parser |
+| [resvg](https://crates.io/crates/resvg) 0.48.1 | Mature SVG parsing and bounded raster output without a browser DOM | Adopted for static SVG decoding and final-size VGA preparation behind bounded workers and page/frontend budgets; no custom SVG parser |
 | [tracing](https://crates.io/crates/tracing) 0.1.44 + [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3.23 + [tracing-chrome](https://crates.io/crates/tracing-chrome) 0.7.2 | Structured logs plus Chrome/Perfetto timeline spans with an explicit flush guard | Opt-in file diagnostics only; no default terminal output and no response bodies, credentials, queries, fragments or form values |
+| MediaWiki ResourceLoader | Wikipedia's documented base environment is HTML5, ES2017, Selectors API, local storage, `querySelector`, jQuery and `mediawiki.base`; scripts are asynchronous progressive enhancement | The WP-A JavaScript target. Implement the generic platform underneath Wikipedia's own code; never reproduce ResourceLoader or site modules in Rust |
+| `ureq` 3.4.0 cookies + `cookie_store` 0.22.1 | Current latest HTTP-client cookie path, with persistence hooks | **Candidate only.** `ureq`'s internal store has no configured public-suffix list, so it is not the final browser jar. The browser-state tranche must prove RFC6265bis request context, SameSite, prefixes, HttpOnly and public-suffix rejection before selecting the library adapter |
 | Every browser since Firefox 3 | `:visited` must never be observable to page styling | `:visited` parses and never matches |
 
 ## Status legend
@@ -82,8 +90,8 @@ signed off.
 | M2 — Tabs & keyboard | Link navigation, anchors, titles, error pages, in-page search, forms | (in progress) |
 | M3 — Mouse | Zones, wheel, clicks, hover, dynamic pseudo-class state | (in progress) |
 | M4 — JS seam | Runtime-neutral engine/factory traits + Noop impl + typed host layer | (done) |
-| M5 — Boa | Boa 0.22.0 adapter; practical DOM bindings; bounded jobs and host operations | (in progress) |
-| M6 — Stretch | Custom properties ✅ · flex ✅ · grid ✅ · CSS math ✅ · practical image fidelity · floats ✅ · perf | (in progress) |
+| M5 — JavaScript and Web APIs | Boa 0.22.0; script processing; DOM, events and bounded host APIs | (in progress) |
+| M6 — Browser platform | Images · browser state/request policy · storage/cache/security · floats ✅ · perf | (in progress) |
 | M7 — Stylo cascade | Stylo 0.20.0 as the sole full and incremental cascade | (done — smoke pending) |
 
 Cross-cutting: test infrastructure (in progress — static WPT backfill, corpus error-count and
@@ -91,12 +99,45 @@ astral attribute-order gaps) · gates (done, local only) · coverage floor (open
 80% overall / 90% css·layout·paint) · conformance corpora (html5lib tree output 95.16% raw / 100%
 with xfail; static WPT crash/reftest pilot complete; test262 at M5).
 
+### Active compatibility profile — WP-A Wikipedia anonymous reader (in progress)
+
+WP-A closes when Wikipedia is a productive anonymous-reading browser in VGA and a productive
+terminal fallback. Server-rendered content must be complete with JavaScript off; JavaScript on adds
+enhancements without becoming necessary to read. Login, editing, watchlists and account preferences
+belong to a later profile.
+
+**Fidelity policy:** required behavior preserves content, logical reading order, layout, navigation,
+interaction, state and security. Adapted behavior preserves those semantics while using the cell grid
+or frontend-specific image path. A capability exception needs a named reason and usable fallback:
+`border-radius`, for example, paints square corners. Deferred means feasible but not required by the
+active profile; it is not a permanent rejection. Quantization never excuses missing or reordered
+content, unintended overlap, a wrong target, unsafe behavior, or resize/resource divergence.
+
+**Acceptance surface:** the resource-closed static corpus covers the Wikipedia portal/search path,
+ordinary long articles, dense tables/lists, disambiguation/category navigation, SVG and responsive
+media, galleries, code/preformatted and mathematical content, plus horizontal RTL and mixed-direction
+text. Static evidence runs at 40, 100 and 160 columns in VGA and terminal. Interaction uses one
+canonical viewport per frontend plus focused resize cases instead of multiplying every state across
+the static matrix.
+
+Required workflows are search, titles, links, fragments, table of contents, citations/backlinks,
+language switching, collapsibles, sortable tables, history and scroll restoration, reload, in-page
+search, selection/copy, persistent anonymous appearance preferences and explicit image/document
+downloads. Audio/video exposes a usable link or download; embedded playback is deferred.
+
+The existing script-disabled captures remain the static integration corpus. Rendering uses applicable
+WPT reftests; DOM and Web APIs use focused local contracts and applicable testharness cases. Live
+JavaScript-enabled Wikipedia/ResourceLoader verification is human-run: do not commit captured site
+JavaScript bundles or let Rust tests touch the network. Every confirmed failure gets a generic
+regression and stays classified in its owning milestone or existing corpus manifest rather than a
+duplicate roadmap ledger.
+
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green matrix run (2026-08-31): default/VGA **960 total**
-(956 passing, 4 ignored), JavaScript+VGA **972 total** (968 passing, 4 ignored), and
-terminal/no-default-features **852 total** (849 passing, 3 ignored). The WPT target contributes 7
+Test counts at the last green matrix run (2026-09-01): default/VGA **975 total**
+(971 passing, 4 ignored), JavaScript+VGA **987 total** (983 passing, 4 ignored), and
+terminal/no-default-features **856 total** (853 passing, 3 ignored). The WPT target contributes 7
 tests (6 passing and 1 ignored; 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -125,24 +166,26 @@ before any item is marked `(done)`.
 1. Read this status board, then recent `git log` entries for historical context.
 2. Reproduce each visible rendering failure as a resource-closed fixture or minimal standards case;
    classify it under M1-F, M6 images or M4/M5 before changing production code.
-3. Advance M1-F in order, starting with general flow correctness across the offline corpus. Every
-   defect gets a focused regression plus rendering-atlas or WPT coverage where applicable; never
-   add URL-, class- or site-specific production behavior.
-4. Fix CSS-pixel precision for replaced sizing, then add bounded static SVG rasterization and audit
-   the currently skipped SVG sizing reftests.
-5. Smoke the representative static pages in both frontends; this closes M1-F, M6 images and the M7
-   styling smoke only when their acceptance criteria pass.
-6. Keep the generic app-level URL benchmark as the performance reference after each correctness
-   tranche. Resume optimization only after rendering acceptance; its initial resource window
-   already produces one coherent initial layout.
+3. Advance WP-A in this order, one test-first standards slice at a time:
+   1. finish M1-F static flow, stacking, inline geometry and horizontal international layout, plus
+      M6's remaining static image contracts;
+   2. finish M2/M3 reader navigation, history/scroll restoration and page selection;
+   3. add M6 browser request context, state, storage, cache and security policy;
+   4. finish M5 classic-script processing, test262 and the DOM/event/network APIs ResourceLoader
+      actually exercises;
+   5. prove downloads and live progressive Wikipedia behavior, then close the profile.
+4. Every defect gets a focused generic regression plus rendering-atlas or applicable WPT coverage;
+   never add URL-, class- or site-specific production behavior.
+5. Keep the existing script-disabled corpus offline and use its three-width/two-frontend matrix.
+   Keep live JavaScript-enabled Wikipedia/ResourceLoader verification human-run.
+6. Run the generic app benchmark after each correctness tranche. Re-baseline the cold target only
+   after rendering acceptance; preserve the owner-slice and warmed interaction budgets.
 7. Smoke retained row-local paint and stationary-pointer scrolling in VGA and terminal; its warmed
    release state-change-through-apply gate is 2.6 ms p95.
-8. Resume M2 with keymap unification, then finish link hints and the help overlay; basic form
-   editing and submission are done.
-9. Run the gates before and after; never mark `(done)` with red gates.
-10. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
+8. Run the gates before and after an implementation item; never mark `(done)` with red gates.
+9. The manual smoke list (example.com, lite.duckduckgo.com, wikipedia.org) is human-run per
    milestone close and never automated.
-11. Live repo: no commits without explicit user confirmation.
+10. Live repo: no commits without explicit user confirmation.
 
 ## Architecture (as-built)
 
@@ -331,12 +374,14 @@ before any item is marked `(done)`.
   right-aligned across siblings so numbers meet one text column and wrapped lines align under the
   item text. `list-style-position: inside` renders the marker as inline content. `ul`/`ol` add no
   indent of their own — nesting indents because each level starts after its own marker field.
-- **Subresources are same-scheme** (`http`/`https` count as one), so a remote page cannot name
-  `file:///…` in a `<link>`. Cross-scheme occurrences count as failed resources.
+- **Remote subresources never gain local-scheme access.** HTTP(S) documents cannot load `file:` or
+  another local scheme. Until M6's mixed-content policy lands, HTTP and HTTPS are treated as one
+  remote family; rejected cross-family occurrences count as failed resources.
 - **A non-2xx response keeps its body** — a server's own error page is a page — but is never
   accepted as a subresource; a 404 is not a stylesheet.
-- Relative colours, remote `@font-face`/custom font-family selection and border radius remain out of
-  scope until a concrete readability case promotes them. M1-F and M6 own `line-height`, inline box
+- Remote `@font-face` and custom font families fall back to built-in fonts; border radii render as
+  square corners because the cell grid cannot represent them faithfully. Relative colours remain
+  deferred until a compatibility profile promotes them. M1-F and M6 own `line-height`, inline box
   decoration and CSS background images.
 
 ### Deferred — decision gates with explicit triggers
@@ -512,23 +557,27 @@ work when their host bindings are insufficient.
 A critical corpus failure is missing or reordered in-flow content, unintended overlap, a wrong
 topmost hit/link target, divergence after resize or late resource completion, or an abort/hang.
 M1-F remains open until the offline corpus has no unclassified critical failures, the authoritative
-rendering profiles do not regress, and the manual example.com, lite.duckduckgo.com and wikipedia.org
-smokes pass in both native frontends. Run the generic app benchmark after each tranche and report
-the numbers, but treat performance as secondary to correctness until this acceptance gate closes.
+rendering profiles do not regress, the WP-A static families pass at 40/100/160 columns in VGA and
+terminal, and the manual example.com, lite.duckduckgo.com and wikipedia.org smokes pass in both
+native frontends. Run the generic app benchmark after each tranche and report the numbers, but treat
+performance as secondary to correctness until this acceptance gate closes.
 
-Relative colours, remote/custom fonts, border radius, transforms, multicolumn layout and vertical
-writing remain deferred unless a concrete corpus readability failure promotes them.
+Remote/custom fonts use a built-in fallback and border radii use square corners as explicit WP-A
+adaptations. Relative colours, transforms, multicolumn layout and vertical writing remain deferred
+unless a compatibility profile promotes them; a reachable content or interaction effect cannot be
+waived merely because its visual presentation needs adaptation.
 
 ### M2 — Tabs & keyboard navigation (in progress)
 
 Started from the robustness end rather than the keyboard end, because the failure paths were what
 the browser did worst. Render robustness, the non-2xx body, the load-status line, declarative
 refresh, the designed start page, page screenshots and linear-time DOM child construction are done;
-basic form operation is done. After SVG closes, resume keymap unification and finish keyboard link
-hints. Help, in-page search, history caching and other secondary polish follow that usable browsing
-path.
+basic form operation is done. After the current M1-F and remaining static-image tranche closes,
+resume keymap unification and finish keyboard link hints. Help, in-page search, history caching and
+other secondary polish follow that usable browsing path. WP-A then adds page selection and the
+explicit download surface; M6 owns the shared browser profile and transport policy beneath it.
 
-- [ ] **Keymap unification** *(next after SVG; prerequisite to keyboard links)* (extends the M0
+- [ ] **Keymap unification** *(next after the static-fidelity/image tranche; prerequisite to keyboard links)* (extends the M0
       keymap tests, same file): `Ctrl+L` (+ existing `a`)
       focuses the address bar so `/` is freed; `/` becomes in-page search; `Tab` in the address bar
       moves focus to content; new `FocusTabs` action (`F6`).
@@ -555,9 +604,20 @@ path.
 - [x] **Content-type honesty** *(done).* Declared supported types are authoritative; missing,
       malformed and generic types use a bounded WHATWG-minimum HTML/text/binary classifier, and
       unsupported content reaches the controlled failure page in both interactive and dump modes.
-- [ ] **Back/forward without refetching.** A small per-tab document cache keyed by history entry, so
-      Back/Forward restore instead of re-issuing a request; the per-load pivot still applies to
-      fresh navigations.
+- [ ] **Back/forward without refetching and scroll restoration.** A small per-tab history cache keeps
+      immutable response/resource inputs plus scroll state. Back/Forward rebuild a fresh `Document`
+      and `JsEngine` under a new generation without network refetch, then restore the clamped scroll
+      position after the coherent layout. Entry and byte caps with deterministic eviction bound the
+      cache; cached mutable DOM or script state never crosses the per-load pivot.
+- [ ] **Page-content selection and copy.** Keyboard and pointer-drag selection use rendered fragment
+      geometry in both frontends, survive scrolling and clip correctly, and copy logical document
+      order rather than paint order, including mixed bidi text. Selection clears safely when a hard
+      revision invalidates its anchors and reuses the existing frontend clipboard request path.
+- [ ] **Explicit downloads.** Link/image actions may create the same typed browser request used by
+      navigation, while `app` carries request metadata, suggested name and status only. The terminal
+      adapter streams the policy-checked response to a temporary file under separate limits,
+      sanitizes `Content-Disposition`/URL names and atomically publishes success. Unsupported
+      documents offer download instead of a blank page; automatic script downloads stay inert.
 - [x] **Basic forms** — mixed DOM-order link/control focus; the URL bar, text/password inputs and
       multiline textarea share one ratatui text-field widget with selection, clipboard commands,
       pointer placement and an opaque context menu painted with the active chrome theme; enabled
@@ -610,7 +670,8 @@ path.
 
 **Acceptance:** a scripted-drive checklist of every keybinding including the rebinds; per-tab state
 isolation tests; snapshot-tested chrome items (titles, error pages, search, help overlay); the
-robustness and cache items proven by focused tests; manual DuckDuckGo Lite submission works.
+robustness, cache, selection and download-request items proven by focused tests; manual DuckDuckGo
+Lite submission and the WP-A search/anchor/copy/download walkthrough work in both frontends.
 
 ### M3 — Mouse (in progress)
 
@@ -702,7 +763,7 @@ the single checked `MutateOp` invalidation funnel are wired only from the compos
 feature remains default-off and runtime `--js=off` always wins. Template-content creation is
 idempotent, template scripts stay inert, and host failures surface without entering DOM panic paths.
 
-### M5 — Boa (in progress)
+### M5 — JavaScript and Web APIs (in progress)
 
 - [x] Decision gate: retain Boa 0.22.0. A 600-job Promise fixture is owner-sequence sliced at the
       requested 256-job budget; the loop-iteration ceiling bounds a single synchronous evaluation.
@@ -715,16 +776,34 @@ idempotent, template scripts stay inert, and host failures surface without enter
 - [x] Practical rendering bindings: document/title/location, ID and simple-selector lookup,
       checked DOM tree mutation, attributes/properties, `classList`, inline `style`, console/alert,
       classic external scripts, click handlers with cancellation/bubbling, fetch text/JSON and
-      injected-time timeout/interval scheduling. `addEventListener`, full selectors and full DOM
-      remain deferred as recorded under Non-goals.
+      injected-time timeout/interval scheduling. This click-only v0 is the baseline for the open
+      browser API slices below.
 - [ ] test262 subset runner: pinned checkout under `testdata/test262`, harness files, YAML
       frontmatter, curated slices, xfail manifest by feature, regressions forbidden. Upstream
       reference must be refreshed against Boa 0.22.0 before the runner lands; our slice must stay
       within a documented delta.
-- **Acceptance:** a fixture page (inline script + onclick + `document.title` + console echo) green;
-  no crashes on example.com with JS on; gates green with `--features js`.
+- [ ] **Classic script processing.** Implement parser-blocking inline and external scripts,
+      `async`/`defer` ordering, `DOMContentLoaded`/`load`, and dynamic script and stylesheet
+      insertion through the existing `PageLoad` resource graph. The DOM remains single-owner,
+      generation checks reject stale work, and module scripts stay deferred until a profile
+      promotes them.
+- [ ] **WP-A DOM, event and browser APIs.** Add standards-driven slices for selector collections,
+      `querySelector`/`querySelectorAll`, `matches`/`closest`, attributes and reflected properties,
+      `classList`/`dataset`, and HTML fragment insertion parsed by html5ever. Add
+      `addEventListener`/`removeEventListener`, capture/target/bubble propagation, default actions,
+      and the input/change/submit events exercised by reader workflows. Expose `localStorage` and
+      `document.cookie` only through the injected M6 browser profile, and route `fetch`/XHR through
+      M6's typed, bounded request policy rather than a second network path.
+      - Before each API tranche, refresh a capability inventory from current MediaWiki browser
+        requirements and the human-run live smoke. Every observed missing global, member or event is
+        classified as required, adapted or deferred, then represented by a generic standards fixture
+        or applicable WPT before production code uses it.
+- **Acceptance:** generic offline fixtures cover ResourceLoader-shaped loading and the required DOM,
+  event, storage and network slices; the existing `--js=off` page remains complete. Human-run live
+  Wikipedia with JavaScript enabled proves progressive interaction without committing captured site
+  JavaScript, and all `--features js` gates are green.
 
-### M6 — Stretch (in progress)
+### M6 — Browser platform (in progress)
 
 - [x] **Taffy 0.14 baseline upgrade** — pinned with block-only features, 0.14 leaf-measure callback
       adapted without changing render output.
@@ -760,9 +839,31 @@ idempotent, template scripts stay inert, and host failures surface without enter
       inside auto-repeat, where Taffy's fixed-component contract cannot represent them.
       M1-F owns Grid absolute positioning, aspect ratio, `z-index` and horizontal RTL/logical
       integration. *Explicit limits:* `subgrid`, masonry and vertical writing modes.
-- [ ] **Images** *(in progress — loading, decoding and layout integration green; CSS-pixel
-      precision, responsive sources, replaced-fit painting, CSS backgrounds, bounded data sources,
-      SVG and human VGA/terminal smoke pending)*. One
+- [ ] **Browser profile, HTTP request policy, storage and cache.** One browser-owned profile is
+      shared across tabs. Interactive sessions persist non-session cookies and origin-scoped
+      `localStorage`; session cookies die on exit, and `--dump` uses an ephemeral profile unless a
+      future explicit profile option says otherwise. The terminal adapter performs snapshot I/O
+      through the injected profile-store boundary while `app` remains I/O-free.
+      - Every fetch carries top-level site, initiator origin, request destination,
+        navigation/subresource mode, credentials mode and referrer policy. The shared policy layer
+        owns redirects, credential attachment, CORS, mixed-content checks, referrer calculation and
+        the WP-A-relevant CSP, Subresource Integrity and `nosniff` response checks; script hosts
+        cannot bypass it.
+      - The cookie service must enforce RFC6265bis domain/path/expiry rules, `Secure`, `HttpOnly`,
+        `SameSite`, name prefixes and a current public-suffix list before any library adapter is
+        accepted. Cookie values never enter logs or diagnostics, and `document.cookie` uses the same
+        synchronous store and visibility rules as network requests.
+      - Origin-keyed `localStorage` has an explicit quota, atomic persistence and controlled
+        corruption recovery. HTTP caching implements the validation and freshness subset exercised
+        by WP-A with bounded storage and generation-safe delivery.
+      - Acceptance uses fake-clock, fake-fetch and temporary-profile contracts for expiry, path and
+        site boundaries, SameSite navigation/subresource cases, public-suffix rejection, session
+        shutdown, cross-tab visibility, storage quota/recovery, cache validation, redirects, CORS,
+        mixed content, referrers, CSP/SRI/`nosniff` and ephemeral dump isolation. No test touches the
+        network or the user's real profile.
+- [ ] **Images** *(in progress — loading, decoding, layout integration, static SVG and automated
+      VGA image preparation green; CSS-pixel precision, responsive sources, replaced-fit painting,
+      CSS backgrounds, bounded data sources and human VGA/terminal smoke pending)*. One
       delivery across the shared pipeline and both frontends. Static HTML `<img src>` is the first
       boundary. Animation, lazy loading and cross-page caching remain deferred; the remaining
       static-web contracts are open below.
@@ -790,11 +891,10 @@ idempotent, template scripts stay inert, and host failures surface without enter
         block, table, flex and grid; fallback-to-decoded and resize reflow preserve anchor, hit and
         clip geometry, float formatting contexts exclude text, and both frontends present the
         reserved rectangle without moving, resizing or paint-masking text.
-      - [x] **Native VGA output.** The adapter nearest-samples only visible target pixels from
-        immutable RGBA and alpha-blends through the framebuffer overlay path — no resize allocation
-        or encoding. Image and scaled-text overlays share CSS paint order and obey content clipping,
-        scroll, partial viewport edges, menu occlusion, retained-surface restoration and damage
-        tracking; the cursor still paints last.
+      - [x] **Native VGA overlay foundation.** Immutable RGBA travels through the framebuffer
+        overlay path without encoding. Image and scaled-text overlays share CSS paint order and obey
+        content clipping, scroll, partial viewport edges, menu occlusion, retained-surface
+        restoration and damage tracking; the cursor still paints last.
       - [x] **Terminal output.** Capability detected once after setup; fixed-size
         `ratatui_image::sliced::SlicedProtocol` variants built off the UI thread so scrolling never
         resizes or encodes during presentation. Protocols are used only for an unobscured rectangular
@@ -805,14 +905,17 @@ idempotent, template scripts stay inert, and host failures surface without enter
         A protocol carries its whole picture in one cell's escape and marks the rest
         `CellDiffOption::Skip`; because `FrameComposer` replaces ratatui's diff with its own damage
         tracking, it owes that rule too and must never hand a skipped cell to the backend.
-      - [ ] **Static SVG rasterization** *(open; follows raster layout correctness).* Use `resvg` 0.48.1
-        in the existing decode worker; SVG parsing stays library-owned and returns the same immutable
-        RGBA asset contract as raster formats. Preserve raw-byte, axis, pixel, decoded-byte and
-        per-page budgets; reject malformed or oversized SVG without panic; never fetch external SVG
-        resources or scan system fonts.
-        Fixtures cover intrinsic dimensions and `viewBox`, path-only content, malformed and
-        over-budget inputs, external references remaining inert, and representative generic-corpus
-        assets.
+      - [x] **Static SVG decoding.** `resvg` 0.48.1 runs without default features in the existing
+        decode worker, preserves the shared size/byte budgets and straight-RGBA fallback contract,
+        and keeps external resources and system-font scanning inert.
+      - [ ] **VGA image preparation** *(in progress — automated contracts green; human Wikipedia
+        VGA smoke open).* Native overlays paint once over
+        the actual page background. A bounded frontend worker prepares raster images at their final
+        framebuffer size and rasterizes retained SVG sources directly at that size; cache and work
+        keys include document generation, surface epoch, asset revision and destination geometry.
+        Filtering and compositing preserve premultiplied-alpha invariants, and a failed or pending
+        preparation keeps a usable intrinsic-pixel fallback. Interactive and captured VGA output use
+        the same preparation policy.
       - [ ] **Responsive sources and replaced-fit painting.** Parse `<picture>`, `srcset` and `sizes`,
         select deterministically from the CSS viewport at an effective density of 1 dppx independent
         of the frontend, and re-evaluate on width changes without stale placements. Implement
@@ -834,10 +937,13 @@ idempotent, template scripts stay inert, and host failures surface without enter
       and links. M1-F owns horizontal RTL/logical behavior, `z-index` and positioned descendants
       whose containing block crosses the atomic float boundary. *Limits:* rectangular margin boxes
       only; no `shape-outside`, vertical writing or deliberate negative-margin overlap.
-- [ ] **Perf gate (in progress; optimization deferred until rendering correctness).** Standing budgets on the reference Windows machine: the pinned
-      Linux Wikipedia revision commits in <250 ms debug, worker layout+paint is <200 ms, no
-      owner-sequence work slice exceeds 8 ms, and a warmed paint-only interaction completes through
-      owner application in <16.667 ms p95. Input, DOM and future JavaScript remain on one
+- [ ] **Perf gate (in progress; optimization deferred until rendering correctness).** The current
+      cold baseline is recorded below and remains authoritative until WP-A static correctness and
+      image acceptance close; then rerun `app_render` and set a stage-specific cold target. Do not
+      claim the earlier <250 ms commit or <200 ms layout+paint goals as passing while measured cold
+      layout remains higher. No owner-sequence work slice may exceed 8 ms, and a warmed paint-only
+      interaction must complete through owner application in <16.667 ms p95. Input, DOM and
+      JavaScript remain on one
       priority-ordered owner sequence; responses use incremental `encoding_rs` decoding and
       html5ever parsing. One bounded render worker publishes revision-tagged artifacts atomically;
       hard revisions reject stale output, while stylesheet/image arrivals may publish one coherent
@@ -877,8 +983,8 @@ idempotent, template scripts stay inert, and host failures surface without enter
             Layout remains the dominant cold-worker cost. The committed fixture is revision
             `1371530035`, SHA-256
             `9f75eb3fe747cd8d2ef786705f3f45b97f071a0b03f77507cdf64143cf6deebd`.
-- [ ] Persistence/backup · per-history-entry scroll memory · drag input · console view (F12) ·
-      config file · top-level `data:` URL navigation · optional Readability-style reader view.
+- [ ] Console view (F12) · config file · top-level `data:` URL navigation · optional
+      Readability-style reader view.
 
 ### M7 — Stylo cascade (done — smoke pending)
 
@@ -1213,7 +1319,13 @@ incrementally.
 
 ## Non-goals (locked unless a milestone re-opens them)
 
-Page-content selection/copy, iframes/`<frame>`, vertical writing modes, remote `@font-face`/custom
-font-family selection, border radius, transforms, multicolumn layout, cookies, `addEventListener`
-DOM events (click-only v0), top-level await, full CSS/DOM, window-title setting, syscall sandboxing,
-native OS-window title setting, config files pre-M6, drag input pre-M6.
+WP-A excludes account authentication, editing, watchlists and account preferences; those require a
+later signed-in profile. Iframes/`<frame>`, embedded audio/video playback, JavaScript modules and
+top-level await, vertical writing, native OS-window title setting and syscall sandboxing remain
+deferred. Audio/video resources remain reachable as links or explicit downloads.
+
+Remote `@font-face` and custom families use built-in font fallback, and border radii render as square
+corners. Transforms, multicolumn layout and other unexercised platform slices are deferred rather
+than permanently rejected and must be promoted when a compatibility profile requires them. “Full
+CSS/DOM” is not a useful acceptance target: generic, specification-backed slices exercised by active
+profiles and applicable WPT are.

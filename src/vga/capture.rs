@@ -29,7 +29,7 @@ use crate::ui::widgets::clip_width;
 use crate::ui::widgets::content::span_style;
 
 use super::font::{CELL_H, CELL_W};
-use super::surface::{Surface, SurfaceConfig};
+use super::{SurfaceConfig, VgaBackend};
 
 /// Where a screenshot lands, relative to the working directory.
 pub const SCREENSHOT_DIR: &str = "screenshots";
@@ -145,7 +145,7 @@ pub fn capture_page(request: PageCapture<'_>) -> Result<CapturedPage, CaptureErr
         }
     }
 
-    let mut surface = Surface::new(SurfaceConfig {
+    let mut backend = VgaBackend::new(SurfaceConfig {
         cols,
         rows,
         scale: 1,
@@ -156,8 +156,9 @@ pub fn capture_page(request: PageCapture<'_>) -> Result<CapturedPage, CaptureErr
         .flat_map(|row| (0..cols).map(move |col| (col, row)))
         .map(|(col, row)| (col, row, &buffer[(col, row)]))
         .collect();
-    surface.set_cells(cells.into_iter());
-    surface.draw_overlays(
+    backend.surface_mut().set_cells(cells.into_iter());
+    backend.set_image_generation(0);
+    backend.draw_overlays(
         painted,
         (0, 0),
         0,
@@ -171,6 +172,7 @@ pub fn capture_page(request: PageCapture<'_>) -> Result<CapturedPage, CaptureErr
         theme.palette(),
     );
 
+    let surface = backend.surface();
     let (width, height) = surface.pixel_size();
     Ok(CapturedPage {
         png: encode(surface.pixels(), width, height)?,

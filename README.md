@@ -6,7 +6,7 @@
 
 ![Rust 1.91+](https://img.shields.io/badge/Rust-1.91%2B-orange?style=flat-square&logo=rust)
 ![ratatui 0.30.2](https://img.shields.io/badge/ratatui-0.30.2-ff9e18?style=flat-square)
-![968 passing tests](https://img.shields.io/badge/tests%20(VGA%2BJS)-968%20passing-brightgreen?style=flat-square)
+![983 passing tests](https://img.shields.io/badge/tests%20(VGA%2BJS)-983%20passing-brightgreen?style=flat-square)
 
 </div>
 
@@ -67,7 +67,7 @@ wins, including in a JavaScript-enabled build.
 | DOM | [indextree](https://github.com/saschagrunert/indextree) | Mutable document tree with stable node identities |
 | CSS | [Stylo](https://github.com/servo/stylo), [cssparser](https://github.com/servo/rust-cssparser), [selectors](https://github.com/servo/stylo) | Parsing, selector matching, cascade and computed values |
 | Layout and text | [Taffy](https://github.com/DioxusLabs/taffy), [textwrap](https://github.com/mgeisler/textwrap), [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) and [unicode-width](https://github.com/unicode-rs/unicode-width) | Block, flex, grid and float geometry with TextSurfer inline and table adapters |
-| Images | [image](https://github.com/image-rs/image), [ratatui-image](https://github.com/benjajaja/ratatui-image) | Bounded decoding and native or terminal image presentation |
+| Images | [image](https://github.com/image-rs/image), [resvg](https://github.com/linebender/resvg), [ratatui-image](https://github.com/benjajaja/ratatui-image) | Bounded raster/SVG decoding and native or terminal image presentation |
 | JavaScript | [Boa](https://github.com/boa-dev/boa) 0.22 | Optional per-document script engine behind replaceable host contracts |
 | CLI and diagnostics | [clap](https://github.com/clap-rs/clap), [tracing](https://github.com/tokio-rs/tracing) | Command-line configuration and opt-in structured diagnostics |
 
@@ -80,12 +80,12 @@ wins, including in a JavaScript-enabled build.
 | CSS cascade | **Partial:** Stylo parsing and cascade, selectors, media queries, custom properties, generated content, presentational hints and CSS math | Continue property coverage and practical-site parity |
 | Layout | **Partial:** block, flex, grid, tables, floats, overflow, visibility and relative, absolute and fixed positioning | Complete stacking and `z-index` interactions, remaining inline geometry and horizontal RTL |
 | Typography | **Partial:** Unicode cell widths, VGA bitmap typography, terminal styling and scaled headings | No remote fonts, complete `line-height`, vertical writing or advanced font selection |
-| Images | **Partial:** PNG, JPEG, WebP, first-frame GIF, VGA RGBA painting, terminal image protocols and halfblock fallback | Add SVG, `picture`, `srcset`, `sizes`, CSS-pixel precision, `object-fit` and `object-position` |
+| Images | **Partial:** PNG, JPEG, WebP, first-frame GIF, static SVG, filtered final-size VGA painting, terminal image protocols and halfblock fallback | Add `picture`, `srcset`, `sizes`, CSS-pixel precision, `object-fit` and `object-position` |
 | Forms | **Partial:** text/password fields, textarea, checkbox/radio, buttons, single-select, reset, GET and URL-encoded POST | Remaining input types, file uploads and complete browser form APIs |
 | Interaction | **Partial:** tabs, history, links, mouse input, scrolling, CSS hover/focus/active, themes and shared text editing | Add keyboard link hints, the help overlay and in-page search |
 | JavaScript engine | **Partial:** optional Boa 0.22, isolated engines, classic inline/external scripts, bounded Promise jobs, injected timers and resource-graph fetches | No script modules, top-level await or completed test262 target; `async`/`defer` semantics remain incomplete |
 | JavaScript web APIs | **Partial:** document/title/location, ID and simple selector lookup, checked DOM mutation, attributes, `classList`, inline `style`, click handlers, console/alert, GET `fetch()` text/JSON and timers | No `addEventListener`, `querySelectorAll`, `innerHTML`, full/scoped selectors, request options, headers, CORS model or complete DOM |
 | Frontends | **Supported:** native VGA is the default; terminal is the compatibility and no-default-features frontend | Representative human smoke remains part of milestone acceptance |
-| Browser platform | **Not planned:** iframes/frames, cookies, remote fonts, transforms, border radius, multicolumn layout, vertical writing and syscall sandboxing | A future roadmap decision must explicitly reopen these areas |
+| Browser platform | **Partial:** generation-safe navigation and subresources, bounded workers and controlled response routing | Add cookies, request policy, local storage, cache and web security; iframes and vertical writing remain deferred, and rounded corners use a square fallback |
 
 Detailed status, decisions and acceptance criteria live in [ROADMAP.md](ROADMAP.md).

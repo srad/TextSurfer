@@ -24,6 +24,7 @@ pub struct ContentTextField<'a> {
 pub struct Content<'a> {
     pub lines: &'a ContentLines<'a>,
     pub theme: &'a Theme,
+    pub render_images: bool,
 }
 
 impl Widget for Content<'_> {
@@ -55,18 +56,20 @@ impl Widget for Content<'_> {
                 buf.set_string(area.x + 1 + col, y, &clipped, span_style(span, self.theme));
             }
         }
-        for overlay in &self.lines.painted.overlays {
-            let PaintOverlay::Image(index) = *overlay else {
-                continue;
-            };
-            let Some(placement) = self.lines.painted.images.get(index) else {
-                continue;
-            };
-            let Some(image) = self.lines.painted.image_assets.get(&placement.asset_id) else {
-                continue;
-            };
-            if image.revision == placement.revision {
-                render_halfblocks(placement, image, area, self.lines.scroll, self.theme, buf);
+        if self.render_images {
+            for overlay in &self.lines.painted.overlays {
+                let PaintOverlay::Image(index) = *overlay else {
+                    continue;
+                };
+                let Some(placement) = self.lines.painted.images.get(index) else {
+                    continue;
+                };
+                let Some(image) = self.lines.painted.image_assets.get(&placement.asset_id) else {
+                    continue;
+                };
+                if image.revision == placement.revision {
+                    render_halfblocks(placement, image, area, self.lines.scroll, self.theme, buf);
+                }
             }
         }
         for field in &self.lines.text_fields {
@@ -235,6 +238,7 @@ mod tests {
                         text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
+                    render_images: true,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -303,6 +307,7 @@ mod tests {
                         text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
+                    render_images: true,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })
@@ -350,6 +355,7 @@ mod tests {
                         }],
                     },
                     theme: &DEFAULT,
+                    render_images: true,
                 }
                 .render(frame.area(), frame.buffer_mut());
             })
@@ -396,6 +402,7 @@ mod tests {
                 width: 1,
                 height: 2,
                 rgba: std::sync::Arc::from([255, 0, 0, 255, 0, 0, 255, 128]),
+                source: crate::core::image::DecodedImageSource::Raster,
             },
         );
         let backend = TestBackend::new(4, 1);
@@ -409,6 +416,7 @@ mod tests {
                         text_fields: Vec::new(),
                     },
                     theme: &DEFAULT,
+                    render_images: true,
                 }
                 .render(frame.area(), frame.buffer_mut())
             })

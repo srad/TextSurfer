@@ -20,6 +20,13 @@ pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
     pub rgba: Arc<[u8]>,
+    pub source: DecodedImageSource,
+}
+
+#[derive(Clone, Debug)]
+pub enum DecodedImageSource {
+    Raster,
+    Svg(Arc<[u8]>),
 }
 
 impl PartialEq for DecodedImage {
@@ -29,6 +36,13 @@ impl PartialEq for DecodedImage {
             && self.width == other.width
             && self.height == other.height
             && Arc::ptr_eq(&self.rgba, &other.rgba)
+            && match (&self.source, &other.source) {
+                (DecodedImageSource::Raster, DecodedImageSource::Raster) => true,
+                (DecodedImageSource::Svg(left), DecodedImageSource::Svg(right)) => {
+                    Arc::ptr_eq(left, right)
+                }
+                _ => false,
+            }
     }
 }
 

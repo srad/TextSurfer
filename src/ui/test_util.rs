@@ -19,6 +19,7 @@ static DRAFT_CONTENT: std::sync::LazyLock<DisplayList> =
 /// several callers rely on that to exercise clipping.
 pub fn draft_view() -> ChromeView<'static> {
     ChromeView {
+        content_generation: 0,
         geometry: ChromeGeometry::for_size(Size { cols: 60, rows: 10 }),
         theme: DEFAULT,
         theme_index: DEFAULT_THEME_INDEX,

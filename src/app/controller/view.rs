@@ -92,6 +92,7 @@ impl App {
             TextFieldView::display(active.url.as_str())
         };
         ChromeView {
+            content_generation: active.generation,
             geometry: self.geometry,
             theme: *self.theme(),
             theme_index: self.theme_index(),

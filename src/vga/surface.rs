@@ -12,12 +12,14 @@ use ratatui::style::{Color, Modifier};
 use unicode_width::UnicodeWidthChar;
 
 use crate::core::geom::Size;
+use crate::core::image::DecodedImage;
 use crate::core::style::{Palette, Rgb};
 use crate::layout::LayoutRect;
 use crate::paint::{DisplayList, PaintOverlay, PaintedImage, ScaledTextRun, resolve_cell_style};
 use crate::ui::theme::rgb_of;
 
 use super::font::{CELL_H, CELL_W, GlyphWidth, glyph};
+use super::image::{ImagePreparationRequest, PreparedImageCache, PreparedImageKey};
 
 /// Pixel row within a cell that an underline fills.
 const UNDERLINE_ROW: usize = 14;
@@ -73,6 +75,10 @@ pub struct Surface {
     pixels: Vec<u32>,
     cursor: Option<(u16, u16)>,
     overlay_cells: Vec<(u16, u16)>,
+    prepared_images: PreparedImageCache,
+    pending_image_preparations: Vec<ImagePreparationRequest>,
+    image_generation: u64,
+    surface_epoch: u64,
     damage: Vec<PixelRect>,
 }
 
@@ -104,6 +110,10 @@ impl Surface {
             pixels: Vec::new(),
             cursor: None,
             overlay_cells: Vec::new(),
+            prepared_images: PreparedImageCache::default(),
+            pending_image_preparations: Vec::new(),
+            image_generation: 0,
+            surface_epoch: 0,
             damage: Vec::new(),
         };
         surface.resize(Size { cols, rows });
@@ -161,6 +171,29 @@ impl Surface {
         &self.pixels
     }
 
+    pub(super) fn set_image_generation(&mut self, generation: u64) {
+        self.image_generation = generation;
+    }
+
+    pub(super) fn image_context(&self) -> (u64, u64) {
+        (self.image_generation, self.surface_epoch)
+    }
+
+    pub(super) fn accept_prepared_image(
+        &mut self,
+        key: PreparedImageKey,
+        rgba: std::sync::Arc<[u8]>,
+    ) -> bool {
+        if (key.generation, key.surface_epoch) != self.image_context() {
+            return false;
+        }
+        self.prepared_images.insert(key, rgba)
+    }
+
+    pub(super) fn take_image_preparations(&mut self) -> Vec<ImagePreparationRequest> {
+        std::mem::take(&mut self.pending_image_preparations)
+    }
+
     pub fn set_default_palette(&mut self, palette: Palette) -> bool {
         if self.default_fg == palette.text && self.default_bg == palette.background {
             return false;
@@ -194,6 +227,9 @@ impl Surface {
         // The old position may not exist in the new grid; ratatui re-sets it next draw.
         self.cursor = None;
         self.overlay_cells.clear();
+        self.prepared_images.clear();
+        self.pending_image_preparations.clear();
+        self.surface_epoch = self.surface_epoch.wrapping_add(1);
         self.damage = vec![PixelRect {
             x: 0,
             y: 0,
@@ -519,6 +555,7 @@ impl Surface {
         occlusions: &[LayoutRect],
         palette: Palette,
     ) {
+        self.pending_image_preparations.clear();
         for overlay in &painted.overlays {
             match *overlay {
                 PaintOverlay::ScaledText(index) => {
@@ -554,7 +591,7 @@ impl Surface {
     fn draw_image(
         &mut self,
         placement: &PaintedImage,
-        image: &crate::core::image::DecodedImage,
+        image: &DecodedImage,
         origin: (u16, u16),
         scroll: usize,
         content_clip: LayoutRect,
@@ -586,6 +623,28 @@ impl Surface {
         let cell_h = CELL_H.saturating_mul(self.scale);
         let destination_width = placement.rect.width.saturating_mul(cell_w).max(1);
         let destination_height = placement.rect.height.saturating_mul(cell_h).max(1);
+        let (Ok(prepared_width), Ok(prepared_height)) = (
+            u32::try_from(destination_width),
+            u32::try_from(destination_height),
+        ) else {
+            return;
+        };
+        let key = PreparedImageKey {
+            generation: self.image_generation,
+            surface_epoch: self.surface_epoch,
+            asset_id: image.asset_id,
+            revision: image.revision,
+            width: prepared_width,
+            height: prepared_height,
+        };
+        let prepared = self.prepared_images.get(key);
+        if prepared.is_none() {
+            self.pending_image_preparations
+                .push(ImagePreparationRequest {
+                    key,
+                    image: image.clone(),
+                });
+        }
         let surface_width = self.pixel_size().0;
         for cell_row in top as usize..bottom as usize {
             for cell_col in left..right {
@@ -608,39 +667,54 @@ impl Surface {
                 let local_cell_y = (cell_row as isize - screen_top) as usize;
                 for pixel_y in 0..cell_h {
                     let destination_y = local_cell_y.saturating_mul(cell_h).saturating_add(pixel_y);
-                    let source_y = destination_y
-                        .saturating_mul(image.height as usize)
-                        .checked_div(destination_height)
-                        .unwrap_or(0)
-                        .min(image.height.saturating_sub(1) as usize);
                     let output_y = cell_row.saturating_mul(cell_h).saturating_add(pixel_y);
                     for pixel_x in 0..cell_w {
                         let destination_x =
                             local_cell_x.saturating_mul(cell_w).saturating_add(pixel_x);
-                        let source_x = destination_x
-                            .saturating_mul(image.width as usize)
-                            .checked_div(destination_width)
-                            .unwrap_or(0)
-                            .min(image.width.saturating_sub(1) as usize);
-                        let source = source_y
-                            .saturating_mul(image.width as usize)
-                            .saturating_add(source_x)
-                            .saturating_mul(4);
+                        let source = if prepared.is_some() {
+                            destination_y
+                                .saturating_mul(destination_width)
+                                .saturating_add(destination_x)
+                                .saturating_mul(4)
+                        } else {
+                            let source_y = destination_y
+                                .saturating_mul(image.height as usize)
+                                .checked_div(destination_height)
+                                .unwrap_or(0)
+                                .min(image.height.saturating_sub(1) as usize);
+                            let source_x = destination_x
+                                .saturating_mul(image.width as usize)
+                                .checked_div(destination_width)
+                                .unwrap_or(0)
+                                .min(image.width.saturating_sub(1) as usize);
+                            source_y
+                                .saturating_mul(image.width as usize)
+                                .saturating_add(source_x)
+                                .saturating_mul(4)
+                        };
                         let output_x = cell_col.saturating_mul(cell_w).saturating_add(pixel_x);
                         let output = output_y
                             .saturating_mul(surface_width)
                             .saturating_add(output_x);
-                        let (Some(pixel), Some(target)) = (
-                            image.rgba.get(source..source.saturating_add(4)),
-                            self.pixels.get_mut(output),
-                        ) else {
+                        let pixel = prepared.as_ref().map_or_else(
+                            || image.rgba.get(source..source.saturating_add(4)),
+                            |rgba| rgba.get(source..source.saturating_add(4)),
+                        );
+                        let (Some(pixel), Some(target)) = (pixel, self.pixels.get_mut(output))
+                        else {
                             continue;
                         };
                         let alpha = u32::from(pixel[3]);
                         let old = *target;
                         let blend = |source: u8, shift: u32| {
                             let destination = (old >> shift) & 0xff;
-                            (u32::from(source) * alpha + destination * (255 - alpha) + 127) / 255
+                            if prepared.is_some() {
+                                (u32::from(source) + (destination * (255 - alpha) + 127) / 255)
+                                    .min(255)
+                            } else {
+                                (u32::from(source) * alpha + destination * (255 - alpha) + 127)
+                                    / 255
+                            }
                         };
                         *target = (blend(pixel[0], 16) << 16)
                             | (blend(pixel[1], 8) << 8)

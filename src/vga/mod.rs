@@ -17,6 +17,7 @@
 pub mod backend;
 pub mod capture;
 pub mod font;
+mod image;
 pub mod input;
 mod surface;
 mod window;

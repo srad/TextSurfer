@@ -146,6 +146,7 @@ fn visible_grid(painted: &DisplayList, columns: u16, rows: u16) -> Result<Visual
                     text_fields: Vec::new(),
                 },
                 theme: &PAPER_WHITE,
+                render_images: true,
             }
             .render(area, frame.buffer_mut());
         })
@@ -391,6 +392,7 @@ fn render_pixels(
                     text_fields: Vec::new(),
                 },
                 theme: &PAPER_WHITE,
+                render_images: false,
             }
             .render(frame.area(), frame.buffer_mut());
         })

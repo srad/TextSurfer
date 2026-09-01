@@ -123,6 +123,7 @@ fn image_fetches_route_through_the_injected_decoder_by_tab_and_generation() {
             width: 1,
             height: 1,
             rgba: Arc::from([7, 8, 9, 255]),
+            source: crate::core::image::DecodedImageSource::Raster,
         }),
     });
     app.step(Duration::ZERO);
