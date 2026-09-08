@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use crate::core::dom::{ElementNs, Node};
-use crate::core::image::{DecodedImage, ImageAssetId, ImageDecodeError, ImageDecodeRequest};
+use crate::core::image::{
+    DecodedImage, ImageAssetId, ImageDecodeError, ImageDecodeRequest, ImageDecodeSource,
+};
 use crate::net::http::diagnostic_url;
 use crate::net::{FetchError, FetchResponse, MAX_BODY_BYTES, ResourceId};
 
@@ -21,6 +23,11 @@ impl PageLoad {
                 resources.insert(*node, image.clone());
             }
         }
+        for image in &self.images {
+            if let ImageState::Ready(decoded) = &image.state {
+                resources.insert_source(normalized_url(&image.requested), decoded.clone());
+            }
+        }
         resources
     }
 
@@ -38,7 +45,7 @@ impl PageLoad {
                 && let Some(src) = attr_value(attrs, "src").filter(|src| !src.trim().is_empty())
             {
                 match effective_base.join(src.trim()) {
-                    Ok(mut url) if self.scheme_allowed(&url) => {
+                    Ok(mut url) if self.image_scheme_allowed(&url) => {
                         url.set_fragment(None);
                         discovered.push((id, url));
                     }
@@ -58,6 +65,7 @@ impl PageLoad {
             tracing::warn!(count = invalid_addresses, "image addresses rejected");
         }
         for (node, url) in discovered {
+            let data = url.scheme() == "data";
             let key = normalized_url(&url);
             if let Some(index) = self.image_url_cache.get(&key).copied() {
                 self.image_node_index.insert(node, index);
@@ -69,6 +77,16 @@ impl PageLoad {
                 tracing::warn!(url = %diagnostic_url(&url), "image URL limit reached");
                 continue;
             }
+            if data
+                && self
+                    .image_raw_bytes
+                    .checked_add(url.as_str().len())
+                    .is_none_or(|total| total > MAX_IMAGE_FETCH_BYTES)
+            {
+                self.image_failures.resource_limit =
+                    self.image_failures.resource_limit.saturating_add(1);
+                continue;
+            }
             let resource_id = ResourceId(self.next_resource_id);
             self.next_resource_id += 1;
             let asset_id = ImageAssetId(self.next_image_asset_id);
@@ -78,14 +96,91 @@ impl PageLoad {
                 asset_id,
                 revision: 1,
                 requested: url.clone(),
-                state: ImageState::Fetching,
+                state: if data {
+                    ImageState::Decoding
+                } else {
+                    ImageState::Fetching
+                },
             });
-            self.image_fetch_index.insert(resource_id, index);
             self.image_asset_index.insert(asset_id, index);
             self.image_node_index.insert(node, index);
             self.image_url_cache.insert(key, index);
-            self.commands.push(FetchCommand { resource_id, url });
+            if data {
+                self.image_raw_bytes = self.image_raw_bytes.saturating_add(url.as_str().len());
+                self.image_decode_commands.push(ImageDecodeRequest {
+                    asset_id,
+                    revision: 1,
+                    source: ImageDecodeSource::DataUrl(Arc::from(url.as_str())),
+                });
+            } else {
+                self.image_fetch_index.insert(resource_id, index);
+                self.commands.push(FetchCommand { resource_id, url });
+            }
         }
+    }
+
+    pub(super) fn discover_css_images(&mut self, styles: &crate::core::style::StyleTree) {
+        let sources: Vec<_> = styles.image_sources().map(str::to_owned).collect();
+        for source in sources {
+            let Ok(mut url) = url::Url::parse(&source) else {
+                self.image_failures.invalid_address =
+                    self.image_failures.invalid_address.saturating_add(1);
+                continue;
+            };
+            url.set_fragment(None);
+            if !self.image_scheme_allowed(&url) {
+                self.image_failures.invalid_address =
+                    self.image_failures.invalid_address.saturating_add(1);
+                continue;
+            }
+            let key = normalized_url(&url);
+            if self.image_url_cache.contains_key(&key) {
+                continue;
+            }
+            if self.images.len() >= MAX_IMAGE_URLS
+                || self
+                    .image_raw_bytes
+                    .checked_add(url.as_str().len())
+                    .is_none_or(|total| total > MAX_IMAGE_FETCH_BYTES)
+            {
+                self.image_failures.resource_limit =
+                    self.image_failures.resource_limit.saturating_add(1);
+                continue;
+            }
+            let resource_id = ResourceId(self.next_resource_id);
+            self.next_resource_id = self.next_resource_id.saturating_add(1);
+            let asset_id = ImageAssetId(self.next_image_asset_id);
+            self.next_image_asset_id = self.next_image_asset_id.saturating_add(1);
+            let data = url.scheme() == "data";
+            let index = self.images.len();
+            self.images.push(ImageEntry {
+                asset_id,
+                revision: 1,
+                requested: url.clone(),
+                state: if data {
+                    ImageState::Decoding
+                } else {
+                    ImageState::Fetching
+                },
+            });
+            self.image_asset_index.insert(asset_id, index);
+            self.image_url_cache.insert(key, index);
+            if data {
+                self.image_raw_bytes += url.as_str().len();
+                self.image_decode_commands.push(ImageDecodeRequest {
+                    asset_id,
+                    revision: 1,
+                    source: ImageDecodeSource::DataUrl(Arc::from(url.as_str())),
+                });
+            } else {
+                self.image_fetch_index.insert(resource_id, index);
+                self.commands.push(FetchCommand { resource_id, url });
+            }
+        }
+    }
+
+    fn image_scheme_allowed(&self, url: &url::Url) -> bool {
+        url.scheme() == "data" || self.scheme_allowed(url)
     }
 
     pub(super) fn deliver_image_fetch(
@@ -154,7 +249,7 @@ impl PageLoad {
         self.image_decode_commands.push(ImageDecodeRequest {
             asset_id: self.images[index].asset_id,
             revision: self.images[index].revision,
-            bytes: Arc::from(response.body),
+            source: ImageDecodeSource::Bytes(Arc::from(response.body)),
         });
         true
     }

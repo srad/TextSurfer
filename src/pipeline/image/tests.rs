@@ -5,7 +5,9 @@ use image::codecs::gif::GifEncoder;
 use image::{DynamicImage, Frame, ImageFormat, Rgba, RgbaImage};
 
 use super::*;
-use crate::core::image::{ImageAssetId, ImageDecodeError, ImageDecodeRequest, ImageDecoder};
+use crate::core::image::{
+    ImageAssetId, ImageDecodeError, ImageDecodeRequest, ImageDecodeSource, ImageDecoder,
+};
 
 fn encoded(format: ImageFormat, width: u32, height: u32) -> Vec<u8> {
     let pixels = RgbaImage::from_pixel(width, height, Rgba([12, 34, 56, 255]));
@@ -20,7 +22,7 @@ fn request(bytes: Vec<u8>) -> ImageDecodeRequest {
     ImageDecodeRequest {
         asset_id: ImageAssetId(7),
         revision: 3,
-        bytes: Arc::from(bytes),
+        source: ImageDecodeSource::Bytes(Arc::from(bytes)),
     }
 }
 
@@ -40,6 +42,36 @@ fn enabled_raster_formats_decode_by_signature() {
         assert_eq!(decoded.revision, 3);
         assert_eq!(decoded.rgba.len(), 24);
     }
+}
+
+#[test]
+fn data_images_decode_in_the_worker_input_path_and_reject_other_mime_types() {
+    let decoded = RasterImageDecoder
+        .decode(ImageDecodeRequest {
+            asset_id: ImageAssetId(7),
+            revision: 3,
+            source: ImageDecodeSource::DataUrl(Arc::from(
+                "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='2'%20height='1'%3E%3Cpath%20d='M0%200h2v1H0z'/%3E%3C/svg%3E",
+            )),
+        })
+        .unwrap();
+    assert_eq!((decoded.width, decoded.height), (2, 1));
+    assert_eq!(
+        RasterImageDecoder.decode(ImageDecodeRequest {
+            asset_id: ImageAssetId(7),
+            revision: 3,
+            source: ImageDecodeSource::DataUrl(Arc::from("data:text/plain,hello")),
+        }),
+        Err(ImageDecodeError::UnsupportedFormat)
+    );
+    assert_eq!(
+        RasterImageDecoder.decode(ImageDecodeRequest {
+            asset_id: ImageAssetId(7),
+            revision: 3,
+            source: ImageDecodeSource::DataUrl(Arc::from("data:image/png;base64,!")),
+        }),
+        Err(ImageDecodeError::Invalid)
+    );
 }
 
 #[test]

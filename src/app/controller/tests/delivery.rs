@@ -143,6 +143,36 @@ fn image_fetches_route_through_the_injected_decoder_by_tab_and_generation() {
 }
 
 #[test]
+fn css_data_images_discovered_by_the_renderer_reach_the_injected_decoder() {
+    let net = Arc::new(FakeNet::default());
+    let images = Arc::new(FakeImages::default());
+    let mut app = App::with_net_metrics_and_images(
+        net.clone(),
+        crate::core::style::RenderMetrics::TERMINAL,
+        images.clone(),
+    );
+    app.submit_url("https://example.com/page");
+    let document = net.pending.lock().unwrap().pop().unwrap();
+    assert!(app.deliver_fetch(FetchPayload {
+        result: Ok(FetchResponse {
+            final_url: Url::parse("https://example.com/page").unwrap(),
+            status: 200,
+            body: br#"<style>span{display:inline-block;width:8px;height:16px;background-image:url('data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%221%22%20height=%221%22/%3E')}</style><span></span>"#.to_vec(),
+            content_type: Some("text/html".to_string()),
+        }),
+        ..document
+    }));
+    app.step(Duration::ZERO);
+    let job = images.submitted.lock().unwrap().pop().unwrap();
+    assert_eq!(job.tab_id, app.tabs.active().id);
+    assert!(matches!(
+        job.request.source,
+        crate::core::image::ImageDecodeSource::DataUrl(_)
+    ));
+    assert!(net.pending.lock().unwrap().is_empty());
+}
+
+#[test]
 fn image_status_separates_rate_limits_from_unknown_formats() {
     let net = Arc::new(FakeNet::default());
     let images = Arc::new(FakeImages::default());

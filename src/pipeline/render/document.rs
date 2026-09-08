@@ -112,7 +112,7 @@ pub(crate) fn render_document_with_images(
         ),
         palette,
     );
-    for (_, image) in images.iter() {
+    for image in images.assets() {
         painted.image_assets.insert(image.asset_id, image.clone());
     }
     RenderedPage {

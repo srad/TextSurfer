@@ -10,7 +10,13 @@ pub struct ImageAssetId(pub u64);
 pub struct ImageDecodeRequest {
     pub asset_id: ImageAssetId,
     pub revision: u64,
-    pub bytes: Arc<[u8]>,
+    pub source: ImageDecodeSource,
+}
+
+#[derive(Clone, Debug)]
+pub enum ImageDecodeSource {
+    Bytes(Arc<[u8]>),
+    DataUrl(Arc<str>),
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +57,7 @@ impl Eq for DecodedImage {}
 #[derive(Clone, Debug, Default)]
 pub struct ImageResources {
     by_node: HashMap<NodeId, DecodedImage>,
+    by_source: HashMap<String, DecodedImage>,
 }
 
 impl ImageResources {
@@ -64,6 +71,18 @@ impl ImageResources {
 
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &DecodedImage)> {
         self.by_node.iter().map(|(node, image)| (*node, image))
+    }
+
+    pub fn insert_source(&mut self, source: String, image: DecodedImage) {
+        self.by_source.insert(source, image);
+    }
+
+    pub fn get_source(&self, source: &str) -> Option<&DecodedImage> {
+        self.by_source.get(source)
+    }
+
+    pub fn assets(&self) -> impl Iterator<Item = &DecodedImage> {
+        self.by_node.values().chain(self.by_source.values())
     }
 }
 

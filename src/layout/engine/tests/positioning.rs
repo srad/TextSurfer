@@ -30,6 +30,33 @@ fn absolute_descendants_resolve_against_the_nearest_positioned_ancestor() {
 }
 
 #[test]
+fn a_single_translation_centers_a_positioned_empty_css_image_leaf() {
+    let mut document = Document::new();
+    let container = document.insert_element(None, "div", ElementNs::Html, vec![]);
+    let icon = document.insert_element(Some(container), "span", ElementNs::Html, vec![]);
+    let sheet = CssparserParser.parse(
+        "div { position:relative;width:80px;height:32px } span { position:absolute;left:8px;top:50%;width:20px;height:20px;background-image:url(data:image/png;base64,AA==);transform:translateY(-50%) }",
+    );
+    let styles = StyloCascade.apply(&[sheet], &document, MediaContext::screen());
+    let icon_style = styles.get(icon);
+    assert_ne!(icon_style.translation, Default::default());
+    assert!(
+        styles
+            .image_layers(icon_style.background_images)
+            .next()
+            .is_some()
+    );
+    let tree = TaffyLayoutEngine.layout(&document, &styles, Size { cols: 20, rows: 24 });
+    let icon_box = tree.boxes.iter().find(|box_| box_.node == icon).unwrap();
+
+    assert_eq!(icon_box.border_rect.col, 1);
+    assert_eq!(icon_box.border_rect.row, 0);
+    assert_eq!(icon_box.border_rect.width, 3);
+    assert_eq!(icon_box.border_rect.height, 1);
+    assert_eq!(tree.height, 2);
+}
+
+#[test]
 fn fixed_subtrees_do_not_extend_document_height() {
     let mut document = Document::new();
     let fixed = document.insert_element(None, "div", ElementNs::Html, vec![]);

@@ -48,6 +48,7 @@ pub struct BoxTree {
     pub strokes: Vec<BorderStroke>,
     pub links: Vec<LinkBox>,
     pub images: Vec<ImagePlacement>,
+    pub(crate) css_image_assets: Vec<CssImageAsset>,
     pub(crate) float_boxes: Vec<usize>,
     pub(crate) float_fragments: Vec<usize>,
     pub(crate) float_fills: Vec<usize>,
@@ -128,6 +129,13 @@ pub struct ImagePlacement {
     pub rect: LayoutRect,
     pub clip: LayoutRect,
     pub depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CssImageAsset {
+    pub(crate) asset_id: crate::core::image::ImageAssetId,
+    pub(crate) source_asset_id: crate::core::image::ImageAssetId,
+    pub(crate) tint: crate::core::style::Rgb,
 }
 
 /// Ways a page can outgrow what the engine will do for it. `layout` sits below `app`
@@ -328,8 +336,225 @@ impl TaffyLayoutEngine {
         tree.paint_order = document_paint_order(document);
         assign_link_rects(document, &mut tree);
         crate::layout::restyle::capture_sources(&mut tree, document, styles);
+        attach_css_images(&mut tree, input);
         tree
     }
+}
+
+fn attach_css_images(tree: &mut BoxTree, input: LayoutInput<'_>) {
+    tree.fills.retain(|fill| {
+        style_for_source(input.styles, fill.paint_source)
+            .is_none_or(|style| input.styles.image_layers(style.masks).next().is_none())
+    });
+    for layout_box in tree.boxes.clone() {
+        let Some(style) = style_for_source(input.styles, layout_box.paint_source) else {
+            continue;
+        };
+        let empty = match layout_box.paint_source {
+            PaintStyleSource::Element(node) => input
+                .document
+                .text_content(node)
+                .is_none_or(|text| text.trim().is_empty()),
+            PaintStyleSource::Pseudo(_, _) | PaintStyleSource::Marker(_) => true,
+            PaintStyleSource::Missing => false,
+        };
+        if !empty || tree.images.len() >= 4_096 {
+            continue;
+        }
+        for layer in input
+            .styles
+            .image_layers(style.background_images)
+            .chain(input.styles.image_layers(style.masks))
+        {
+            let Some(image) = input
+                .images
+                .and_then(|images| images.get_source(&layer.url))
+            else {
+                continue;
+            };
+            let asset_id = if layer.kind == crate::core::style::CssImageKind::Mask {
+                let tint = style
+                    .background
+                    .or_else(|| style.color.map(|color| color.rgb))
+                    .unwrap_or(crate::core::style::Rgb::BLACK);
+                let asset_id = crate::core::image::ImageAssetId(
+                    (1_u64 << 63)
+                        | u64::try_from(tree.css_image_assets.len() + 1).unwrap_or(u64::MAX),
+                );
+                tree.css_image_assets.push(CssImageAsset {
+                    asset_id,
+                    source_asset_id: image.asset_id,
+                    tint,
+                });
+                asset_id
+            } else {
+                image.asset_id
+            };
+            let size = css_image_size(layer, image, layout_box.border_rect, input.cell_metric);
+            for rect in css_image_rects(layer, size, layout_box.border_rect) {
+                if tree.images.len() >= 4_096 {
+                    break;
+                }
+                tree.images.push(ImagePlacement {
+                    node: layout_box.node,
+                    asset_id,
+                    revision: image.revision,
+                    rect,
+                    clip: layout_box.border_rect,
+                    depth: layout_box.depth,
+                });
+            }
+        }
+    }
+}
+
+fn style_for_source(
+    styles: &StyleTree,
+    source: PaintStyleSource,
+) -> Option<crate::core::style::ComputedStyle> {
+    match source {
+        PaintStyleSource::Element(node) => Some(styles.get(node)),
+        PaintStyleSource::Pseudo(node, which) => styles.pseudo(node, which).map(|box_| box_.style),
+        PaintStyleSource::Marker(node) => styles.marker(node).map(|marker| marker.style),
+        PaintStyleSource::Missing => None,
+    }
+}
+
+fn css_image_size(
+    layer: &crate::core::style::CssImageLayer,
+    image: &crate::core::image::DecodedImage,
+    area: LayoutRect,
+    metric: crate::core::style::CellMetric,
+) -> (usize, usize) {
+    let intrinsic = (
+        metric
+            .cells_from_px(
+                f64::from(image.width),
+                crate::core::style::LengthAxis::Horizontal,
+            )
+            .max(1),
+        metric
+            .cells_from_px(
+                f64::from(image.height),
+                crate::core::style::LengthAxis::Vertical,
+            )
+            .max(1),
+    );
+    match layer.size {
+        crate::core::style::CssImageSize::Auto => intrinsic,
+        crate::core::style::CssImageSize::Explicit { width, height } => {
+            let width = css_image_dimension(width, area.width);
+            let height = css_image_dimension(height, area.height);
+            match (width, height) {
+                (Some(width), Some(height)) => (width.max(1), height.max(1)),
+                (Some(width), None) => (
+                    width.max(1),
+                    width
+                        .saturating_mul(intrinsic.1)
+                        .checked_div(intrinsic.0)
+                        .unwrap_or(1)
+                        .max(1),
+                ),
+                (None, Some(height)) => (
+                    height
+                        .saturating_mul(intrinsic.0)
+                        .checked_div(intrinsic.1)
+                        .unwrap_or(1)
+                        .max(1),
+                    height.max(1),
+                ),
+                (None, None) => intrinsic,
+            }
+        }
+        crate::core::style::CssImageSize::Cover | crate::core::style::CssImageSize::Contain => {
+            if area.width == 0 || area.height == 0 {
+                return intrinsic;
+            }
+            let width_scale = area.width as f64 / intrinsic.0 as f64;
+            let height_scale = area.height as f64 / intrinsic.1 as f64;
+            let scale = if layer.size == crate::core::style::CssImageSize::Cover {
+                width_scale.max(height_scale)
+            } else {
+                width_scale.min(height_scale)
+            };
+            (
+                (intrinsic.0 as f64 * scale).round().max(1.0) as usize,
+                (intrinsic.1 as f64 * scale).round().max(1.0) as usize,
+            )
+        }
+    }
+}
+
+fn css_image_dimension(
+    dimension: crate::core::style::CssImageDimension,
+    basis: usize,
+) -> Option<usize> {
+    match dimension {
+        crate::core::style::CssImageDimension::Cells(value) => Some(value),
+        crate::core::style::CssImageDimension::Percent(value) => {
+            Some(basis.saturating_mul(usize::try_from(value).unwrap_or(usize::MAX)) / 10_000)
+        }
+        crate::core::style::CssImageDimension::Auto => None,
+    }
+}
+
+fn css_image_rects(
+    layer: &crate::core::style::CssImageLayer,
+    size: (usize, usize),
+    area: LayoutRect,
+) -> Vec<LayoutRect> {
+    let col = css_image_offset(layer.position_x, area.width, size.0);
+    let row = css_image_offset(layer.position_y, area.height, size.1);
+    let columns = css_image_origins(layer.repeat_x, area.col, area.width, size.0, col);
+    let rows = css_image_origins(layer.repeat_y, area.row, area.height, size.1, row);
+    columns
+        .into_iter()
+        .flat_map(|col| {
+            rows.iter().copied().map(move |row| LayoutRect {
+                col,
+                row,
+                width: size.0,
+                height: size.1,
+            })
+        })
+        .take(4_096)
+        .collect()
+}
+
+fn css_image_offset(
+    coordinate: crate::core::style::CssImageCoordinate,
+    area: usize,
+    image: usize,
+) -> isize {
+    let remaining =
+        isize::try_from(area).unwrap_or(isize::MAX) - isize::try_from(image).unwrap_or(isize::MAX);
+    match coordinate {
+        crate::core::style::CssImageCoordinate::Cells(value) => value,
+        crate::core::style::CssImageCoordinate::Percent(value) => {
+            remaining.saturating_mul(value as isize) / 10_000
+        }
+        crate::core::style::CssImageCoordinate::Center => remaining / 2,
+    }
+}
+
+fn css_image_origins(
+    repeat: crate::core::style::CssImageRepeat,
+    start: usize,
+    extent: usize,
+    image: usize,
+    offset: isize,
+) -> Vec<usize> {
+    if repeat == crate::core::style::CssImageRepeat::NoRepeat {
+        return vec![start.saturating_add_signed(offset)];
+    }
+    let mut origins = Vec::new();
+    let end = start.saturating_add(extent);
+    let mut current = start;
+    while current < end && origins.len() < 4_096 {
+        origins.push(current);
+        current = current.saturating_add(image.max(1));
+    }
+    origins
 }
 
 fn document_paint_order(document: &Document) -> HashMap<NodeId, usize> {
@@ -579,8 +804,21 @@ fn try_layout_flow(
         let float_subtree = inherited_float || flow[index].style.float.is_floating();
         let float_starts = OutputStarts::new(&tree);
         let layout = layouts[index];
-        let absolute_col = parent_col + layout.location.x;
-        let absolute_row = parent_row + layout.location.y;
+        let laid_out_col = parent_col + layout.location.x;
+        let laid_out_row = parent_row + layout.location.y;
+        let (translation_x, translation_y) =
+            if applies_css_image_translation(&flow[index], document, styles) {
+                styles.resolve_translation(
+                    flow[index].style.translation,
+                    layout.size.width,
+                    layout.size.height,
+                )
+            } else {
+                (0.0, 0.0)
+            };
+        let absolute_col = laid_out_col + translation_x;
+        let absolute_row = laid_out_row + translation_y;
+        let laid_out_border_rect = layout_rect(laid_out_col, laid_out_row, layout.size);
         let border_rect = layout_rect(absolute_col, absolute_row, layout.size);
         let padding_rect = layout_rect(
             absolute_col + layout.border.left,
@@ -603,8 +841,12 @@ fn try_layout_flow(
                 flow[index].style.overflow.y.clips() || paint_contained,
             )
         };
-        if !fixed_subtree && let Some(bottom) = inherited_clip.vertical_end(border_rect) {
-            layout_height = layout_height.max(bottom);
+        if !fixed_subtree {
+            for rect in [laid_out_border_rect, border_rect] {
+                if let Some(bottom) = inherited_clip.vertical_end(rect) {
+                    layout_height = layout_height.max(bottom);
+                }
+            }
         }
         if let Some(table) = flow[index].table {
             let width = layout.size.width.max(1.0) as usize;
@@ -640,6 +882,11 @@ fn try_layout_flow(
             if visible
                 && let Some(rect) = painted_border
                 && let Some(color) = style.bg
+                && input
+                    .styles
+                    .image_layers(flow[index].style.masks)
+                    .next()
+                    .is_none()
             {
                 tree.fills.push(BackgroundFill {
                     rect,
@@ -821,6 +1068,27 @@ fn try_layout_flow(
     tree.fragments
         .sort_by_key(|fragment| (fragment.row, fragment.col, fragment.depth));
     Some(tree)
+}
+
+fn applies_css_image_translation(flow: &FlowBox, document: &Document, styles: &StyleTree) -> bool {
+    let empty_leaf = match flow.paint_source {
+        PaintStyleSource::Element(node) => document.first_child(node).is_none(),
+        PaintStyleSource::Pseudo(_, _) | PaintStyleSource::Marker(_) => {
+            flow.inline.is_empty() && flow.children.is_empty()
+        }
+        PaintStyleSource::Missing => false,
+    };
+    flow.style.position.is_absolute()
+        && empty_leaf
+        && !flow.rule
+        && flow.table.is_none()
+        && flow.marker.is_none()
+        && flow.replaced.is_none()
+        && styles
+            .image_layers(flow.style.background_images)
+            .chain(styles.image_layers(flow.style.masks))
+            .next()
+            .is_some()
 }
 
 fn mark_float_since(tree: &mut BoxTree, starts: OutputStarts) {

@@ -80,12 +80,15 @@ fn atlas_pages(cols: u16, rows: u16, vga: bool) -> (RenderedPage, RenderedPage) 
             content_type: Some("image/png".to_string()),
         })
     ));
-    let decode = load.take_image_decode_commands().pop().unwrap();
-    assert!(load.deliver_image_decode(
-        decode.asset_id,
-        decode.revision,
-        Ok(atlas_image(decode.asset_id, decode.revision))
-    ));
+    let decodes = load.take_image_decode_commands();
+    assert_eq!(decodes.len(), if cols == 160 { 2 } else { 1 });
+    for decode in decodes {
+        assert!(load.deliver_image_decode(
+            decode.asset_id,
+            decode.revision,
+            Ok(atlas_image(decode.asset_id, decode.revision))
+        ));
+    }
     let decoded = load.render_after_image().unwrap();
     (first, decoded)
 }
@@ -264,7 +267,10 @@ fn atlas_manifest_and_semantics_cover_the_rendering_contract() {
         assert_eq!(first.parse_errors, 0);
         assert_eq!(decoded.parse_errors, 0);
         assert_eq!(decoded.css_warnings, 0);
-        assert_eq!(decoded.painted.images.len(), 11);
+        assert_eq!(
+            decoded.painted.images.len(),
+            if cols == 160 { 12 } else { 11 }
+        );
         assert_image_rects_are_text_free(&decoded.painted);
         assert!(first.painted.text_lines().join("\n").contains("[linked]"));
         let text = decoded.painted.text_lines().join("\n");

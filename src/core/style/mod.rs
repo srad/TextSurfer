@@ -6,11 +6,13 @@ mod dynamic;
 mod flex;
 mod float;
 mod grid;
+mod image;
 mod length;
 mod list;
 mod math;
 mod render;
 mod table;
+mod transform;
 mod typography;
 
 #[cfg(test)]
@@ -40,6 +42,11 @@ pub use grid::{
     GridPlacement, GridRepeat, GridStyle, GridTemplate, GridTemplateComponent, GridTemplateData,
     GridTracks, RepeatCount, TrackBreadthMax, TrackBreadthMin, TrackSize,
 };
+pub(crate) use image::CssImageStore;
+pub use image::{
+    CssImageCoordinate, CssImageDimension, CssImageKind, CssImageLayer, CssImageLayers,
+    CssImageRepeat, CssImageSize,
+};
 pub use length::{CellMetric, CssLength, CssLengthUnit, CssNumber, LengthAxis};
 pub use list::{ListStylePosition, ListStyleType};
 pub use math::CssCalc;
@@ -48,6 +55,7 @@ pub use render::{RenderContext, RenderMetrics};
 pub use table::{
     BorderCollapse, BorderSpacing, CaptionSide, Direction, EmptyCells, TableLayoutMode,
 };
+pub use transform::{CssTranslation, CssTranslationAxis};
 pub use typography::{FontSize, TextPresentation, TextRendering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -160,6 +168,7 @@ pub struct ComputedStyle {
     pub visibility: Visibility,
     pub position: Position,
     pub inset: InsetEdges,
+    pub translation: CssTranslation,
     pub margin: MarginEdges,
     pub padding: PaddingEdges,
     pub border: BorderEdges,
@@ -176,6 +185,8 @@ pub struct ComputedStyle {
     pub list_style_position: ListStylePosition,
     pub color: Option<Rgba>,
     pub background: Option<Rgb>,
+    pub background_images: CssImageLayers,
+    pub masks: CssImageLayers,
     pub bold: bool,
     pub underline: bool,
     pub strike: bool,
@@ -244,6 +255,7 @@ pub struct Marker {
 pub(crate) struct StyleStore {
     pub(crate) calculations: CssCalcStore,
     pub(crate) grid: GridStore,
+    pub(crate) images: CssImageStore,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -333,5 +345,27 @@ impl StyleTree {
 
     pub(crate) fn grid(&self) -> &GridStore {
         &self.store.grid
+    }
+
+    pub fn image_layers(&self, handle: CssImageLayers) -> impl Iterator<Item = &CssImageLayer> {
+        self.store.images.get(handle).into_iter().flatten()
+    }
+
+    pub fn image_sources(&self) -> impl Iterator<Item = &str> {
+        self.styles
+            .values()
+            .flat_map(|style| [style.background_images, style.masks])
+            .chain(
+                self.pseudo
+                    .values()
+                    .flat_map(|box_| [box_.style.background_images, box_.style.masks]),
+            )
+            .chain(
+                self.markers
+                    .values()
+                    .flat_map(|marker| [marker.style.background_images, marker.style.masks]),
+            )
+            .flat_map(|handle| self.image_layers(handle))
+            .map(|layer| layer.url.as_ref())
     }
 }

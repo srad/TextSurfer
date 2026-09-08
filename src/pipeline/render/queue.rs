@@ -406,16 +406,18 @@ fn execute_inner(
                 }
             } else {
                 let mut painted = BasicPainter.paint(&layout, palette);
-                for (_, image) in images.iter() {
+                for image in images.assets() {
                     painted.image_assets.insert(image.asset_id, image.clone());
                 }
+                insert_css_image_assets(&mut painted, &layout, &images);
                 PaintUpdate::Replace(painted)
             }
         } else {
             let mut painted = BasicPainter.paint(&layout, palette);
-            for (_, image) in images.iter() {
+            for image in images.assets() {
                 painted.image_assets.insert(image.asset_id, image.clone());
             }
+            insert_css_image_assets(&mut painted, &layout, &images);
             PaintUpdate::Replace(painted)
         }
     };
@@ -465,6 +467,34 @@ fn execute_inner(
         *activity.lock().unwrap() = None;
     }
     result
+}
+
+fn insert_css_image_assets(painted: &mut DisplayList, layout: &BoxTree, images: &ImageResources) {
+    for asset in &layout.css_image_assets {
+        let Some(source) = images
+            .assets()
+            .find(|image| image.asset_id == asset.source_asset_id)
+        else {
+            continue;
+        };
+        let mut rgba = source.rgba.to_vec();
+        for pixel in rgba.chunks_exact_mut(4) {
+            pixel[0] = asset.tint.r;
+            pixel[1] = asset.tint.g;
+            pixel[2] = asset.tint.b;
+        }
+        painted.image_assets.insert(
+            asset.asset_id,
+            crate::core::image::DecodedImage {
+                asset_id: asset.asset_id,
+                revision: source.revision,
+                width: source.width,
+                height: source.height,
+                rgba: Arc::from(rgba),
+                source: crate::core::image::DecodedImageSource::Raster,
+            },
+        );
+    }
 }
 
 pub struct BlockingRenderQueue {

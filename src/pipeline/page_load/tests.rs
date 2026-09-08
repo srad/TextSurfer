@@ -1,7 +1,7 @@
 use encoding_rs::UTF_8;
 
 use super::*;
-use crate::core::image::ImageDecodeError;
+use crate::core::image::{ImageDecodeError, ImageDecodeSource, ImageDecoder};
 use crate::css::{DynamicState, FocusSource, FocusedNode};
 use crate::net::{FetchError, FetchResponse};
 use crate::pipeline::render::{
@@ -839,6 +839,83 @@ fn image_fetches_deduplicate_and_share_the_initial_resource_window() {
 }
 
 #[test]
+fn data_images_bypass_network_and_css_discovery_is_progressive() {
+    let source = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1'%20height='1'/%3E";
+    let mut image = load(&format!("<img src=\"{source}\">"));
+    assert!(image.take_commands().is_empty());
+    let command = image.take_image_decode_commands().pop().unwrap();
+    assert!(matches!(command.source, ImageDecodeSource::DataUrl(_)));
+
+    let mut css = load(&format!(
+        "<style>span {{ display:inline-block; width:8px; height:16px; background-image:url(\"{source}\") }}</style><span></span>"
+    ));
+    assert!(css.take_image_decode_commands().is_empty());
+    let _ = css.force_render();
+    assert!(css.take_commands().is_empty());
+    let command = css.take_image_decode_commands().pop().unwrap();
+    assert!(matches!(command.source, ImageDecodeSource::DataUrl(_)));
+}
+
+#[test]
+fn decoded_css_masks_replace_the_solid_box_with_a_tinted_image() {
+    let source = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='2'%20height='1'%3E%3Cpath%20d='M0%200h2v1H0z'/%3E%3C/svg%3E";
+    let mut load = load(&format!(
+        "<style>span {{ display:inline-block; width:16px; height:16px; background-color:#336699; mask-image:url(\"{source}\"); mask-repeat:no-repeat; mask-size:100% 100% }}</style><span></span>"
+    ));
+    let first = load.force_render();
+    assert!(first.painted.images.is_empty());
+    let command = load.take_image_decode_commands().pop().unwrap();
+    let asset_id = command.asset_id;
+    let revision = command.revision;
+    let decoded = crate::pipeline::image::RasterImageDecoder.decode(command);
+    assert!(load.deliver_image_decode(asset_id, revision, decoded));
+    let rendered = load.force_render();
+    assert_eq!(rendered.painted.images.len(), 1);
+    let placement = rendered.painted.images[0];
+    assert_ne!(placement.asset_id, asset_id);
+    let tinted = rendered
+        .painted
+        .image_assets
+        .get(&placement.asset_id)
+        .unwrap();
+    assert_eq!(&tinted.rgba[..3], &[0x33, 0x66, 0x99]);
+}
+
+#[test]
+fn a_centered_css_image_keeps_its_box_when_late_decode_adds_pixels() {
+    let source = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='2'%20height='1'%3E%3Cpath%20d='M0%200h2v1H0z'/%3E%3C/svg%3E";
+    let mut load = load(&format!(
+        "<style>#field {{ position:relative;width:80px;height:32px }} #icon {{ position:absolute;left:8px;top:50%;width:20px;height:20px;background-image:url(\"{source}\");background-size:100% 100%;background-repeat:no-repeat;transform:translateY(-50%) }}</style><div id=field><span id=icon></span></div>"
+    ));
+    let first = load.force_render();
+    let icon = load.document.borrow().element_by_id("icon").unwrap();
+    let before = first
+        .painted
+        .hits
+        .iter()
+        .find(|hit| hit.node == icon && hit.kind == crate::paint::HitKind::Box)
+        .unwrap()
+        .rect;
+    assert_eq!(before.row, 0);
+    let command = load.take_image_decode_commands().pop().unwrap();
+    let asset_id = command.asset_id;
+    let revision = command.revision;
+    let decoded = crate::pipeline::image::RasterImageDecoder.decode(command);
+    assert!(load.deliver_image_decode(asset_id, revision, decoded));
+    let rendered = load.render_after_image().unwrap();
+    let after = rendered
+        .painted
+        .hits
+        .iter()
+        .find(|hit| hit.node == icon && hit.kind == crate::paint::HitKind::Box)
+        .unwrap()
+        .rect;
+
+    assert_eq!(after, before);
+    assert_eq!(rendered.painted.images[0].rect, before);
+}
+
+#[test]
 fn image_fetches_require_success_and_have_an_independent_byte_budget() {
     let mut failed = load("<img src='missing.png'>");
     let command = failed.take_commands().pop().unwrap();
@@ -1649,6 +1726,46 @@ fn layout_dynamic_state_keeps_the_full_layout_path() {
         hard_epoch: load.hard_epoch(),
     };
     let hover = load.render_job_blocking(hover_key).unwrap();
+    assert_ne!(hover.timings.restyle, Duration::ZERO);
+    assert_ne!(hover.timings.layout, Duration::ZERO);
+    assert_eq!(
+        hover.restyle_failure,
+        Some(crate::layout::RestyleFailure::LayoutChanged)
+    );
+}
+
+#[test]
+fn a_dynamic_css_image_translation_keeps_the_full_layout_path() {
+    let mut load = load(
+        "<!doctype html><style>#field { position:relative;height:32px } #icon { position:absolute;top:50%;width:20px;height:20px;background-image:url(data:image/png;base64,AA==);transform:translateY(0) } #icon:hover { transform:translateY(-50%) }</style><div id=field><span id=icon></span></div>",
+    );
+    load.defer_rendering();
+    assert!(load.render_if_ready(Duration::ZERO).is_none());
+    let initial_key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    let initial = load.render_job_blocking(initial_key).unwrap();
+    assert!(load.apply_render_result(initial).is_some());
+
+    let icon = load.document.borrow().element_by_id("icon").unwrap();
+    assert!(
+        load.set_dynamic_state(DynamicState {
+            hover: Some(icon),
+            ..Default::default()
+        })
+        .is_none()
+    );
+    let hover_key = RenderKey {
+        tab_id: 7,
+        generation: 11,
+        epoch: load.render_epoch(),
+        hard_epoch: load.hard_epoch(),
+    };
+    let hover = load.render_job_blocking(hover_key).unwrap();
+
     assert_ne!(hover.timings.restyle, Duration::ZERO);
     assert_ne!(hover.timings.layout, Duration::ZERO);
     assert_eq!(

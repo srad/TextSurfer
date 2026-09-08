@@ -11,10 +11,12 @@ mod edges;
 mod flex;
 mod generated;
 mod grid;
+mod image;
 mod length;
 mod policy;
 mod sizing;
 mod text;
+mod transform;
 
 #[cfg(test)]
 mod tests;
@@ -180,6 +182,9 @@ impl Mapper {
     fn map(&mut self, values: &ServoArc<ComputedValues>) -> ComputedStyle {
         let decorations = text::decorations(values);
         let font_size = text::font_size(values);
+        let background_images = image::backgrounds(values, &self.lengths, &mut self.store);
+        let masks = image::masks(values, &self.lengths, &mut self.store);
+        let translation = transform::translation(values, &mut self.lengths, &mut self.store);
         let text_rendering = self.context.metrics.text;
         let lengths = &mut self.lengths;
         let store = &mut self.store;
@@ -227,6 +232,7 @@ impl Mapper {
             contain: sizing::contain(values),
             position: sizing::position(values),
             inset: edges::insets(values, lengths, store),
+            translation,
             margin: edges::margins(values, lengths, store),
             padding: edges::paddings(values, lengths, store),
             border: edges::borders(values),
@@ -245,6 +251,8 @@ impl Mapper {
             list_style_position: text::list_style_position(values),
             color: color::foreground(&values.clone_color()),
             background: color::background(&values.resolve_color(&values.clone_background_color())),
+            background_images,
+            masks,
             bold: text::bold(values),
             underline: decorations.contains(TextDecorationLine::UNDERLINE),
             strike: decorations.contains(TextDecorationLine::LINE_THROUGH),

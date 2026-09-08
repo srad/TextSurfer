@@ -6,7 +6,10 @@ use style::values::generics::length::GenericSize;
 
 use crate::core::dom::{Document, ElementNs, NodeId};
 use crate::core::geom::Size;
-use crate::core::style::{CalcRange, CellMetric, LengthAxis, Palette, RenderContext, StyleStore};
+use crate::core::style::{
+    CalcRange, CellMetric, CssSignedPercentage, CssTranslation, CssTranslationAxis, LengthAxis,
+    Palette, RenderContext, StyleStore,
+};
 
 use super::super::dom::StyleArena;
 use super::super::engine::StyloEngine;
@@ -71,6 +74,82 @@ fn mapped(css: &str) -> (crate::core::style::StyleTree, NodeId) {
 fn style_of(css: &str) -> crate::core::style::ComputedStyle {
     let (tree, div) = mapped(css);
     tree.get(div)
+}
+
+#[test]
+fn url_backgrounds_and_masks_survive_mapping_without_affecting_plain_styles() {
+    let (tree, div) = mapped(
+        "div { background-image: url(data:image/png;base64,AA==); mask-image: url(data:image/svg+xml,%3Csvg/%3E); mask-position:25% 75%; mask-repeat:no-repeat; mask-size:50% 10px }",
+    );
+    let style = tree.get(div);
+    let backgrounds: Vec<_> = tree.image_layers(style.background_images).collect();
+    let masks: Vec<_> = tree.image_layers(style.masks).collect();
+    assert_eq!(backgrounds.len(), 1);
+    assert_eq!(backgrounds[0].url.as_ref(), "data:image/png;base64,AA==");
+    assert_eq!(masks.len(), 1);
+    assert_eq!(masks[0].url.as_ref(), "data:image/svg+xml,%3Csvg/%3E");
+    assert_eq!(
+        masks[0].position_x,
+        crate::core::style::CssImageCoordinate::Percent(2_500)
+    );
+    assert_eq!(
+        masks[0].position_y,
+        crate::core::style::CssImageCoordinate::Percent(7_500)
+    );
+    assert_eq!(
+        masks[0].repeat_x,
+        crate::core::style::CssImageRepeat::NoRepeat
+    );
+    assert_eq!(
+        masks[0].repeat_y,
+        crate::core::style::CssImageRepeat::NoRepeat
+    );
+    assert_eq!(
+        style_of("div { color: red }"),
+        style_of("div { color: red; background-image: none; mask-image: none }")
+    );
+}
+
+#[test]
+fn one_two_dimensional_translation_maps_and_other_transform_lists_stay_inert() {
+    assert_eq!(
+        style_of("div { transform: translateY(-50%) }").translation,
+        CssTranslation {
+            x: CssTranslationAxis::Zero,
+            y: CssTranslationAxis::Percent(CssSignedPercentage::new(-5_000)),
+        }
+    );
+    assert_eq!(
+        style_of("div { transform: translate(16px, 25%) }").translation,
+        CssTranslation {
+            x: CssTranslationAxis::Cells(2),
+            y: CssTranslationAxis::Percent(CssSignedPercentage::new(2_500)),
+        }
+    );
+    assert_eq!(
+        style_of("div { transform: translateX(8px) }").translation,
+        CssTranslation {
+            x: CssTranslationAxis::Cells(1),
+            y: CssTranslationAxis::Zero,
+        }
+    );
+    for css in [
+        "div { transform: none }",
+        "div { transform: translateY(-50%) scale(1) }",
+        "div { transform: rotate(10deg) }",
+        "div { transform: translate3d(0, -50%, 0) }",
+    ] {
+        assert_eq!(
+            style_of(css).translation,
+            CssTranslation::default(),
+            "{css}"
+        );
+    }
+    let (tree, div) = mapped("div { transform:translate(calc(8px + 25%), calc(-50% + 16px)) }");
+    assert_eq!(
+        tree.resolve_translation(tree.get(div).translation, 8.0, 4.0),
+        (3.0, -1.0)
+    );
 }
 
 /// The declared `width` as a computed `<length-percentage>`.

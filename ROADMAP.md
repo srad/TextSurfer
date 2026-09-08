@@ -60,6 +60,7 @@ questions we were answering ad hoc.
 | [ratatui-image](https://crates.io/crates/ratatui-image) 11.0.6 | Terminal-only Sixel/Kitty/iTerm2 output, sliced scrolling, halfblock fallback | The terminal adapter only. VGA blits into its own framebuffer |
 | [arboard](https://crates.io/crates/arboard) 3.6.1 | Current cross-platform text clipboard access without a UI toolkit | Frontend adapters only, default features off; `app` exchanges owned clipboard requests and remains I/O-free |
 | [resvg](https://crates.io/crates/resvg) 0.48.1 | Mature SVG parsing and bounded raster output without a browser DOM | Adopted for static SVG decoding and final-size VGA preparation behind bounded workers and page/frontend budgets; no custom SVG parser |
+| [data-url](https://crates.io/crates/data-url) 0.3.2 | WHATWG Fetch `data:` URL processing with streaming percent/base64 decode | Adopt for bounded `data:image/...` sources in the existing image worker; top-level navigation and non-image MIME types remain refused |
 | [tracing](https://crates.io/crates/tracing) 0.1.44 + [tracing-subscriber](https://crates.io/crates/tracing-subscriber) 0.3.23 + [tracing-chrome](https://crates.io/crates/tracing-chrome) 0.7.2 | Structured logs plus Chrome/Perfetto timeline spans with an explicit flush guard | Opt-in file diagnostics only; no default terminal output and no response bodies, credentials, queries, fragments or form values |
 | MediaWiki ResourceLoader | Wikipedia's documented base environment is HTML5, ES2017, Selectors API, local storage, `querySelector`, jQuery and `mediawiki.base`; scripts are asynchronous progressive enhancement | The WP-A JavaScript target. Implement the generic platform underneath Wikipedia's own code; never reproduce ResourceLoader or site modules in Rust |
 | `ureq` 3.4.0 cookies + `cookie_store` 0.22.1 | Current latest HTTP-client cookie path, with persistence hooks | **Candidate only.** `ureq`'s internal store has no configured public-suffix list, so it is not the final browser jar. The browser-state tranche must prove RFC6265bis request context, SameSite, prefixes, HttpOnly and public-suffix rejection before selecting the library adapter |
@@ -135,9 +136,9 @@ duplicate roadmap ledger.
 M1-B through M1-E are completed component contracts. Their combined behavior on real pages remains
 open until M1-F practical-fidelity and M6 image acceptance pass.
 
-Test counts at the last green matrix run (2026-09-01): default/VGA **975 total**
-(971 passing, 4 ignored), JavaScript+VGA **987 total** (983 passing, 4 ignored), and
-terminal/no-default-features **856 total** (853 passing, 3 ignored). The WPT target contributes 7
+Test counts at the last green matrix run (2026-09-08): default/VGA **1,007 total**
+(1,003 passing, 4 ignored), JavaScript+VGA **1,019 total** (1,015 passing, 4 ignored), and
+terminal/no-default-features **888 total** (885 passing, 3 ignored). The WPT target contributes 7
 tests (6 passing and 1 ignored; 5 passing and 1 ignored without `vga`).
 Deliberately ignored: the WPT child worker, the VGA reference generator, and the M7 Stylo perf
 measurement, which reports rather than asserts.
@@ -574,7 +575,7 @@ native frontends. Run the generic app benchmark after each tranche and report th
 performance as secondary to correctness until this acceptance gate closes.
 
 Remote/custom fonts use a built-in fallback and border radii use square corners as explicit WP-A
-adaptations. Relative colours, transforms, multicolumn layout and vertical writing remain deferred
+adaptations. Relative colours, general transforms, multicolumn layout and vertical writing remain deferred
 unless a compatibility profile promotes them; a reachable content or interaction effect cannot be
 waived merely because its visual presentation needs adaptation.
 
@@ -932,14 +933,23 @@ idempotent, template scripts stay inert, and host failures surface without enter
         of the frontend, and re-evaluate on width changes without stale placements. Implement
         `object-fit` and `object-position` inside the laid-out content rectangle; clipping or scaling
         may not change that rectangle or cover neighboring text.
-      - [ ] **CSS background images.** Route bounded static `background-image: url(...)` resources
-        through the existing per-page image graph, decoder, generation checks and budgets. Support
-        size, position and repeat within the owning box's clip; paint backgrounds below borders,
-        content and descendants. Gradients remain deferred until a readability case requires them.
-      - [ ] **Bounded data image URLs.** Accept base64 and percent-encoded `data:image/...` sources
-        only through the shared decoder and existing raw/decoded budgets, with the same MIME allowlist
-        and failure reporting as fetched images; they never become top-level navigation or bypass
-        per-page accounting.
+      - [x] **Bounded CSS URL icons (done — VGA smoke pending).** Empty element and pseudo boxes
+        retain URL background/mask layers, computed size/position/repeat and mask tint; resources use
+        the shared graph and existing terminal/VGA image path. Layer lists stop at 32 and placements
+        at 4,096. Non-empty owners remain on `BasicPainter`, avoiding image overlays that would cover
+        text before the atomic-group substrate exists. A positioned empty image leaf may apply one
+        2D `translate`, `translateX` or `translateY` operation after layout; percentages resolve
+        against its border box. Compound and non-translation transforms remain deferred.
+      - [ ] **Full CSS backgrounds and masking.** Paint URL backgrounds below borders, content and
+        descendants, then implement mask origin, clip, alpha/luminance mode and multi-layer
+        composition over an isolated element subtree. A second explicit paint program must reproduce
+        `BasicPainter` exactly with CSS effects disabled before activation; invalid programs fail open
+        to complete legacy rendering. This does not complete M1-F stacking or `z-index`. Gradients,
+        `image-set`, `clip-path`, `mask-border`, SVG DOM mask references, root/body propagation and
+        non-scrolling background attachment remain deferred.
+      - [x] **Bounded data image URLs.** Base64 and percent-encoded allowlisted `data:image/...`
+        sources decode in the image worker under raw/decoded page budgets. They never become top-level
+        navigation or network commands; progressive CSS discovery does not extend stylesheet blocking.
       - **Human acceptance:** the representative image corpus and Wikipedia image smoke pass in both
         VGA and terminal without missing in-flow content, overlap or resize/resource divergence.
 - [x] **Floats** — Taffy 0.14.0 `float_layout` owns CSS 2 physical placement, clearance and

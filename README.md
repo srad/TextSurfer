@@ -67,7 +67,7 @@ wins, including in a JavaScript-enabled build.
 | DOM | [indextree](https://github.com/saschagrunert/indextree) | Mutable document tree with stable node identities |
 | CSS | [Stylo](https://github.com/servo/stylo), [cssparser](https://github.com/servo/rust-cssparser), [selectors](https://github.com/servo/stylo) | Parsing, selector matching, cascade and computed values |
 | Layout and text | [Taffy](https://github.com/DioxusLabs/taffy), [textwrap](https://github.com/mgeisler/textwrap), [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) and [unicode-width](https://github.com/unicode-rs/unicode-width) | Block, flex, grid and float geometry with TextSurfer inline and table adapters |
-| Images | [image](https://github.com/image-rs/image), [resvg](https://github.com/linebender/resvg), [ratatui-image](https://github.com/benjajaja/ratatui-image) | Bounded raster/SVG decoding and native or terminal image presentation |
+| Images | [image](https://github.com/image-rs/image), [resvg](https://github.com/linebender/resvg), [data-url](https://github.com/servo/rust-url/tree/main/data-url), [ratatui-image](https://github.com/benjajaja/ratatui-image) | Bounded raster/SVG/data-image decoding and native or terminal image presentation |
 | JavaScript | [Boa](https://github.com/boa-dev/boa) 0.22 | Optional per-document script engine behind replaceable host contracts |
 | CLI and diagnostics | [clap](https://github.com/clap-rs/clap), [tracing](https://github.com/tokio-rs/tracing) | Command-line configuration and opt-in structured diagnostics |
 
@@ -80,7 +80,7 @@ wins, including in a JavaScript-enabled build.
 | CSS cascade | **Partial:** Stylo parsing and cascade, selectors, media queries, custom properties, generated content, presentational hints and CSS math | Continue property coverage and practical-site parity |
 | Layout | **Partial:** block, flex, grid, tables, floats, overflow, visibility and relative, absolute and fixed positioning | Complete stacking and `z-index` interactions, remaining inline geometry and horizontal RTL |
 | Typography | **Partial:** Unicode cell widths, VGA bitmap typography, terminal styling and scaled headings | No remote fonts, complete `line-height`, vertical writing or advanced font selection |
-| Images | **Partial:** PNG, JPEG, WebP, first-frame GIF, static SVG, filtered final-size VGA painting, terminal image protocols and halfblock fallback | Add `picture`, `srcset`, `sizes`, CSS-pixel precision, `object-fit` and `object-position` |
+| Images | **Partial:** PNG, JPEG, WebP, first-frame GIF, static SVG, bounded `data:image` URLs, CSS URL background/mask icons, filtered final-size VGA painting, terminal image protocols and halfblock fallback | Add `picture`, `srcset`, `sizes`, full CSS background/mask composition, CSS-pixel precision, `object-fit` and `object-position` |
 | Forms | **Partial:** text/password fields, textarea, checkbox/radio, buttons, single-select, reset, GET and URL-encoded POST | Remaining input types, file uploads and complete browser form APIs |
 | Interaction | **Partial:** tabs, history, links, mouse input, scrolling, CSS hover/focus/active, themes and shared text editing | Add keyboard link hints, the help overlay and in-page search |
 | JavaScript engine | **Partial:** optional Boa 0.22, isolated engines, classic inline/external scripts, bounded Promise jobs, injected timers and resource-graph fetches | No script modules, top-level await or completed test262 target; `async`/`defer` semantics remain incomplete |

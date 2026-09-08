@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::core::image::{
-    DecodedImage, DecodedImageSource, ImageAssetId, ImageDecodeRequest, ImageDecoder,
+    DecodedImage, DecodedImageSource, ImageAssetId, ImageDecodeRequest, ImageDecodeSource,
+    ImageDecoder,
 };
 use crate::pipeline::image::RasterImageDecoder;
 
@@ -122,7 +123,7 @@ fn wikipedia_svg_is_rendered_directly_at_its_final_vga_size() {
         .decode(ImageDecodeRequest {
             asset_id: ImageAssetId(7),
             revision: 3,
-            bytes: Arc::clone(&bytes),
+            source: ImageDecodeSource::Bytes(Arc::clone(&bytes)),
         })
         .unwrap();
     assert!(matches!(decoded.source, DecodedImageSource::Svg(_)));

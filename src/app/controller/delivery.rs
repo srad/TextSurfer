@@ -481,6 +481,7 @@ impl App {
             return RenderAdvance::default();
         };
         let dynamic_state = result.causes.contains(RenderCause::DynamicState);
+        let result_key = result.key;
         if result
             .paint
             .base()
@@ -503,10 +504,53 @@ impl App {
         if !dynamic_state {
             update_load_message(tab);
         }
+        let (commands, image_commands) = tab.load.as_mut().map_or_else(
+            || (Vec::new(), Vec::new()),
+            |load| (load.take_commands(), load.take_image_decode_commands()),
+        );
         let published = index == active_index;
         if published {
             for range in applied.rows {
                 self.damage.repaint_rows(range);
+            }
+        }
+        for command in commands {
+            let resource_id = command.resource_id;
+            if self.net.submit(
+                result_key.tab_id,
+                result_key.generation,
+                resource_id,
+                command.url,
+            ) == crate::net::Submitted::Closed
+            {
+                let _ = self.deliver_fetch(FetchPayload {
+                    tab_id: result_key.tab_id,
+                    generation: result_key.generation,
+                    resource_id,
+                    result: Err(crate::net::FetchError::Network(
+                        "the network is not running".to_string(),
+                    )),
+                });
+            }
+        }
+        for request in image_commands {
+            let asset_id = request.asset_id;
+            let revision = request.revision;
+            if matches!(
+                self.images.submit(ImageDecodeJob {
+                    tab_id: result_key.tab_id,
+                    generation: result_key.generation,
+                    request,
+                }),
+                ImageSubmitted::Refused | ImageSubmitted::Closed
+            ) {
+                let _ = self.deliver_image_decode(ImageDecodePayload {
+                    tab_id: result_key.tab_id,
+                    generation: result_key.generation,
+                    asset_id,
+                    revision,
+                    result: Err(crate::core::image::ImageDecodeError::Unavailable),
+                });
             }
         }
         RenderAdvance {

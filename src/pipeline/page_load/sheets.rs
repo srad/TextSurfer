@@ -127,6 +127,7 @@ impl PageLoad {
             return None;
         }
         let soft_stale = result.key.epoch != self.render_epoch;
+        self.discover_css_images(&result.styles);
         if result.key.epoch == self.render_epoch {
             self.cached_layout = Some(result.layout);
             self.cached_styles = Some(result.styles.clone());

@@ -11,13 +11,15 @@ use image::{DynamicImage, ImageDecoder as _, ImageError, ImageFormat, ImageReade
 use resvg::{tiny_skia, usvg};
 
 use crate::core::image::{
-    DecodedImage, DecodedImageSource, ImageDecodeError, ImageDecodeRequest, ImageDecoder,
+    DecodedImage, DecodedImageSource, ImageDecodeError, ImageDecodeRequest, ImageDecodeSource,
+    ImageDecoder,
 };
 
 pub const MAX_IMAGE_AXIS: u32 = 8192;
 pub const MAX_IMAGE_PIXELS: u64 = 8_388_608;
 pub const MAX_IMAGE_RGBA_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_DECODER_ALLOC: u64 = 64 * 1024 * 1024;
+const MAX_DATA_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
 pub struct RasterImageDecoder;
 
@@ -258,7 +260,11 @@ fn finish_key(
 
 impl ImageDecoder for RasterImageDecoder {
     fn decode(&self, request: ImageDecodeRequest) -> Result<DecodedImage, ImageDecodeError> {
-        let (width, height, rgba, svg) = decode_pixels(&request.bytes)?;
+        let bytes = match request.source {
+            ImageDecodeSource::Bytes(bytes) => bytes,
+            ImageDecodeSource::DataUrl(url) => Arc::from(decode_data_image(&url)?),
+        };
+        let (width, height, rgba, svg) = decode_pixels(&bytes)?;
         let image = DecodedImage {
             asset_id: request.asset_id,
             revision: request.revision,
@@ -266,7 +272,7 @@ impl ImageDecoder for RasterImageDecoder {
             height,
             rgba: Arc::from(rgba),
             source: if svg {
-                DecodedImageSource::Svg(Arc::clone(&request.bytes))
+                DecodedImageSource::Svg(Arc::clone(&bytes))
             } else {
                 DecodedImageSource::Raster
             },
@@ -280,6 +286,40 @@ impl ImageDecoder for RasterImageDecoder {
         );
         Ok(image)
     }
+}
+
+fn decode_data_image(source: &str) -> Result<Vec<u8>, ImageDecodeError> {
+    let url = data_url::DataUrl::process(source).map_err(|_| ImageDecodeError::Invalid)?;
+    let mime = url.mime_type();
+    if mime.type_ != "image"
+        || !matches!(
+            mime.subtype.as_str(),
+            "png" | "jpeg" | "webp" | "gif" | "svg+xml"
+        )
+    {
+        return Err(ImageDecodeError::UnsupportedFormat);
+    }
+    let mut body = Vec::new();
+    let decoded = url.decode(|chunk| {
+        let next = body
+            .len()
+            .checked_add(chunk.len())
+            .filter(|length| *length <= MAX_DATA_IMAGE_BYTES)
+            .ok_or(())?;
+        body.reserve(next.saturating_sub(body.len()));
+        body.extend_from_slice(chunk);
+        Ok::<(), ()>(())
+    });
+    match decoded {
+        Ok(_) => {}
+        Err(data_url::forgiving_base64::DecodeError::InvalidBase64(_)) => {
+            return Err(ImageDecodeError::Invalid);
+        }
+        Err(data_url::forgiving_base64::DecodeError::WriteError(())) => {
+            return Err(ImageDecodeError::Limit);
+        }
+    }
+    Ok(body)
 }
 
 fn decode_pixels(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>, bool), ImageDecodeError> {
